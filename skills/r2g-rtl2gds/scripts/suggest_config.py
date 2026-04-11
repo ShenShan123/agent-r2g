@@ -12,6 +12,12 @@ import re
 import sys
 from pathlib import Path
 
+import knowledge_db
+import query_knowledge
+
+HEURISTICS_PATH = knowledge_db.DEFAULT_KNOWLEDGE_DIR / "heuristics.json"
+FAMILIES_PATH = knowledge_db.DEFAULT_FAMILIES_PATH
+
 
 def parse_synth_stats(synth_dir: Path) -> dict:
     """Parse Yosys stat output from synth.log for cell counts."""
@@ -124,6 +130,42 @@ def recommend(project: Path) -> dict:
     }
     recommendations.update(params_by_size.get(size_class, params_by_size['unknown']))
 
+    # --- Learned-heuristics override (before design-type adjustments) ----
+    # Learned values become the new baseline. The design-type clamps below
+    # still apply, so e.g. a bus_heavy design with a learned median of 28
+    # will still be clamped to 15 by the existing bus_heavy rule. This is
+    # intentional: safety rails beat empirical medians.
+    learned_source = None
+    try:
+        families = knowledge_db.load_families(FAMILIES_PATH)
+        family = knowledge_db.infer_family(config.get('DESIGN_NAME', ''), families)
+        learned = query_knowledge.get_family_heuristics(
+            family, platform, heuristics_path=HEURISTICS_PATH,
+        )
+        if learned:
+            cu = learned.get('core_utilization') or {}
+            pd = learned.get('place_density_lb_addon') or {}
+            if 'median' in cu:
+                # Round to int to match the integer-percent convention of
+                # params_by_size; a learned median can be a float (e.g. 22.5
+                # from statistics.median on even-length samples).
+                recommendations['CORE_UTILIZATION'] = int(round(cu['median']))
+            if 'median' in pd:
+                recommendations['PLACE_DENSITY_LB_ADDON'] = float(pd['median'])
+            learned_source = f"{family}/{platform}"
+            explanations.append(
+                f"Learned heuristics for {family}/{platform} "
+                f"(n={learned.get('sample_size', 0)}, "
+                f"success_rate={learned.get('success_rate', 0):.2f}): "
+                f"CORE_UTILIZATION={recommendations.get('CORE_UTILIZATION')}, "
+                f"PLACE_DENSITY_LB_ADDON={recommendations.get('PLACE_DENSITY_LB_ADDON')}"
+            )
+    except (OSError, json.JSONDecodeError, KeyError, TypeError, AttributeError):
+        # Malformed knowledge files should never break a real run.
+        # Fall through to the hard-coded params_by_size baseline.
+        learned_source = None
+    # ----------------------------------------------------------------------
+
     # Design-type adjustments
     if design_type == 'bus_heavy':
         recommendations['CORE_UTILIZATION'] = min(recommendations['CORE_UTILIZATION'], 15)
@@ -179,6 +221,7 @@ def recommend(project: Path) -> dict:
         'synth_stats': synth_stats,
         'recommendations': recommendations,
         'explanations': explanations,
+        'learned_source': learned_source,
     }
 
 
