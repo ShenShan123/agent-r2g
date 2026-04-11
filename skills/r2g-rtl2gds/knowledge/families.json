@@ -1,0 +1,20 @@
+{
+  "mappings": {
+    "aes128_core":   "aes_xcrypt",
+    "ibex_core":     "ibex",
+    "riscv_top":     "riscv32i",
+    "RocketTile":    "tinyRocket",
+    "vga_enh_top":   "vga_enh_top",
+    "swerv_wrapper": "swerv",
+    "black_parrot":  "bp_multi_top"
+  },
+  "patterns": [
+    {"regex": "^aes",                       "family": "aes_xcrypt"},
+    {"regex": "^ibex",                      "family": "ibex"},
+    {"regex": "^riscv",                     "family": "riscv32i"},
+    {"regex": "^rocket",                    "family": "tinyRocket"},
+    {"regex": "^swerv",                     "family": "swerv"},
+    {"regex": "^(bp_|black_parrot)",        "family": "bp_multi_top"},
+    {"regex": "^vga",                       "family": "vga_enh_top"}
+  ]
+}
