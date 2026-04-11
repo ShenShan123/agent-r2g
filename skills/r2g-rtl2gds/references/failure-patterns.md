@@ -1,0 +1,501 @@
+# Failure Patterns
+
+## Specification Gaps
+
+**Symptoms:**
+- Unclear module boundaries
+- No clock/reset definition
+- Contradictory IO behavior
+
+**Action:**
+- Stop and ask the user, or record explicit assumptions before continuing
+
+## RTL Issues
+
+**Symptoms:**
+- Syntax errors
+- Undeclared signals
+- Width mismatch warnings
+- Unintended latch inference
+
+**Action:**
+- Fix RTL first
+- Avoid changing the testbench unless failure points to a testbench mismatch
+
+## Testbench Issues
+
+**Symptoms:**
+- Compilation succeeds but runtime checks fail unexpectedly
+- No waveform dump generated
+- Reset/clock generation missing
+
+**Action:**
+- Inspect testbench expectations
+- Verify clock/reset sequencing
+- Add clearer self-checks and logging
+
+## Synthesis Issues
+
+**Symptoms:**
+- Hierarchy/top module not found
+- Unsupported constructs
+- Blackbox or missing module errors
+
+**Action:**
+- Verify top module name
+- Flatten dependencies
+- Replace unsupported simulation-only code with synthesizable alternatives
+
+## ORFS Backend Issues
+
+**Symptoms:**
+- Make target fails early
+- Floorplan error (core area too small)
+- Placement utilization exceeds target
+- Routing congestion or DRC violations
+- No final GDS generated
+- Clock port not found
+
+**Action:**
+- Check config.mk: DESIGN_NAME must match RTL top module exactly
+- Check constraint.sdc: clock port name must match RTL port name
+- If utilization is too high, reduce `CORE_UTILIZATION` in config.mk
+- If core area too small, the design may be too large for default settings
+- Check flow.log for the specific failing ORFS stage
+- Only consider RTL restructuring after confirming configuration is correct
+
+## Routing Congestion (GRT-0116)
+
+**Symptoms:**
+- `[ERROR GRT-0116] Global routing finished with congestion`
+- Final congestion report shows large total overflow (e.g., > 1000)
+- Flow fails at `5_1_grt` stage
+
+**Root Cause:**
+CORE_UTILIZATION is too high for the design's routing complexity. Highly interconnected designs (e.g., bus crossbars, interconnect fabrics) need lower utilization to leave room for routing channels.
+
+**Action:**
+- Reduce `CORE_UTILIZATION` by 30-50% (e.g., 25 → 15)
+- Compare with successful configs of the same design for a known-good utilization range
+- As a rule of thumb, bus-heavy designs (wb_conmax, crossbars) need utilization ≤ 15%
+- If the design uses `SYNTH_HIERARCHICAL=1`, the gate count may be larger than expected
+
+## Placement Divergence (NesterovSolve Non-Convergence)
+
+**Symptoms:**
+- flow.log shows thousands of `[NesterovSolve] Iter: XXXX overflow: 0.2X` lines
+- Overflow stays above 0.10 and oscillates without decreasing
+- Process eventually killed by timeout or OOM
+- No explicit error message in log
+
+**Root Cause:**
+`PLACE_DENSITY_LB_ADDON` is too low (e.g., 0.01), making the effective placement density too close to the theoretical minimum. The placer cannot find a legal solution with so little density headroom, especially for large designs with macros.
+
+**Action:**
+- Raise `PLACE_DENSITY_LB_ADDON` to at least 0.20 (0.30-0.45 for large macro-heavy designs)
+- If `PLACE_DENSITY` is set explicitly, ensure it's at least 0.55
+- For designs with macros (fakeram, SRAM blocks), use higher density (0.60-0.70)
+- Compare with successful configs of the same design for known-good density values
+- Also add `SKIP_LAST_GASP=1` to prevent post-placement optimization from stalling
+
+## OpenROAD SIGSEGV in CTS / Repair Timing
+
+**Symptoms:**
+- `Signal 11 received` during `repair_timing` at CTS stage (4_1_cts)
+- Stack trace shows `sta::ClkInfo::crprClkVertexId()` or similar STA functions
+- `Command terminated by signal 11` followed by make error
+
+**Root Cause:**
+OpenROAD bug in timing repair, typically triggered by complex clock trees in large designs (e.g., swerv with 10k+ clock sinks). This is non-deterministic in some cases.
+
+**Action:**
+- Add `export SKIP_CTS_REPAIR_TIMING = 1` to config.mk to bypass the crashing step
+- Also add `export SKIP_LAST_GASP = 1` to avoid similar crashes in later stages
+- If the design must have CTS timing repair, try reducing the number of clock sinks by increasing die area
+- Re-running may work if the crash is non-deterministic
+
+## RTL Reserved Keywords as Identifiers
+
+**Symptoms:**
+- Yosys parse error: `syntax error, unexpected ','` or `unexpected TOK_INT`
+- Error appears at a port list or signal declaration line
+- The RTL compiles fine with older Verilog-95 tools but fails in Yosys
+
+**Root Cause:**
+Verilog-2005 and SystemVerilog reserve keywords like `int`, `bit`, `logic`, `byte`, `shortint`, `longint`, `shortreal`, `string`, `type`. Legacy RTL (e.g., OpenCores IP) sometimes uses these as port or signal names. Yosys 0.50+ enforces Verilog-2005 keyword rules.
+
+**Action:**
+- Search for reserved keywords used as identifiers: `grep -wn 'int\|bit\|logic\|byte\|shortint' *.v`
+- Rename the identifier everywhere: port list, port declaration, assign statements, and all instantiation sites
+- Common rename pattern: `int` → `int_o`, `bit` → `bit_o`
+- Check both the module definition file AND all files that instantiate the module
+
+**Example:** `wb_dma_ch_rf.v` uses `int` as an output port → rename to `int_o` in the module and all `.int(...)` connections in `wb_dma_rf.v`.
+
+## Missing Floorplan Initialization
+
+**Symptoms:**
+- `Error: No floorplan initialization method specified` during ORFS floorplan stage
+- Backend fails at `2_1_floorplan` step
+
+**Root Cause:**
+config.mk lacks both `CORE_UTILIZATION` and `DIE_AREA`/`CORE_AREA`. ORFS requires at least one method to initialize the floorplan.
+
+**Action:**
+- Add `export CORE_UTILIZATION = 30` to config.mk (recommended default)
+- Or set explicit die/core area: `export DIE_AREA = 0 0 200 200` and `export CORE_AREA = 10 12 190 188`
+- For very small designs (< 10 cells), prefer explicit area over utilization
+
+## ORFS Directory Collision (tmp.log mv Failure)
+
+**Symptoms:**
+- `mv: cannot stat './logs/<platform>/<design>/base/X.tmp.log': No such file or directory`
+- The actual EDA step (floorplan, placement, etc.) appears to complete successfully (timing/area reports visible in log)
+- Makefile reports Error 1 on the `do-X` target
+
+**Root Cause:**
+Multiple project configs sharing the same `DESIGN_NAME` use a shared `FLOW_VARIANT=base`, causing all runs to write to the same ORFS working directories. The `make clean_all` from one run can interfere with another run's log files, or stale state from a previous config can corrupt the current run.
+
+**Action:**
+- Use a unique `FLOW_VARIANT` per project config (e.g., project directory basename)
+- The `run_orfs.sh` script now derives FLOW_VARIANT automatically from the project directory name
+- If running manually: `make DESIGN_CONFIG=... FLOW_VARIANT=<unique_name>`
+
+## Timeout / Stalled Backend Runs
+
+**Symptoms:**
+- flow.log ends abruptly during placement, CTS, or global routing with no error message
+- `ERROR: ORFS run timed out after Xs` at end of flow.log (if using run_orfs.sh)
+- Last log entry shows iterative optimization (e.g., NesterovSolve iterations, buffer insertion)
+- No GDS or final ODB produced
+
+**Root Cause:**
+Large designs (swerv, bp_multi_top, tinyRocket) can take hours for PnR. The process may have been killed by an OOM killer, the ORFS_TIMEOUT limit, or resource limits.
+
+**Action:**
+- Increase timeout: `ORFS_TIMEOUT=14400 scripts/run_orfs.sh ...` (4 hours)
+- Limit CPU usage: `ORFS_MAX_CPUS=4 scripts/run_orfs.sh ...` (prevent thermal/resource issues)
+- For faster convergence, add to config.mk:
+  - `export SKIP_LAST_GASP = 1` (skip last-gasp optimization)
+  - `export SKIP_CTS_REPAIR_TIMING = 1` (skip CTS timing repair)
+  - `export SKIP_GATE_CLONING = 1` (skip gate cloning)
+- Increase die area to reduce placement density (lower utilization = faster convergence)
+- Monitor with `tail -f flow.log` to track progress
+
+## Yosys Segfault (Signal 11)
+
+**Symptoms:**
+- `Command terminated by signal 11` during Yosys synthesis
+- Occurs during Liberty frontend loading or hierarchy pass
+
+**Root Cause:**
+Yosys crash, typically caused by very large designs or specific RTL constructs that trigger a parser/optimizer bug.
+
+**Action:**
+- Re-run — segfaults are sometimes non-deterministic
+- Try toggling `SYNTH_HIERARCHICAL` (1 ↔ 0) in config.mk
+- If reproducible, try simplifying the RTL or splitting into hierarchical blocks
+- Check available memory (`free -h`) — Yosys may need 4-8 GB for large designs
+
+## Common ORFS-Specific Issues
+
+### Clock Port Mismatch
+- **Symptom:** `cannot find port` error in STA
+- **Fix:** Ensure `clk_port_name` in SDC matches the exact port name in RTL
+
+### DESIGN_NAME Mismatch
+- **Symptom:** `no cells mapped` or empty synthesis
+- **Fix:** DESIGN_NAME in config.mk must exactly match `module <name>` in RTL
+
+### Missing VERILOG_FILES
+- **Symptom:** `no such file` during synthesis
+- **Fix:** Use absolute paths in config.mk for VERILOG_FILES
+
+### PDN Error on Small Designs
+- **Symptom:** `Insufficient width to add straps` during floorplan/PDN
+- **Fix:** Set explicit `DIE_AREA = 0 0 50 50` and `CORE_AREA = 2 2 48 48` in config.mk instead of `CORE_UTILIZATION`
+
+### Platform Not Found
+- **Symptom:** Make error about missing platform
+- **Fix:** Verify platform name matches a directory in `$ORFS_ROOT/flow/platforms/`
+- Available: nangate45, sky130hd, sky130hs, asap7, gf180, ihp-sg13g2
+
+## Signoff Check Failures
+
+### DRC Violations
+- **Symptom:** `X violations found` in DRC report; `6_drc_count.rpt` shows non-zero count
+- **Diagnosis:** Run `scripts/extract_drc.py` to get per-category violation breakdown from `6_drc.lyrdb`
+- **Common causes:**
+  - Routing density too high → reduce `PLACE_DENSITY_LB_ADDON` or increase die area
+  - Insufficient spacing → increase `DIE_AREA`/`CORE_AREA`
+  - Metal width violations → may indicate congestion, try lower utilization
+- **Tool:** `scripts/run_drc.sh` → `scripts/extract_drc.py` for detailed category breakdown
+
+### LVS Mismatch
+- **Symptom:** `ERROR : Netlists don't match` in LVS log; mismatches in `6_lvs.lvsdb`
+- **Diagnosis:** Check the extracted SPICE netlist (`*_extracted.cir`) vs the CDL reference. Common mismatch patterns:
+  - Empty extracted netlist (0 devices) → gate layer definitions don't match GDS layers
+  - Extra pins on subcircuits (`VDD$1`, `VSS$1`, `$6`, `$7`) → bulk terminal connectivity issue
+  - Missing pins (e.g., `QN` on flip-flops) → unused output not routed in design
+- **Common causes:**
+  - **Device model name mismatch:** LVS rule extracts `PMOS_LVT` but CDL uses `PMOS_VTL` → rename in `.lylvs`
+  - **Missing threshold voltage layers:** nangate45 GDS has no vtg/vth/thkox layers → use `lv_pgate = pgate` directly
+  - **Bulk terminal pin bloat:** `mos4` extraction creates extra bulk pins → use `connect_implicit("VDD")` and `connect_implicit("VSS")` to merge
+  - **Unused cell pins:** design doesn't connect all CDL pins → add `schematic.purge` and `schematic.purge_nets`
+  - Extra devices from fill/tap cells
+  - Port name mismatches between GDS and CDL netlist
+- **Tool:** `scripts/run_lvs.sh` → `scripts/extract_lvs.py`
+
+### LVS Skipped (No Rules)
+- **Symptom:** `LVS is not supported on this platform` or `lvs_result.json` shows status "skipped"
+- **Fix:** This is expected for platforms without KLayout LVS rule decks. Not a flow error.
+- **Platforms without KLayout LVS:** asap7
+- **Alternative:** For sky130hd/sky130hs, use `run_netgen_lvs.sh` (Netgen + Magic) as an alternative LVS flow
+
+### Magic DRC Failure
+- **Symptom:** Magic DRC script fails or produces no output
+- **Common causes:**
+  - sky130A tech file missing at `/opt/pdks/sky130A/libs.tech/magic/sky130A.tech`
+  - Platform not supported (Magic DRC only works for sky130hd/sky130hs)
+  - GDS file corrupted or from incomplete backend run
+- **Tool:** `scripts/run_magic_drc.sh`
+
+### Netgen LVS Failure
+- **Symptom:** Magic SPICE extraction fails or Netgen comparison fails
+- **Common causes:**
+  - sky130A PDK files missing (tech file or netgen setup.tcl)
+  - No Verilog netlist found (6_final.v or synth_output.v)
+  - Platform not supported (Netgen LVS only works for sky130hd/sky130hs)
+- **Diagnosis:** Check `lvs/magic_extract.log` for extraction errors, `lvs/netgen_lvs.log` for comparison errors
+- **Tool:** `scripts/run_netgen_lvs.sh`
+
+### RCX Extraction Failure
+- **Symptom:** `extract_parasitics` error in OpenROAD; no SPEF output
+- **Diagnosis:** Check `rcx/rcx.log` for OpenROAD error messages
+- **Common causes:**
+  - `rcx_patterns.rules` file missing for the platform
+  - `6_final.odb` is invalid or corrupted
+  - Backend did not complete successfully
+- **Fix:** Verify platform has `rcx_patterns.rules`. Ensure `6_final.odb` exists. Re-run backend if needed.
+- **Tool:** `scripts/run_rcx.sh` → `scripts/extract_rcx.py`
+
+### LVS CDL_FILE Override by Platform Config
+
+**Symptoms:**
+- `[ERROR ODB-0287] Master fakeram45_XXxYY was not in the masters CDL files`
+- LVS fails for designs that use fakeram or other hard macros
+- CDL file passed to KLayout only contains standard cell definitions
+
+**Root Cause:**
+The ORFS Makefile includes the design config.mk (line ~98) before the platform config.mk (via variables.mk). The platform config.mk sets `export CDL_FILE = $(PLATFORM_DIR)/cdl/NangateOpenCellLibrary.cdl`, which overwrites any CDL_FILE set in the design config. This means macro designs cannot point to a CDL file that includes both standard cells and macro subcircuit definitions.
+
+**Action:**
+- Use `override export CDL_FILE = /path/to/combined.cdl` in the design config.mk. The `override` keyword prevents later assignments from overriding it.
+- Create a combined CDL that concatenates the standard cell CDL with CDL stubs for all fakeram types used.
+- CDL stubs can be generated from LEF pin lists: `.SUBCKT fakeram45_NxM <pin1> <pin2> ... VDD VSS` / `.ENDS`
+
+### LVS Timeout on Large Macro Designs
+
+**Symptoms:**
+- LVS process killed after timeout (exit code 124)
+- LVS log ends with `Flatten schematic circuit (no layout): ...` messages
+- klayout process consumes >4GB memory
+- Zombie klayout process persists after timeout
+
+**Root Cause:**
+KLayout LVS scales poorly with design size. Validated timings from 70-design batch:
+- **<100K cells** (aes, ibex, riscv32i, tinyRocket, vga_enh_top): <30 min. **100% LVS pass at 3600s.**
+- **~145K cells** (swerv): ~56 min. Passes at 3600s under low load (6/10 pass), times out under parallel contention (4/10 timeout). Load-dependent.
+- **~200K cells** (bp_multi_top): Always >60 min. **0% LVS pass at 3600s.** Needs 7200s.
+
+The `timeout` command only kills the `make` process; the grandchild `klayout` process survives as a zombie consuming 3-5 GB memory and holding flock file descriptors, blocking subsequent designs.
+
+**Action:**
+- **<100K cells**: Default `LVS_TIMEOUT=3600` is sufficient
+- **~145K cells** (swerv-class): Use `LVS_TIMEOUT=4200` or run LVS with fewer parallel jobs to reduce CPU contention
+- **>150K cells** (bp_multi_top-class): Use `LVS_TIMEOUT=7200`
+- run_lvs.sh now uses `setsid timeout` to kill the entire process group, preventing zombie processes
+- If zombie klayout processes persist from pre-fix scripts: `pkill -f 'klayout.*lvs'`
+
+### SYNTH_HIERARCHICAL + Blackbox Cost Error
+
+**Symptoms:**
+- `ERROR: Missing cost information on instanced blackbox <module_name>` during Yosys synthesis
+- Occurs only with `SYNTH_HIERARCHICAL = 1` in config.mk
+- Same design passes synthesis without `SYNTH_HIERARCHICAL`
+
+**Root Cause:**
+The `SYNTH_HIERARCHICAL` option enables Yosys's hierarchical synthesis flow, which includes a `CELLMATCH` pass. This pass needs cost information for all instantiated modules. Modules declared with `(* blackbox *)` attribute have no cost info, causing CELLMATCH to fail. Standard cells have cost info from their .lib files, but custom wrapper modules (e.g., BSG hard memory wrappers) don't.
+
+**Action:**
+- Replace `(* blackbox *)` stubs with actual wrapper implementations that instantiate the underlying fakeram macros. The fakeram macros have .lib files (providing cost info), so they work as blackboxes. The wrapper module becomes a real module with internal instantiation.
+- Example: instead of `(* blackbox *) module hard_mem_wrapper(...)`, write a module that contains `fakeram45_NxM mem (.clk(clk_i), .rd_out(data_o), ...)`.
+
+### Invalid macro_placement.tcl Command
+
+**Symptoms:**
+- `Error: macro_placement.tcl, N invalid command name "all_macros"` during floorplan stage
+- Backend fails at `2_2_floorplan_macro` step
+
+**Root Cause:**
+The Tcl command `all_macros` does not exist in OpenROAD. The correct command is `find_macros`. Also, `macro_placement` requires an initial global placement to have starting positions for the simulated annealing algorithm.
+
+**Action:**
+- Use `find_macros` instead of `all_macros` in macro_placement.tcl
+- Call `global_placement` before `macro_placement`:
+  ```tcl
+  if {[find_macros] != ""} {
+    global_placement -density [place_density_with_lb_addon] -pad_left 2 -pad_right 2
+    macro_placement -halo {10 10} -style corner_max_wl
+  }
+  ```
+
+### PDN Channel Repair Failure (PDN-0179)
+
+**Symptoms:**
+- `[ERROR PDN-0179] Unable to repair all channels` during floorplan stage
+- Backend fails at floorplan with exit code 2
+- Typically occurs with `SYNTH_HIERARCHICAL=1` which increases gate count
+
+**Root Cause:**
+The power delivery network (PDN) grid cannot fit within the die/core area. `SYNTH_HIERARCHICAL=1` can increase the effective cell count (less optimization across module boundaries), requiring more area. Combined with aggressive placement density or insufficient die area, the PDN straps don't have enough room.
+
+**Action:**
+- Increase `DIE_AREA` / `CORE_AREA` by 10-20%
+- Reduce `PLACE_DENSITY` (e.g., 0.35 → 0.30)
+- Try without `SYNTH_HIERARCHICAL=1` if not required
+- This is a config tuning issue, not a script bug
+
+### RCX Skipped (No Rules)
+- **Symptom:** `No RCX rules found for platform` or `rcx_result.json` shows status "skipped"
+- **Fix:** The platform lacks `rcx_patterns.rules`. This is uncommon — most platforms include RCX rules.
+
+### Empty SPEF (RCX)
+- **Symptom:** `rcx.json` shows status "empty", `net_count` is 0
+- **Common causes:**
+  - Design has no routed nets (backend did not complete routing)
+  - ODB file is from an early stage before routing
+- **Fix:** Verify the ORFS flow completed through the routing stage. Check `progress.json` for stage completion.
+
+### Antenna DRC Violations
+
+**Symptoms:**
+- DRC report shows METAL*_ANTENNA violations (e.g., METAL4_ANTENNA, METAL5_ANTENNA)
+- All violations are antenna-rule related; no spacing/width violations
+- Violation counts vary across configs of the same design (layout-dependent)
+
+**Root Cause:**
+Long unbroken metal routes accumulate charge during plasma etching, which can damage thin gate oxides at the route endpoint. FIFO designs with deep address buses are particularly susceptible because the router creates long metal paths from address logic to SRAM-like structures.
+
+**Action:**
+- Enable ORFS antenna repair: add `export ANTENNA_CHECK = 1` and `export DIODE_INSERTION = 1` to config.mk (if supported by platform)
+- If ORFS doesn't support native antenna repair: manually insert diode cells as antenna protection
+- Increase die area to give the router more freedom to break long metal paths
+- As a workaround, try `export DETAILED_ROUTE_ARGS = -droute_end_iteration 10` for more routing iterations
+
+### Hold Timing Violations Post-CTS
+
+**Symptoms:**
+- `6_report.json` shows `finish__timing__hold__tns < 0` and `finish__timing__hold__ws < 0`
+- Hold violation count > 0 in final timing report
+- High clock skew (>1ns) reported
+- Designs with many macros (>20) are most affected
+
+**Root Cause:**
+Macro-heavy designs (swerv, bp_multi_top) have high clock skew (~1.5ns) due to macro placement spreading clock sinks far apart. CTS cannot fully equalize the skew, leaving hold violations. Designs that require `SKIP_CTS_REPAIR_TIMING=1` (OpenROAD crash workaround) are especially affected since hold repair is also skipped.
+
+**Action:**
+- If `SKIP_CTS_REPAIR_TIMING=1` was set as a crash workaround, check if the OpenROAD version has been updated to fix the SIGSEGV
+- Increase `CTS_CLUSTER_SIZE` or `CTS_CLUSTER_DIAMETER` to reduce clock skew
+- Add post-CTS hold margin: increase SDC hold uncertainty with `set_clock_uncertainty -hold 0.05 [all_clocks]`
+- As a last resort, increase clock period to give more hold margin
+
+### Unconstrained Timing (Silent Clock Mismatch)
+
+**Symptoms:**
+- Backend completes successfully with GDS output
+- `6_report.json` shows very large positive WNS (e.g., 1e+38) — effectively unconstrained
+- Power analysis shows >50% leakage ratio (zero switching activity assumed)
+- SDC `create_clock` targets a port name that doesn't exist in RTL
+
+**Root Cause:**
+The SDC `clk_port_name` doesn't match the actual RTL clock port. OpenROAD silently skips the clock constraint when the port isn't found (no hard error), so the entire flow runs without timing constraints. Common mismatches:
+- SDC uses `clk` but RTL has `clk_i` (ac97_ctrl, mem_ctrl, simple_spi_top)
+- SDC uses `clk` but RTL has `wb_clk_i` (i2c_verilog)
+
+**Action:**
+- Verify clock port: `grep 'input.*clk' rtl/design.v` and compare with SDC `clk_port_name`
+- Fix SDC to use the exact RTL port name
+- Re-run synthesis and backend
+- Prevention: add a pre-flight check in `run_orfs.sh` that warns if SDC clock port is not found in RTL
+
+### Setup Timing Violations (Tiered WNS + TNS Response)
+
+`check_timing.py` classifies timing into tiers based on the **worse of** the WNS tier and the TNS tier. A design with small WNS but large TNS (many slightly-violating paths) is treated as severely as one with large WNS.
+
+**Thresholds (defaults, overridable via `--wns-threshold` and `--tns-threshold`):**
+
+| Metric | Minor | Moderate | Severe |
+|--------|-------|----------|--------|
+| WNS | -2.0 to 0 ns | -5.0 to -2.0 ns | < -5.0 ns |
+| TNS | -10.0 to 0 ns | -100.0 to -10.0 ns | < -100.0 ns |
+
+#### Minor Setup Violations (combined tier = minor)
+
+**Criteria:** WNS >= -2.0 AND TNS >= -10.0 (both metrics are minor or clean)
+
+**Agent Action (automatic — no user interaction):**
+1. Read `suggested_clock_period` from `reports/timing_check.json`
+2. Update `clk_period` in `constraints/constraint.sdc` to the suggested value
+3. Re-run synthesis and backend
+4. Re-run `check_timing.py` to verify fix worked
+5. Report the change to the user after the fact
+
+#### Moderate Setup Violations (combined tier = moderate)
+
+**Criteria:** WNS >= -5.0 AND TNS >= -100.0, but at least one metric is moderate
+
+**Common scenario — TNS escalation:** WNS is only -0.5ns (minor) but TNS is -50ns (moderate) because 100 paths each violate by 0.5ns. The design looks "almost clean" by WNS alone but has widespread timing failure.
+
+**Agent Action (stop and present options):**
+1. Print the numbered `options` from `timing_check.json` to the user
+2. Note which metric (`wns_tier` vs `tns_tier`) drove the escalation
+3. Wait for the user to choose an option number
+4. Apply the chosen fix and re-run backend, OR accept violations and proceed
+
+**Typical options presented:**
+1. Increase clock period to X ns (calculated)
+2. Reduce CORE_UTILIZATION to Y%
+3. Both: increase period + reduce utilization
+4. Accept violations and proceed to signoff anyway (risk: high)
+5. Stop flow and restructure RTL
+
+#### Severe Setup Violations (combined tier = severe)
+
+**Criteria:** WNS < -5.0 OR TNS < -100.0 (at least one metric is severe)
+
+**Agent Action (stop and present options with strong warning):**
+- Same options as moderate, but with stronger warnings and "stop and restructure RTL" recommended
+- If WNS exceeds 50% of clock period, flag that architectural changes are needed
+
+**Escalation Criteria:**
+- **Moderate:** Agent may attempt one auto-tuning iteration (config change) if user picks option 1/2/3. If still moderate after retry, present options again.
+- **Severe:** Always escalate to user immediately. Do not attempt auto-tuning.
+- **Large TNS with small WNS:** Indicates widespread shallow violations. Increasing clock period is usually effective (all paths get more margin). This is noted in the options.
+- **Large WNS with small TNS:** Indicates one deep critical path. Clock period increase alone may not help — RTL restructuring may be needed.
+
+### Severe IR-Drop (>10% VDD)
+
+**Symptoms:**
+- `6_report.json` shows `finish__power__internal__total` is high relative to design size
+- VDD worst-case voltage drop exceeds 10% of nominal (e.g., >0.11V on 1.1V supply)
+- May cause functional failures in silicon at worst-case PVT corners
+
+**Root Cause:**
+Insufficient power delivery network (PDN) for the design's power density. Common in AES/crypto designs with high toggle rates and dense placement.
+
+**Action:**
+- Reduce placement density: lower `CORE_UTILIZATION` to spread cells
+- Strengthen PDN: add more power straps or increase strap width (platform-dependent config)
+- If possible, increase die area to reduce power density
+- Check that `PLACE_DENSITY_LB_ADDON` is not causing excessive local density

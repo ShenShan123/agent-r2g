@@ -1,0 +1,45 @@
+design_name: arbiter
+top_module: arbiter
+description: 2-request fixed-priority arbiter with registered outputs
+inputs:
+  - name: clk
+    width: 1
+    desc: main clock
+  - name: rst_n
+    width: 1
+    desc: active-low reset
+  - name: req0
+    width: 1
+    desc: request 0 (highest priority)
+  - name: req1
+    width: 1
+    desc: request 1 (lower priority)
+outputs:
+  - name: grant0
+    width: 1
+    desc: grant for request 0
+  - name: grant1
+    width: 1
+    desc: grant for request 1
+clock:
+  name: clk
+  edge: posedge
+reset:
+  name: rst_n
+  active_level: low
+  sync_or_async: async
+functional_requirements:
+  - Grant request 0 when req0 is asserted
+  - Grant request 1 only when req0 is not asserted and req1 is asserted
+  - Outputs should be registered
+timing_target: 10
+target_flow: orfs
+target_platform: nangate45
+verification_targets:
+  - reset behavior
+  - req0 priority over req1
+  - both requests deasserted
+  - both requests asserted simultaneously
+assumptions:
+  - single clock domain
+  - no CDC

@@ -182,9 +182,9 @@ cython_debug/
 .abstra/
 
 # Visual Studio Code
-#  Visual Studio Code specific template is maintained in a separate VisualStudioCode.gitignore 
+#  Visual Studio Code specific template is maintained in a separate VisualStudioCode.gitignore
 #  that can be found at https://github.com/github/gitignore/blob/main/Global/VisualStudioCode.gitignore
-#  and can be added to the global gitignore or merged into this file. However, if you prefer, 
+#  and can be added to the global gitignore or merged into this file. However, if you prefer,
 #  you could uncomment the following to ignore the entire vscode folder
 # .vscode/
 
@@ -205,3 +205,42 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# --- Project-specific: r2g-rtl2gds / OpenROAD ---
+
+# EDA run data (huge — user-requested exclusion)
+design_cases/
+eda-runs
+validation_*/
+
+# ORFS / flow artifacts
+*.jsonl
+*.vcd
+*.gds
+*.def
+*.lef
+*.lib
+*.odb
+*.spef
+*.lyrdb
+*.lvsdb
+synth/
+backend/RUN_*/
+backend/objects/
+backend/results/
+
+# User-local Claude Code config
+.claude/
+.claude.local.md
+
+# OS cruft
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# Generated knowledge-store artifacts (regenerated on demand)
+skills/r2g-rtl2gds/knowledge/runs.sqlite
+skills/r2g-rtl2gds/knowledge/heuristics.json
+skills/r2g-rtl2gds/knowledge/failure_candidates.json
