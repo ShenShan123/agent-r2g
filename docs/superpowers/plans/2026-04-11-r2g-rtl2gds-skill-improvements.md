@@ -49,10 +49,10 @@ The final tier is the **worse of** the WNS-based tier and the TNS-based tier.
 
 | File | Action | Responsibility |
 |------|--------|----------------|
-| `skills/r2g-rtl2gds/scripts/check_timing.py` | **Create** | Tiered post-backend timing gate: classifies WNS+TNS, outputs `timing_check.json` with tier + options |
-| `skills/r2g-rtl2gds/scripts/build_diagnosis.py` | **Modify** | Add `minor_setup_violation` and `severe_setup_violation` issue kinds checking both WNS and TNS |
-| `skills/r2g-rtl2gds/scripts/validate_config.py` | **Modify** | Add ADDITIONAL_LEFS/LIBS file existence check; add DIE_AREA > CORE_AREA sanity check |
-| `skills/r2g-rtl2gds/scripts/suggest_config.py` | **Modify** | Add LVS_TIMEOUT recommendation for >100K cells; add GDS_ALLOW_EMPTY for fakeram designs |
+| `skills/r2g-rtl2gds/scripts/reports/check_timing.py` | **Create** | Tiered post-backend timing gate: classifies WNS+TNS, outputs `timing_check.json` with tier + options |
+| `skills/r2g-rtl2gds/scripts/reports/build_diagnosis.py` | **Modify** | Add `minor_setup_violation` and `severe_setup_violation` issue kinds checking both WNS and TNS |
+| `skills/r2g-rtl2gds/scripts/project/validate_config.py` | **Modify** | Add ADDITIONAL_LEFS/LIBS file existence check; add DIE_AREA > CORE_AREA sanity check |
+| `skills/r2g-rtl2gds/knowledge/suggest_config.py` | **Modify** | Add LVS_TIMEOUT recommendation for >100K cells; add GDS_ALLOW_EMPTY for fakeram designs |
 | `skills/r2g-rtl2gds/SKILL.md` | **Modify** | Add tiered timing gate (WNS+TNS) to workflow; document hidden scripts; add hard rules |
 | `skills/r2g-rtl2gds/references/workflow.md` | **Modify** | Insert Phase 5b (timing gate) between backend and signoff; update Phase 7 |
 | `skills/r2g-rtl2gds/references/failure-patterns.md` | **Modify** | Add "Setup Timing Violations" pattern with tiered WNS+TNS escalation |
@@ -63,7 +63,7 @@ The final tier is the **worse of** the WNS-based tier and the TNS-based tier.
 ## Task 1: Create `check_timing.py` — tiered WNS+TNS gate with structured output
 
 **Files:**
-- Create: `skills/r2g-rtl2gds/scripts/check_timing.py`
+- Create: `skills/r2g-rtl2gds/scripts/reports/check_timing.py`
 
 This is the core deliverable. It reads `reports/ppa.json` (produced by `extract_ppa.py`), independently classifies WNS and TNS into tiers, takes the **worse of the two** as the combined tier, computes concrete fix options with pre-calculated values, and writes a structured JSON result to `reports/timing_check.json`.
 
@@ -536,7 +536,7 @@ if __name__ == '__main__':
 - [ ] **Step 2: Make it executable**
 
 ```bash
-chmod +x skills/r2g-rtl2gds/scripts/check_timing.py
+chmod +x skills/r2g-rtl2gds/scripts/reports/check_timing.py
 ```
 
 - [ ] **Step 3: Smoke test all tiers including TNS escalation**
@@ -560,49 +560,49 @@ MKEOF
 # Test CLEAN: WNS=0.5, TNS=0.0
 echo '{"summary":{"timing":{"setup_wns":0.5,"setup_tns":0.0}}}' \
   > /tmp/test_timing/reports/ppa.json
-python3 skills/r2g-rtl2gds/scripts/check_timing.py /tmp/test_timing; echo "EXIT: $?"
+python3 skills/r2g-rtl2gds/scripts/reports/check_timing.py /tmp/test_timing; echo "EXIT: $?"
 python3 -c "import json; d=json.load(open('/tmp/test_timing/reports/timing_check.json')); print(d['tier'], d['wns_tier'], d['tns_tier'])"
 # Expected: EXIT:0, clean clean clean
 
 # Test MINOR by WNS: WNS=-0.8, TNS=-2.5
 echo '{"summary":{"timing":{"setup_wns":-0.8,"setup_tns":-2.5,"setup_violation_count":5}}}' \
   > /tmp/test_timing/reports/ppa.json
-python3 skills/r2g-rtl2gds/scripts/check_timing.py /tmp/test_timing; echo "EXIT: $?"
+python3 skills/r2g-rtl2gds/scripts/reports/check_timing.py /tmp/test_timing; echo "EXIT: $?"
 python3 -c "import json; d=json.load(open('/tmp/test_timing/reports/timing_check.json')); print(d['tier'], d['wns_tier'], d['tns_tier'], d.get('suggested_clock_period'))"
 # Expected: EXIT:0, minor minor minor, suggested_clock_period=12.0
 
 # Test TNS ESCALATION: WNS=-0.5 (minor), TNS=-50.0 (moderate) → combined=moderate
 echo '{"summary":{"timing":{"setup_wns":-0.5,"setup_tns":-50.0,"setup_violation_count":100}}}' \
   > /tmp/test_timing/reports/ppa.json
-python3 skills/r2g-rtl2gds/scripts/check_timing.py /tmp/test_timing; echo "EXIT: $?"
+python3 skills/r2g-rtl2gds/scripts/reports/check_timing.py /tmp/test_timing; echo "EXIT: $?"
 python3 -c "import json; d=json.load(open('/tmp/test_timing/reports/timing_check.json')); print(d['tier'], d['wns_tier'], d['tns_tier'])"
 # Expected: EXIT:1, moderate minor moderate (TNS escalated to moderate)
 
 # Test TNS SEVERE ESCALATION: WNS=-1.0 (minor), TNS=-500.0 (severe) → combined=severe
 echo '{"summary":{"timing":{"setup_wns":-1.0,"setup_tns":-500.0,"setup_violation_count":500}}}' \
   > /tmp/test_timing/reports/ppa.json
-python3 skills/r2g-rtl2gds/scripts/check_timing.py /tmp/test_timing; echo "EXIT: $?"
+python3 skills/r2g-rtl2gds/scripts/reports/check_timing.py /tmp/test_timing; echo "EXIT: $?"
 python3 -c "import json; d=json.load(open('/tmp/test_timing/reports/timing_check.json')); print(d['tier'], d['wns_tier'], d['tns_tier'])"
 # Expected: EXIT:1, severe minor severe (TNS escalated to severe)
 
 # Test MODERATE by WNS: WNS=-3.5, TNS=-80.0
 echo '{"summary":{"timing":{"setup_wns":-3.5,"setup_tns":-80.0,"setup_violation_count":25}}}' \
   > /tmp/test_timing/reports/ppa.json
-python3 skills/r2g-rtl2gds/scripts/check_timing.py /tmp/test_timing; echo "EXIT: $?"
+python3 skills/r2g-rtl2gds/scripts/reports/check_timing.py /tmp/test_timing; echo "EXIT: $?"
 python3 -c "import json; d=json.load(open('/tmp/test_timing/reports/timing_check.json')); print(d['tier'], len(d['options']), 'options')"
 # Expected: EXIT:1, moderate, 5 options
 
 # Test SEVERE by WNS: WNS=-8.5, TNS=-2500.0
 echo '{"summary":{"timing":{"setup_wns":-8.5,"setup_tns":-2500.0,"setup_violation_count":150}}}' \
   > /tmp/test_timing/reports/ppa.json
-python3 skills/r2g-rtl2gds/scripts/check_timing.py /tmp/test_timing; echo "EXIT: $?"
+python3 skills/r2g-rtl2gds/scripts/reports/check_timing.py /tmp/test_timing; echo "EXIT: $?"
 python3 -c "import json; d=json.load(open('/tmp/test_timing/reports/timing_check.json')); print(d['tier'], d['wns_tier'], d['tns_tier'])"
 # Expected: EXIT:1, severe severe severe
 
 # Test UNCONSTRAINED: WNS=1e+39
 echo '{"summary":{"timing":{"setup_wns":1e+39}}}' \
   > /tmp/test_timing/reports/ppa.json
-python3 skills/r2g-rtl2gds/scripts/check_timing.py /tmp/test_timing; echo "EXIT: $?"
+python3 skills/r2g-rtl2gds/scripts/reports/check_timing.py /tmp/test_timing; echo "EXIT: $?"
 python3 -c "import json; print(json.load(open('/tmp/test_timing/reports/timing_check.json'))['tier'])"
 # Expected: EXIT:1, unconstrained
 
@@ -612,7 +612,7 @@ rm -rf /tmp/test_timing
 - [ ] **Step 4: Commit**
 
 ```bash
-git add skills/r2g-rtl2gds/scripts/check_timing.py
+git add skills/r2g-rtl2gds/scripts/reports/check_timing.py
 git commit -m "feat(r2g): add check_timing.py — tiered WNS+TNS gate with auto-fix for minor issues"
 ```
 
@@ -621,7 +621,7 @@ git commit -m "feat(r2g): add check_timing.py — tiered WNS+TNS gate with auto-
 ## Task 2: Add tiered setup violation detection (WNS+TNS) to `build_diagnosis.py`
 
 **Files:**
-- Modify: `skills/r2g-rtl2gds/scripts/build_diagnosis.py:184-214` (timing checks section)
+- Modify: `skills/r2g-rtl2gds/scripts/reports/build_diagnosis.py:184-214` (timing checks section)
 
 The existing `build_diagnosis.py` detects unconstrained timing (WNS > 1e+30) and hold violations, but checks neither WNS setup violations nor TNS. Refactor the three independent `ppa_file` reads into a single shared read, and add `minor_setup_violation` and `severe_setup_violation` issue kinds that consider both WNS and TNS.
 
@@ -698,28 +698,28 @@ mkdir -p /tmp/test_diag/reports
 # Test severe by WNS
 echo '{"summary":{"timing":{"setup_wns":-5.0,"setup_tns":-120.0,"setup_violation_count":42}}}' \
   > /tmp/test_diag/reports/ppa.json
-python3 skills/r2g-rtl2gds/scripts/build_diagnosis.py /tmp/test_diag /tmp/test_diag/reports/diagnosis.json
+python3 skills/r2g-rtl2gds/scripts/reports/build_diagnosis.py /tmp/test_diag /tmp/test_diag/reports/diagnosis.json
 python3 -c "import json; d=json.load(open('/tmp/test_diag/reports/diagnosis.json')); print(d['kind'])"
 # Expected: "severe_setup_violation"
 
 # Test severe by TNS (WNS is minor but TNS is huge)
 echo '{"summary":{"timing":{"setup_wns":-0.5,"setup_tns":-500.0,"setup_violation_count":1000}}}' \
   > /tmp/test_diag/reports/ppa.json
-python3 skills/r2g-rtl2gds/scripts/build_diagnosis.py /tmp/test_diag /tmp/test_diag/reports/diagnosis.json
+python3 skills/r2g-rtl2gds/scripts/reports/build_diagnosis.py /tmp/test_diag /tmp/test_diag/reports/diagnosis.json
 python3 -c "import json; d=json.load(open('/tmp/test_diag/reports/diagnosis.json')); print(d['kind'])"
 # Expected: "severe_setup_violation" (TNS < -100 triggers severe)
 
 # Test minor
 echo '{"summary":{"timing":{"setup_wns":-0.5,"setup_tns":-1.2,"setup_violation_count":3}}}' \
   > /tmp/test_diag/reports/ppa.json
-python3 skills/r2g-rtl2gds/scripts/build_diagnosis.py /tmp/test_diag /tmp/test_diag/reports/diagnosis.json
+python3 skills/r2g-rtl2gds/scripts/reports/build_diagnosis.py /tmp/test_diag /tmp/test_diag/reports/diagnosis.json
 python3 -c "import json; d=json.load(open('/tmp/test_diag/reports/diagnosis.json')); print(d['kind'])"
 # Expected: "minor_setup_violation"
 
 # Test clean
 echo '{"summary":{"timing":{"setup_wns":0.5,"setup_tns":0.0}}}' \
   > /tmp/test_diag/reports/ppa.json
-python3 skills/r2g-rtl2gds/scripts/build_diagnosis.py /tmp/test_diag /tmp/test_diag/reports/diagnosis.json
+python3 skills/r2g-rtl2gds/scripts/reports/build_diagnosis.py /tmp/test_diag /tmp/test_diag/reports/diagnosis.json
 python3 -c "import json; d=json.load(open('/tmp/test_diag/reports/diagnosis.json')); print(d['kind'])"
 # Expected: "none"
 
@@ -729,7 +729,7 @@ rm -rf /tmp/test_diag
 - [ ] **Step 3: Commit**
 
 ```bash
-git add skills/r2g-rtl2gds/scripts/build_diagnosis.py
+git add skills/r2g-rtl2gds/scripts/reports/build_diagnosis.py
 git commit -m "feat(r2g): add tiered WNS+TNS setup violation detection to build_diagnosis.py"
 ```
 
@@ -751,8 +751,8 @@ After SKILL.md line 72 (`- Collect results from the ORFS results directory.`), i
 
 After ORFS completes, extract PPA and run the timing gate:
 
-1. Run `scripts/extract_ppa.py <project-dir> reports/ppa.json` to extract timing metrics.
-2. Run `scripts/check_timing.py <project-dir>` to classify WNS and TNS and write `reports/timing_check.json`.
+1. Run `scripts/extract/extract_ppa.py <project-dir> reports/ppa.json` to extract timing metrics.
+2. Run `scripts/reports/check_timing.py <project-dir>` to classify WNS and TNS and write `reports/timing_check.json`.
 3. The script independently classifies WNS and TNS, then takes the **worse** of the two as the combined tier. A design with small WNS but large TNS (many slightly-violating paths) is caught.
 4. Read `reports/timing_check.json` and act on the `tier`:
 
@@ -781,27 +781,27 @@ After line 155 (`- Do not start signoff checks (DRC/LVS/RCX) if backend did not 
 After SKILL.md line 259 (step 9: `run_orfs.sh`), replace steps 10-14 with:
 
 ```markdown
-10. Extract PPA: `scripts/extract_ppa.py <project-dir> reports/ppa.json`
-11. Run timing gate: `scripts/check_timing.py <project-dir>` — reads `reports/timing_check.json`:
+10. Extract PPA: `scripts/extract/extract_ppa.py <project-dir> reports/ppa.json`
+11. Run timing gate: `scripts/reports/check_timing.py <project-dir>` — reads `reports/timing_check.json`:
     - `tier=clean`: proceed to step 12.
     - `tier=minor`: auto-fix clock period per `suggested_clock_period`, re-run step 9, then re-check.
     - `tier=moderate/severe/unconstrained`: **stop, present options to user, wait for decision**.
     - Check `wns_tier` and `tns_tier` to explain which metric drove the tier.
 12. Run signoff checks (only after timing gate passes or user approves):
-    - `scripts/run_drc.sh <project-dir> [platform]` (KLayout DRC)
-    - `scripts/run_magic_drc.sh <project-dir> [platform]` (Magic DRC, sky130 only)
-    - `scripts/run_lvs.sh <project-dir> [platform]` (KLayout LVS)
-    - `scripts/run_netgen_lvs.sh <project-dir> [platform]` (Netgen LVS, sky130 only)
-    - `scripts/run_rcx.sh <project-dir> [platform]`
+    - `scripts/flow/run_drc.sh <project-dir> [platform]` (KLayout DRC)
+    - `scripts/flow/run_magic_drc.sh <project-dir> [platform]` (Magic DRC, sky130 only)
+    - `scripts/flow/run_lvs.sh <project-dir> [platform]` (KLayout LVS)
+    - `scripts/flow/run_netgen_lvs.sh <project-dir> [platform]` (Netgen LVS, sky130 only)
+    - `scripts/flow/run_rcx.sh <project-dir> [platform]`
 13. Extract remaining results:
-    - `scripts/extract_drc.py <project-root> reports/drc.json`
-    - `scripts/extract_lvs.py <project-root> reports/lvs.json`
-    - `scripts/extract_rcx.py <project-root> reports/rcx.json`
-14. Diagnose issues: `scripts/build_diagnosis.py <project-root> reports/diagnosis.json`
-15. Get config suggestions: `scripts/suggest_config.py <project-dir>` (optional, useful for tuning)
-16. Collect artifacts with `scripts/collect_reports.py` and summarize with `scripts/summarize_run.py`.
-17. Generate the dashboard with `scripts/generate_multi_project_dashboard.py`.
-18. Serve it with `scripts/serve_multi_project_dashboard.py 8765`.
+    - `scripts/extract/extract_drc.py <project-root> reports/drc.json`
+    - `scripts/extract/extract_lvs.py <project-root> reports/lvs.json`
+    - `scripts/extract/extract_rcx.py <project-root> reports/rcx.json`
+14. Diagnose issues: `scripts/reports/build_diagnosis.py <project-root> reports/diagnosis.json`
+15. Get config suggestions: `knowledge/suggest_config.py <project-dir>` (optional, useful for tuning)
+16. Collect artifacts with `scripts/reports/collect_reports.py` and summarize with `scripts/reports/summarize_run.py`.
+17. Generate the dashboard with `scripts/dashboard/generate_multi_project_dashboard.py`.
+18. Serve it with `scripts/dashboard/serve_multi_project_dashboard.py 8765`.
 ```
 
 - [ ] **Step 4: Commit**
@@ -821,15 +821,15 @@ git commit -m "docs(r2g): add tiered WNS+TNS timing gate to workflow, hard rules
 
 - [ ] **Step 1: Insert Phase 5b after line 42**
 
-After workflow.md line 42 (`5. Collect results with scripts/collect_orfs_results.py.`), insert:
+After workflow.md line 42 (`5. Collect results with scripts/reports/collect_orfs_results.py.`), insert:
 
 ```markdown
 ## Phase 5b: Timing Gate (Tiered WNS + TNS)
 
 After backend completes, extract PPA and run the timing gate:
 
-1. Run `scripts/extract_ppa.py <project-dir> reports/ppa.json`.
-2. Run `scripts/check_timing.py <project-dir>`.
+1. Run `scripts/extract/extract_ppa.py <project-dir> reports/ppa.json`.
+2. Run `scripts/reports/check_timing.py <project-dir>`.
 3. The script classifies WNS and TNS independently and takes the **worse** as the combined tier.
 4. Read `reports/timing_check.json` and act on the `tier` field:
    - **clean** (WNS >= 0, TNS >= 0): Proceed to Phase 6.
@@ -852,12 +852,12 @@ Note: `extract_ppa.py` already ran in Phase 5b. Re-run only if backend was re-ru
 
 ```bash
 # PPA was already extracted in Phase 5b; re-extract only if backend was re-run:
-# scripts/extract_ppa.py <project-root> reports/ppa.json
-scripts/extract_drc.py <project-root> reports/drc.json
-scripts/extract_lvs.py <project-root> reports/lvs.json
-scripts/extract_rcx.py <project-root> reports/rcx.json
-scripts/extract_progress.py <project-root> reports/progress.json
-scripts/build_diagnosis.py <project-root> reports/diagnosis.json
+# scripts/extract/extract_ppa.py <project-root> reports/ppa.json
+scripts/extract/extract_drc.py <project-root> reports/drc.json
+scripts/extract/extract_lvs.py <project-root> reports/lvs.json
+scripts/extract/extract_rcx.py <project-root> reports/rcx.json
+scripts/extract/extract_progress.py <project-root> reports/progress.json
+scripts/reports/build_diagnosis.py <project-root> reports/diagnosis.json
 ```
 ```
 
@@ -955,7 +955,7 @@ git commit -m "docs(r2g): add tiered WNS+TNS timing violation patterns with esca
 In the "Flow Execution Order (Strict)" section, after step 7 (Backend), insert:
 
 ```markdown
-8. **Timing Gate** — `scripts/check_timing.py <project-dir>` (checks both WNS and TNS; minor: auto-fix; moderate/severe: **stop and present options to user**)
+8. **Timing Gate** — `scripts/reports/check_timing.py <project-dir>` (checks both WNS and TNS; minor: auto-fix; moderate/severe: **stop and present options to user**)
 ```
 
 Renumber: DRC -> 9, LVS -> 10, RCX -> 11, Reports -> 12.
@@ -988,7 +988,7 @@ git commit -m "docs: add tiered WNS+TNS check_timing.py to flow order, inventory
 ## Task 7: Extend `validate_config.py` — macro file checks and area sanity
 
 **Files:**
-- Modify: `skills/r2g-rtl2gds/scripts/validate_config.py`
+- Modify: `skills/r2g-rtl2gds/scripts/project/validate_config.py`
 
 ### 7a: Add ADDITIONAL_LEFS/LIBS file existence check
 
@@ -1080,7 +1080,7 @@ cat > /tmp/test_validate/constraints/constraint.sdc << 'EOF'
 set clk_port_name clk
 create_clock -name core_clock -period 10.0 [get_ports $clk_port_name]
 EOF
-python3 skills/r2g-rtl2gds/scripts/validate_config.py /tmp/test_validate
+python3 skills/r2g-rtl2gds/scripts/project/validate_config.py /tmp/test_validate
 # Expected: warnings about ADDITIONAL_LEFS not found and CORE_AREA >= DIE_AREA
 rm -rf /tmp/test_validate
 ```
@@ -1088,7 +1088,7 @@ rm -rf /tmp/test_validate
 - [ ] **Step 5: Commit**
 
 ```bash
-git add skills/r2g-rtl2gds/scripts/validate_config.py
+git add skills/r2g-rtl2gds/scripts/project/validate_config.py
 git commit -m "feat(r2g): add macro file and area sanity checks to validate_config.py"
 ```
 
@@ -1097,7 +1097,7 @@ git commit -m "feat(r2g): add macro file and area sanity checks to validate_conf
 ## Task 8: Extend `suggest_config.py` — LVS timeout and GDS_ALLOW_EMPTY
 
 **Files:**
-- Modify: `skills/r2g-rtl2gds/scripts/suggest_config.py`
+- Modify: `skills/r2g-rtl2gds/knowledge/suggest_config.py`
 
 - [ ] **Step 1: Read current suggest_config.py**
 
@@ -1120,7 +1120,7 @@ In the recommendation generation section (after safety flags), add:
 - [ ] **Step 3: Commit**
 
 ```bash
-git add skills/r2g-rtl2gds/scripts/suggest_config.py
+git add skills/r2g-rtl2gds/knowledge/suggest_config.py
 git commit -m "feat(r2g): add LVS_TIMEOUT and GDS_ALLOW_EMPTY recommendations to suggest_config.py"
 ```
 
@@ -1131,10 +1131,10 @@ git commit -m "feat(r2g): add LVS_TIMEOUT and GDS_ALLOW_EMPTY recommendations to
 - [ ] **Step 1: Verify all scripts compile**
 
 ```bash
-python3 -m py_compile skills/r2g-rtl2gds/scripts/check_timing.py
-python3 -m py_compile skills/r2g-rtl2gds/scripts/build_diagnosis.py
-python3 -m py_compile skills/r2g-rtl2gds/scripts/validate_config.py
-python3 -m py_compile skills/r2g-rtl2gds/scripts/suggest_config.py
+python3 -m py_compile skills/r2g-rtl2gds/scripts/reports/check_timing.py
+python3 -m py_compile skills/r2g-rtl2gds/scripts/reports/build_diagnosis.py
+python3 -m py_compile skills/r2g-rtl2gds/scripts/project/validate_config.py
+python3 -m py_compile skills/r2g-rtl2gds/knowledge/suggest_config.py
 echo "All scripts compile OK"
 ```
 
@@ -1159,42 +1159,42 @@ EOF
 # Scenario 1: Clean — both WNS and TNS clean
 echo '{"summary":{"timing":{"setup_wns":0.5,"setup_tns":0.0}}}' \
   > /tmp/test_full/reports/ppa.json
-python3 skills/r2g-rtl2gds/scripts/build_diagnosis.py /tmp/test_full /tmp/test_full/reports/diagnosis.json
-python3 skills/r2g-rtl2gds/scripts/check_timing.py /tmp/test_full; echo "EXIT: $?"
+python3 skills/r2g-rtl2gds/scripts/reports/build_diagnosis.py /tmp/test_full /tmp/test_full/reports/diagnosis.json
+python3 skills/r2g-rtl2gds/scripts/reports/check_timing.py /tmp/test_full; echo "EXIT: $?"
 # Expected: diagnosis=none, tier=clean, EXIT=0
 
 # Scenario 2: Minor WNS, minor TNS — auto-fix
 echo '{"summary":{"timing":{"setup_wns":-1.2,"setup_tns":-5.0,"setup_violation_count":8}}}' \
   > /tmp/test_full/reports/ppa.json
-python3 skills/r2g-rtl2gds/scripts/check_timing.py /tmp/test_full; echo "EXIT: $?"
+python3 skills/r2g-rtl2gds/scripts/reports/check_timing.py /tmp/test_full; echo "EXIT: $?"
 python3 -c "import json; d=json.load(open('/tmp/test_full/reports/timing_check.json')); print('tier:', d['tier'], 'wns:', d['wns_tier'], 'tns:', d['tns_tier'])"
 # Expected: tier=minor, wns=minor, tns=minor, EXIT=0
 
 # Scenario 3: KEY TEST — Minor WNS but moderate TNS → combined=moderate
 echo '{"summary":{"timing":{"setup_wns":-0.5,"setup_tns":-50.0,"setup_violation_count":100}}}' \
   > /tmp/test_full/reports/ppa.json
-python3 skills/r2g-rtl2gds/scripts/check_timing.py /tmp/test_full; echo "EXIT: $?"
+python3 skills/r2g-rtl2gds/scripts/reports/check_timing.py /tmp/test_full; echo "EXIT: $?"
 python3 -c "import json; d=json.load(open('/tmp/test_full/reports/timing_check.json')); print('tier:', d['tier'], 'wns:', d['wns_tier'], 'tns:', d['tns_tier'])"
 # Expected: tier=moderate, wns=minor, tns=moderate, EXIT=1 (TNS escalated!)
 
 # Scenario 4: KEY TEST — Minor WNS but severe TNS → combined=severe
 echo '{"summary":{"timing":{"setup_wns":-1.0,"setup_tns":-500.0,"setup_violation_count":500}}}' \
   > /tmp/test_full/reports/ppa.json
-python3 skills/r2g-rtl2gds/scripts/check_timing.py /tmp/test_full; echo "EXIT: $?"
+python3 skills/r2g-rtl2gds/scripts/reports/check_timing.py /tmp/test_full; echo "EXIT: $?"
 python3 -c "import json; d=json.load(open('/tmp/test_full/reports/timing_check.json')); print('tier:', d['tier'], 'wns:', d['wns_tier'], 'tns:', d['tns_tier'])"
 # Expected: tier=severe, wns=minor, tns=severe, EXIT=1 (TNS escalated!)
 
 # Scenario 5: Severe by WNS
 echo '{"summary":{"timing":{"setup_wns":-8.5,"setup_tns":-2500.0,"setup_violation_count":150}}}' \
   > /tmp/test_full/reports/ppa.json
-python3 skills/r2g-rtl2gds/scripts/check_timing.py /tmp/test_full; echo "EXIT: $?"
+python3 skills/r2g-rtl2gds/scripts/reports/check_timing.py /tmp/test_full; echo "EXIT: $?"
 python3 -c "import json; d=json.load(open('/tmp/test_full/reports/timing_check.json')); print('tier:', d['tier'])"
 # Expected: tier=severe, EXIT=1
 
 # Scenario 6: Diagnosis also catches TNS-driven severe
 echo '{"summary":{"timing":{"setup_wns":-0.3,"setup_tns":-200.0,"setup_violation_count":400}}}' \
   > /tmp/test_full/reports/ppa.json
-python3 skills/r2g-rtl2gds/scripts/build_diagnosis.py /tmp/test_full /tmp/test_full/reports/diagnosis.json
+python3 skills/r2g-rtl2gds/scripts/reports/build_diagnosis.py /tmp/test_full /tmp/test_full/reports/diagnosis.json
 python3 -c "import json; d=json.load(open('/tmp/test_full/reports/diagnosis.json')); print(d['kind'])"
 # Expected: "severe_setup_violation" (TNS < -100 triggers severe in diagnosis too)
 
@@ -1205,7 +1205,7 @@ rm -rf /tmp/test_full
 
 ```bash
 source /opt/openroad_tools_env.sh
-bash skills/r2g-rtl2gds/scripts/check_env.sh
+bash skills/r2g-rtl2gds/scripts/flow/check_env.sh
 ```
 
 - [ ] **Step 4: Commit (if any fixes needed)**

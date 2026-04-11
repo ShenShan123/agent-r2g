@@ -7,11 +7,11 @@ the input to `suggest_config.py` and `failure-patterns.md` review.
 
 | File | Producer | Consumer |
 |---|---|---|
-| `schema.sql` | hand-edited | `scripts/knowledge_db.py` at `ensure_schema` time |
-| `families.json` | hand-edited seed; append as new designs ship | `scripts/knowledge_db.py::infer_family` |
-| `runs.sqlite` | `scripts/ingest_run.py` (one row per ingested run) | `learn_heuristics.py`, `mine_rules.py`, `query_knowledge.py` |
-| `heuristics.json` | `scripts/learn_heuristics.py` | `suggest_config.py`, agent, dashboard |
-| `failure_candidates.json` | `scripts/mine_rules.py` | human reviewer → `references/failure-patterns.md` |
+| `schema.sql` | hand-edited | `knowledge/knowledge_db.py` at `ensure_schema` time |
+| `families.json` | hand-edited seed; append as new designs ship | `knowledge/knowledge_db.py::infer_family` |
+| `runs.sqlite` | `knowledge/ingest_run.py` (one row per ingested run) | `learn_heuristics.py`, `mine_rules.py`, `query_knowledge.py` |
+| `heuristics.json` | `knowledge/learn_heuristics.py` | `suggest_config.py`, agent, dashboard |
+| `failure_candidates.json` | `knowledge/mine_rules.py` | human reviewer → `references/failure-patterns.md` |
 
 ## Loop
 

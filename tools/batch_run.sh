@@ -1,20 +1,24 @@
 #!/usr/bin/env bash
 set -uo pipefail
 
-# Re-run all failure design cases from scratch
-# Categories: bp_multi_top (missing files, now fixed), riscv32i/tinyRocket (LVS CDL, now fixed),
-#             aes_xcrypt/ibex/swerv/vga_enh_top (timeout, now with larger outer timeout)
+# Batch runner for all design cases
+# Runs: ORFS backend → LVS → RCX (skipping DRC)
+# Usage: ./batch_run.sh [max_parallel_jobs] [timeout_per_design]
 
 MAX_JOBS="${1:-4}"
-ORFS_TIMEOUT="${2:-3600}"
-BASE_DIR="/data/shenshan/agent_with_openroad"
+ORFS_TIMEOUT="${2:-3600}"  # 1 hour per design
+BASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CASES_DIR="$BASE_DIR/design_cases"
-SKILL_SCRIPTS_DIR="$BASE_DIR/skills/r2g-rtl2gds/scripts"
-RESULTS_FILE="$BASE_DIR/rerun_results.jsonl"
-SUMMARY_FILE="$BASE_DIR/rerun_summary.txt"
+SKILL_SCRIPTS_DIR="$BASE_DIR/skills/r2g-rtl2gds/scripts/flow"
+BATCH_DIR="$CASES_DIR/_batch"
+mkdir -p "$BATCH_DIR"
+RESULTS_FILE="$BATCH_DIR/batch_results.jsonl"
+SUMMARY_FILE="$BATCH_DIR/batch_summary.txt"
 
+# Source EDA environment
 source /opt/openroad_tools_env.sh
 
+# Clear previous results
 > "$RESULTS_FILE"
 
 run_one_design() {
@@ -34,16 +38,20 @@ run_one_design() {
 
   echo "[$(date '+%H:%M:%S')] START $case_name ($design_name)"
 
+  # Lock per DESIGN_NAME to prevent concurrent ORFS runs that share config.mk
   local lock_dir="/tmp/orfs_locks"
   mkdir -p "$lock_dir"
   local lock_file="$lock_dir/${design_name}.lock"
 
+  # Stage 1: ORFS backend (serialized per DESIGN_NAME)
+  local orfs_status=0
   (
     flock -x 200
     ORFS_TIMEOUT="$ORFS_TIMEOUT" timeout --signal=TERM --kill-after=60 "$((ORFS_TIMEOUT * 6))" \
       bash "$SKILL_SCRIPTS_DIR/run_orfs.sh" "$case_dir" "$platform" > "$log_dir/orfs.log" 2>&1
     orfs_exit=$?
 
+    # Also run LVS and RCX inside the lock to prevent result dir conflicts
     if [[ $orfs_exit -eq 0 ]]; then
       LVS_TIMEOUT=3600 timeout --signal=TERM --kill-after=30 3660 \
         bash "$SKILL_SCRIPTS_DIR/run_lvs.sh" "$case_dir" "$platform" > "$log_dir/lvs.log" 2>&1
@@ -59,9 +67,10 @@ run_one_design() {
     fi
   ) 200>"$lock_file"
 
+  # Read exit codes from the locked subshell
   local codes
   codes=$(cat "$log_dir/exit_codes.txt" 2>/dev/null || echo "1 -1 -1")
-  local orfs_status=$(echo "$codes" | awk '{print $1}')
+  orfs_status=$(echo "$codes" | awk '{print $1}')
   local lvs_status=$(echo "$codes" | awk '{print $2}')
   local rcx_status=$(echo "$codes" | awk '{print $3}')
 
@@ -95,51 +104,48 @@ run_one_design() {
 export -f run_one_design
 export ORFS_TIMEOUT SKILL_SCRIPTS_DIR RESULTS_FILE
 
-# Failure families (cfg1 only for initial validation, then all configs)
-FAILURE_FAMILIES=(
-  bp_multi_top
-  riscv32i
-  tinyRocket
-  aes_xcrypt
-  ibex
-  swerv
-  vga_enh_top
-)
-
-# Build interleaved list: cfg1 of all families first, then cfg2, etc.
+# Get list of all design cases, interleaved by DESIGN_NAME for better parallelism
+# Instead of running cfg1,cfg2,...cfg10 of same design sequentially, interleave:
+# cfg1_of_designA, cfg1_of_designB, ..., cfg2_of_designA, cfg2_of_designB, ...
 mapfile -t ALL_CASES < <(
-  for suffix in 1 2 3 4 5 6 7 8 9 10; do
-    for family in "${FAILURE_FAMILIES[@]}"; do
-      dir="$CASES_DIR/${family}_cfg${suffix}"
-      if [[ -d "$dir" ]]; then
-        echo "$dir"
-      fi
-    done
-  done
+  for d in "$CASES_DIR"/*/constraints/config.mk; do
+    dir=$(dirname "$(dirname "$d")")
+    name=$(basename "$dir")
+    # Extract config number suffix for interleaving
+    suffix=$(echo "$name" | grep -oP '(cfg|v)\K\d+$' || echo "0")
+    printf "%s\t%s\n" "$suffix" "$dir"
+  done | sort -t$'\t' -k1,1n -k2,2 | cut -f2
 )
 
 TOTAL=${#ALL_CASES[@]}
 echo "================================================================"
-echo "Re-run failures: $TOTAL designs, $MAX_JOBS parallel jobs"
-echo "ORFS timeout: ${ORFS_TIMEOUT}s per stage, $((ORFS_TIMEOUT * 6))s outer"
+echo "Batch run: $TOTAL designs, $MAX_JOBS parallel jobs"
+echo "ORFS timeout: ${ORFS_TIMEOUT}s per design"
 echo "Results: $RESULTS_FILE"
 echo "================================================================"
 echo ""
 
+# Run with GNU parallel if available, otherwise use xargs
+COMPLETED=0
+FAILED=0
+
 for case_dir in "${ALL_CASES[@]}"; do
+  # Wait if we have too many background jobs
   while [[ $(jobs -r | wc -l) -ge $MAX_JOBS ]]; do
     sleep 2
   done
   run_one_design "$case_dir" &
 done
 
+# Wait for all background jobs
 wait
 
 echo ""
 echo "================================================================"
-echo "Re-run complete. Generating summary..."
+echo "Batch run complete. Generating summary..."
 echo "================================================================"
 
+# Generate summary
 TOTAL_RESULTS=$(wc -l < "$RESULTS_FILE")
 ORFS_PASS=$(grep -c '"orfs": "pass"' "$RESULTS_FILE" || true)
 ORFS_FAIL=$(grep -c '"orfs": "fail' "$RESULTS_FILE" || true)
@@ -151,7 +157,7 @@ RCX_FAIL=$(grep -c '"rcx": "fail' "$RESULTS_FILE" || true)
 RCX_SKIP=$(grep -c '"rcx": "skipped"' "$RESULTS_FILE" || true)
 
 cat > "$SUMMARY_FILE" <<EOF
-Re-run Failures Summary ($(date))
+Batch Run Summary ($(date))
 =====================================
 Total designs: $TOTAL_RESULTS / $TOTAL
 
@@ -170,11 +176,11 @@ RCX:
   Skipped: $RCX_SKIP
 
 Failed designs:
-$(grep '"orfs": "fail' "$RESULTS_FILE" | python3 -c "import sys,json; [print(f'  ORFS: {json.loads(l)[\"case\"]}  ({json.loads(l)[\"orfs\"]})') for l in sys.stdin]" 2>/dev/null || true)
+$(grep '"orfs": "fail' "$RESULTS_FILE" | python3 -c "import sys,json; [print(f'  ORFS: {json.loads(l)[\"case\"]}') for l in sys.stdin]" 2>/dev/null || grep '"orfs": "fail' "$RESULTS_FILE")
 
-$(grep '"lvs": "fail' "$RESULTS_FILE" | python3 -c "import sys,json; [print(f'  LVS: {json.loads(l)[\"case\"]}') for l in sys.stdin]" 2>/dev/null || true)
+$(grep '"lvs": "fail' "$RESULTS_FILE" | python3 -c "import sys,json; [print(f'  LVS: {json.loads(l)[\"case\"]}') for l in sys.stdin]" 2>/dev/null || grep '"lvs": "fail' "$RESULTS_FILE")
 
-$(grep '"rcx": "fail' "$RESULTS_FILE" | python3 -c "import sys,json; [print(f'  RCX: {json.loads(l)[\"case\"]}') for l in sys.stdin]" 2>/dev/null || true)
+$(grep '"rcx": "fail' "$RESULTS_FILE" | python3 -c "import sys,json; [print(f'  RCX: {json.loads(l)[\"case\"]}') for l in sys.stdin]" 2>/dev/null || grep '"rcx": "fail' "$RESULTS_FILE")
 EOF
 
 cat "$SUMMARY_FILE"

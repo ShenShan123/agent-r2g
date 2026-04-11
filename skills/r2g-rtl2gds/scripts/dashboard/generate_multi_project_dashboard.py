@@ -11,7 +11,7 @@ import subprocess
 import sys
 
 # Base directory for all EDA runs - configurable via argv or env
-BASE = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else Path('eda-runs').resolve()
+BASE = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else Path('design_cases').resolve()
 OUT = BASE / '_dashboard'
 
 

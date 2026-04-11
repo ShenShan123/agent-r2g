@@ -7,28 +7,47 @@ AI-driven open-source EDA skill that takes a natural-language hardware spec and 
 ```
 skills/r2g-rtl2gds/      # The skill definition
   SKILL.md               # Skill metadata, workflow, hard rules
-  scripts/               # 30 deterministic Python/Shell scripts (the agent orchestrates, scripts execute)
+  scripts/               # 30 stateless Python/Shell CLIs, grouped by role:
+    flow/                  #   stage runners (run_lint.sh, run_orfs.sh, run_drc.sh, …)
+    extract/               #   parse tool output into JSON (extract_ppa.py, …)
+    project/               #   init/normalize/validate project & spec
+    reports/               #   timing gate, diagnosis, collection, history
+    dashboard/             #   render GDS, generate/serve multi-project dashboard
+  knowledge/             # Self-contained knowledge-store subsystem (seed data + Python code)
   references/            # Workflow guide, failure patterns, spec template, ORFS playbook, PPA guide
   assets/                # config.mk / constraint.sdc templates + simple-arbiter example
-eda-runs/                # Working directory for all design runs
+  tests/                 # pytest suite for knowledge-store scripts
+tools/                   # Repo-level operator tooling (batch_run.sh, …)
+design_cases/            # Working directory for all design runs (gitignored)
   <design-name>/         # One directory per design project
   _dashboard/            # Auto-generated HTML dashboard
+  _batch/                # Batch-run results & summaries
 ```
 
 ### Knowledge Store (inside the skill)
 
+`skills/r2g-rtl2gds/knowledge/` is a self-contained subsystem that bundles
+seed data and the Python code that reads/writes it:
+
 ```
 skills/r2g-rtl2gds/knowledge/
-  schema.sql               # SQLite DDL
-  families.json            # design_name → design_family mapping + patterns
-  runs.sqlite              # one row per ingested run (generated, gitignored)
-  heuristics.json          # empirical per-family bounds (generated, gitignored)
-  failure_candidates.json  # review queue for new failure-patterns.md entries (generated, gitignored)
+  README.md                # What the store contains and how it is used
+  schema.sql               # SQLite DDL (tracked)
+  families.json            # design_name → design_family mapping + patterns (tracked)
+  knowledge_db.py          # Shared SQLite / family-inference helpers (imported by the others)
+  ingest_run.py            # Ingest one design_cases/<project> dir into runs.sqlite
+  learn_heuristics.py      # Derive empirical per-family bounds
+  mine_rules.py            # Surface repeated failure signatures as a review queue
+  query_knowledge.py       # Read-only API + CLI over heuristics.json
+  suggest_config.py        # Design-aware ORFS parameter recommender (uses heuristics)
+  runs.sqlite              # runtime, gitignored
+  heuristics.json          # runtime, gitignored
+  failure_candidates.json  # runtime, gitignored
 ```
 
-Populated by `scripts/ingest_run.py`, derived by `scripts/learn_heuristics.py`
-and `scripts/mine_rules.py`, consumed by `scripts/suggest_config.py` and
-`scripts/query_knowledge.py`. Phase 2 only — no version DAG yet (deferred).
+Populated by `knowledge/ingest_run.py`, derived by `knowledge/learn_heuristics.py`
+and `knowledge/mine_rules.py`, consumed by `knowledge/suggest_config.py` and
+`knowledge/query_knowledge.py`. Phase 2 only — no version DAG yet (deferred).
 
 ## EDA Toolchain (Pre-installed)
 
@@ -57,72 +76,86 @@ Sky130 PDK for Magic/Netgen: `/opt/pdks/sky130A/` (tech file + netgen setup.tcl)
 1. **Spec** — normalize natural-language spec → `input/normalized-spec.yaml`
 2. **RTL** — generate Verilog → `rtl/design.v`
 3. **Testbench** — generate testbench → `tb/testbench.v`
-4. **Lint** — `scripts/run_lint.sh` (must pass before simulation)
-5. **Simulation** — `scripts/run_sim.sh` (must pass before synthesis)
-6. **Synthesis** — `scripts/run_synth.sh` (must pass before backend)
-7. **Backend** — `scripts/run_orfs.sh <project-dir> [platform]` (ORFS place & route → GDS)
-8. **Timing Gate** — `scripts/check_timing.py <project-dir>` (checks both WNS and TNS; minor: auto-fix; moderate/severe: **stop and present options to user**)
-9. **DRC** — `scripts/run_drc.sh <project-dir> [platform]` (KLayout design rule check on GDS)
-10. **LVS** — `scripts/run_lvs.sh <project-dir> [platform]` (KLayout layout-vs-schematic)
-11. **RCX** — `scripts/run_rcx.sh <project-dir> [platform]` (OpenRCX parasitic extraction → SPEF)
-12. **Reports** — `extract_ppa.py`, `extract_drc.py`, `extract_lvs.py`, `extract_rcx.py`, `build_diagnosis.py`, `generate_multi_project_dashboard.py`
+4. **Lint** — `scripts/flow/run_lint.sh` (must pass before simulation)
+5. **Simulation** — `scripts/flow/run_sim.sh` (must pass before synthesis)
+6. **Synthesis** — `scripts/flow/run_synth.sh` (must pass before backend)
+7. **Backend** — `scripts/flow/run_orfs.sh <project-dir> [platform]` (ORFS place & route → GDS)
+8. **Timing Gate** — `scripts/reports/check_timing.py <project-dir>` (checks both WNS and TNS; minor: auto-fix; moderate/severe: **stop and present options to user**)
+9. **DRC** — `scripts/flow/run_drc.sh <project-dir> [platform]` (KLayout design rule check on GDS)
+10. **LVS** — `scripts/flow/run_lvs.sh <project-dir> [platform]` (KLayout layout-vs-schematic)
+11. **RCX** — `scripts/flow/run_rcx.sh <project-dir> [platform]` (OpenRCX parasitic extraction → SPEF)
+12. **Reports** — `extract/extract_ppa.py`, `extract/extract_drc.py`, `extract/extract_lvs.py`, `extract/extract_rcx.py`, `reports/build_diagnosis.py`, `dashboard/generate_multi_project_dashboard.py`
 
 **Never skip a failed stage.** Diagnose first using `references/failure-patterns.md`.
 
 ## Script Inventory
 
-### Execution Scripts (Shell)
+All paths below are relative to `skills/r2g-rtl2gds/`. Everything under
+`scripts/` is stateless tooling; `knowledge/` is the knowledge-store subsystem
+(data + code) described in the previous section.
+
+### `scripts/flow/` — Stage Runners (Shell)
 | Script | Purpose | Inputs | Key Outputs |
 |--------|---------|--------|-------------|
-| `check_env.sh` | Verify tool availability | — | stdout report |
-| `run_lint.sh` | Syntax validation (verilator/iverilog) | `<rtl-file> <log-file>` | `lint.log` with `lint_ok` marker |
-| `run_sim.sh` | Testbench simulation | `<rtl-file> <tb-file> <work-dir>` | `sim.log` with `simulation_ok` marker, `output.vcd` |
-| `run_synth.sh` | Yosys synthesis | `<rtl-file> <top-module> <work-dir>` | `synth_output.v`, `synth.log` |
-| `run_orfs.sh` | ORFS place & route (stage-by-stage) | `<project-dir> [platform]` | GDS, DEF, ODB in `backend/RUN_*/`, `stage_log.jsonl` |
-| `run_drc.sh` | KLayout DRC | `<project-dir> [platform]` | `drc/6_drc.lyrdb`, `drc/6_drc_count.rpt` |
-| `run_magic_drc.sh` | Magic DRC (sky130 only) | `<project-dir> [platform]` | `drc/magic_drc.rpt`, `drc/magic_drc_result.json` |
-| `run_lvs.sh` | KLayout LVS | `<project-dir> [platform]` | `lvs/6_lvs.lvsdb`, `lvs/6_lvs.log` |
-| `run_netgen_lvs.sh` | Netgen LVS (sky130 only) | `<project-dir> [platform]` | `lvs/netgen_lvs.rpt`, `lvs/netgen_lvs_result.json` |
-| `run_rcx.sh` | OpenRCX parasitic extraction | `<project-dir> [platform]` | `rcx/6_final.spef`, `rcx/rcx.log` |
+| `flow/check_env.sh` | Verify tool availability | — | stdout report |
+| `flow/run_lint.sh` | Syntax validation (verilator/iverilog) | `<rtl-file> <log-file>` | `lint.log` with `lint_ok` marker |
+| `flow/run_sim.sh` | Testbench simulation | `<rtl-file> <tb-file> <work-dir>` | `sim.log` with `simulation_ok` marker, `output.vcd` |
+| `flow/run_synth.sh` | Yosys synthesis | `<rtl-file> <top-module> <work-dir>` | `synth_output.v`, `synth.log` |
+| `flow/run_orfs.sh` | ORFS place & route (stage-by-stage) | `<project-dir> [platform]` | GDS, DEF, ODB in `backend/RUN_*/`, `stage_log.jsonl` |
+| `flow/run_drc.sh` | KLayout DRC | `<project-dir> [platform]` | `drc/6_drc.lyrdb`, `drc/6_drc_count.rpt` |
+| `flow/run_magic_drc.sh` | Magic DRC (sky130 only) | `<project-dir> [platform]` | `drc/magic_drc.rpt`, `drc/magic_drc_result.json` |
+| `flow/run_lvs.sh` | KLayout LVS | `<project-dir> [platform]` | `lvs/6_lvs.lvsdb`, `lvs/6_lvs.log` |
+| `flow/run_netgen_lvs.sh` | Netgen LVS (sky130 only) | `<project-dir> [platform]` | `lvs/netgen_lvs.rpt`, `lvs/netgen_lvs_result.json` |
+| `flow/run_rcx.sh` | OpenRCX parasitic extraction | `<project-dir> [platform]` | `rcx/6_final.spef`, `rcx/rcx.log` |
 
-### Analysis & Extraction Scripts (Python)
+### `scripts/extract/` — Parse Tool Output → JSON
 | Script | Purpose | Inputs | Output |
 |--------|---------|--------|--------|
-| `extract_ppa.py` | Parse PPA metrics from `6_report.json` | `<project-root> <output.json>` | `ppa.json` (area, timing, power, geometry) |
-| `extract_drc.py` | Parse DRC results | `<project-root> <output.json>` | `drc.json` (violation counts, categories) |
-| `extract_lvs.py` | Parse LVS results (XML + text format) | `<project-root> <output.json>` | `lvs.json` (match/mismatch status) |
-| `extract_rcx.py` | Parse SPEF parasitics | `<project-root> <output.json>` | `rcx.json` (net count, total cap/res) |
-| `check_timing.py` | Tiered post-backend WNS+TNS gate (auto-fix minor, present options for moderate/severe) | `<project-dir> [--wns-threshold <ns>] [--tns-threshold <ns>]` | `timing_check.json` (tier, wns_tier, tns_tier, options, suggested_clock_period) |
-| `extract_progress.py` | Parse ORFS stage progress | `<project-root> <output.json>` | `progress.json` |
-| `build_diagnosis.py` | Multi-issue detection & suggestions | `<project-root> <output.json>` | `diagnosis.json` (list of all issues) |
-| `suggest_config.py` | Design-aware parameter recommender | `<project-dir> [output.json]` | Recommended ORFS parameters |
-| `validate_config.py` | SDC↔RTL port cross-check, param range validation | `<project-dir>` | stdout warnings |
-| `build_run_history.py` | Multi-run comparison | `<project-root> <output.json>` | `run-history.json` |
-| `build_run_compare.py` | Baseline vs current delta | `<project-root> <base-json> <output.json>` | `run-compare.json` |
-| `ingest_run.py` | Ingest one eda-runs/<project> directory into the knowledge store | `<project-dir> [--db <path>]` | `knowledge/runs.sqlite` (upsert) |
-| `learn_heuristics.py` | Derive empirical per-family bounds from runs.sqlite | `[--db <path>] [--out <path>]` | `knowledge/heuristics.json` |
-| `query_knowledge.py` | Read-only API + CLI over heuristics.json | `family <name> \| list` | stdout JSON |
-| `mine_rules.py` | Surface repeated failure signatures as a review queue | `[--min-occurrences N]` | `knowledge/failure_candidates.json` |
+| `extract/extract_ppa.py` | Parse PPA metrics from `6_report.json` | `<project-root> <output.json>` | `ppa.json` (area, timing, power, geometry) |
+| `extract/extract_drc.py` | Parse DRC results | `<project-root> <output.json>` | `drc.json` (violation counts, categories) |
+| `extract/extract_lvs.py` | Parse LVS results (XML + text format) | `<project-root> <output.json>` | `lvs.json` (match/mismatch status) |
+| `extract/extract_rcx.py` | Parse SPEF parasitics | `<project-root> <output.json>` | `rcx.json` (net count, total cap/res) |
+| `extract/extract_progress.py` | Parse ORFS stage progress | `<project-root> <output.json>` | `progress.json` |
 
-Internal module: `knowledge_db.py` — shared SQLite/family-inference helpers used by the four scripts above (not a standalone CLI).
+### `scripts/project/` — Project Setup & Spec
+| Script | Purpose | Inputs | Output |
+|--------|---------|--------|--------|
+| `project/init_project.py` | Initialize project directory structure | `<design-name> [base-dir]` | `design_cases/<design>/` tree |
+| `project/normalize_spec.py` | Convert free-form spec → YAML | `<raw-spec.md> <out.yaml>` | `input/normalized-spec.yaml` |
+| `project/validate_config.py` | SDC↔RTL port cross-check, param range validation | `<project-dir>` | stdout warnings |
 
-### Project Management Scripts (Python)
+### `scripts/reports/` — Diagnosis, Gates, History
+| Script | Purpose | Inputs | Output |
+|--------|---------|--------|--------|
+| `reports/check_timing.py` | Tiered post-backend WNS+TNS gate (auto-fix minor, present options for moderate/severe) | `<project-dir> [--wns-threshold <ns>] [--tns-threshold <ns>]` | `timing_check.json` |
+| `reports/build_diagnosis.py` | Multi-issue detection & suggestions | `<project-root> <output.json>` | `diagnosis.json` |
+| `reports/build_run_history.py` | Multi-run comparison | `<project-root> <output.json>` | `run-history.json` |
+| `reports/build_run_compare.py` | Baseline vs current delta | `<project-root> <base-json> <output.json>` | `run-compare.json` |
+| `reports/collect_orfs_results.py` | Gather backend artifacts | `<project-dir>` | — |
+| `reports/collect_reports.py` | List all generated artifacts | `<project-dir>` | — |
+| `reports/list_artifacts.py` | Enumerate all output files | `<project-dir>` | stdout |
+| `reports/summarize_run.py` | Run status summary | `<project-dir>` | stdout |
+| `reports/write_success_summary.py` | Markdown run summary | `<project-dir>` | `reports/summary.md` |
+
+### `knowledge/` — Knowledge-Store Subsystem (not under `scripts/`)
+Lives alongside its seed data at `skills/r2g-rtl2gds/knowledge/` so code and schema stay in one place.
+
+| Script | Purpose | Inputs | Output |
+|--------|---------|--------|--------|
+| `knowledge/ingest_run.py` | Ingest one design_cases/<project> directory into the knowledge store | `<project-dir> [--db <path>]` | `knowledge/runs.sqlite` (upsert) |
+| `knowledge/learn_heuristics.py` | Derive empirical per-family bounds from runs.sqlite | `[--db <path>] [--out <path>]` | `knowledge/heuristics.json` |
+| `knowledge/query_knowledge.py` | Read-only API + CLI over heuristics.json | `family <name> \| list` | stdout JSON |
+| `knowledge/mine_rules.py` | Surface repeated failure signatures as a review queue | `[--min-occurrences N]` | `knowledge/failure_candidates.json` |
+| `knowledge/suggest_config.py` | Design-aware parameter recommender (uses learned heuristics) | `<project-dir> [output.json]` | Recommended ORFS parameters |
+
+Internal module: `knowledge/knowledge_db.py` — shared SQLite/family-inference helpers imported by the five scripts above (not a standalone CLI).
+
+### `scripts/dashboard/` — Multi-Project Dashboard
 | Script | Purpose |
 |--------|---------|
-| `init_project.py` | Initialize project directory structure |
-| `normalize_spec.py` | Convert free-form spec → YAML |
-| `collect_orfs_results.py` | Gather backend artifacts |
-| `collect_reports.py` | List all generated artifacts |
-| `summarize_run.py` | Run status summary |
-| `list_artifacts.py` | Enumerate all output files |
-| `write_success_summary.py` | Markdown run summary |
-
-### Dashboard Scripts (Python)
-| Script | Purpose |
-|--------|---------|
-| `render_gds_preview.py` | Generate GDS PNG via KLayout |
-| `generate_multi_project_dashboard.py` | Static HTML dashboard with signoff badges |
-| `serve_multi_project_dashboard.py` | HTTP server with auto-regeneration |
+| `dashboard/render_gds_preview.py` | Generate GDS PNG via KLayout |
+| `dashboard/generate_multi_project_dashboard.py` | Static HTML dashboard with signoff badges |
+| `dashboard/serve_multi_project_dashboard.py` | HTTP server with auto-regeneration |
 
 ## ORFS Backend Key Points
 
@@ -293,9 +326,9 @@ Tested 2026-04-01, updated 2026-04-03 with LVS auto-timeout scaling, PDN-0179 fi
 
 ```bash
 # Limit to 4 CPU cores and 4-hour timeout
-ORFS_MAX_CPUS=4 ORFS_TIMEOUT=14400 scripts/run_orfs.sh <project-dir> [platform]
+ORFS_MAX_CPUS=4 ORFS_TIMEOUT=14400 scripts/flow/run_orfs.sh <project-dir> [platform]
 # LVS timeout auto-scales based on cell count; explicit override still works:
-LVS_TIMEOUT=7200 scripts/run_lvs.sh <project-dir> [platform]
+LVS_TIMEOUT=7200 scripts/flow/run_lvs.sh <project-dir> [platform]
 ```
 
 ## Batch Run Timeout Guidance
@@ -312,7 +345,7 @@ When running multiple configs sequentially per DESIGN_NAME (e.g., in a batch scr
 - All scripts are in `skills/r2g-rtl2gds/scripts/` — use them instead of ad-hoc shell commands
 - The skill supports single-clock flows including macro designs (fakeram45). Escalate to user before attempting CDC, multi-clock, or DFT
 - Macro designs (riscv32i, tinyRocket, swerv, bp_multi_top) are validated through ORFS+LVS+RCX on nangate45
-- Dashboard is static HTML at `eda-runs/_dashboard/index.html`, served via `scripts/serve_multi_project_dashboard.py 8765`
+- Dashboard is static HTML at `design_cases/_dashboard/index.html`, served via `scripts/dashboard/serve_multi_project_dashboard.py 8765`
 - Dashboard embeds GDS preview images (base64), detailed geometry info, and signoff check badges (DRC/LVS/RCX) with color-coded status
 - `extract_ppa.py` reads timing/power from ORFS `6_report.json` (authoritative source), with flow.log regex as fallback only when `6_report.json` is absent. Outputs `summary` (PPA) and `geometry` (detailed layout metrics) into `ppa.json`
 - `extract_drc.py` parses KLayout lyrdb XML for violation categories and counts

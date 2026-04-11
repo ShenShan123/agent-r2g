@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Ingest one eda-runs/<project> directory into knowledge/runs.sqlite.
+"""Ingest one design_cases/<project> directory into knowledge/runs.sqlite.
 
 Usage:
   ingest_run.py <project-dir>
@@ -253,7 +253,7 @@ def ingest(project: Path,
 
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    p.add_argument("project", type=Path, help="Path to eda-runs/<project> directory")
+    p.add_argument("project", type=Path, help="Path to design_cases/<project> directory")
     p.add_argument("--db", type=Path, default=knowledge_db.DEFAULT_DB_PATH,
                    help="SQLite database path (default: knowledge/runs.sqlite)")
     p.add_argument("--schema", type=Path, default=knowledge_db.DEFAULT_SCHEMA_PATH,

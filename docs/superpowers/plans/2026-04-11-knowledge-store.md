@@ -15,7 +15,7 @@
 - The repository is **not** a git repo (`git rev-parse` fails). "Commit" steps below are marked as **checkpoints** — log a one-line progress note and continue. If a future user initialises git, they can replay the checkpoints as real commits.
 - pytest 8.3.5 is already on PATH.
 - `eda-runs/` is empty on disk; tests rely entirely on self-contained fixtures. The seed `families.json` encodes the 7 validated families from `CLAUDE.md:227-240` so that `suggest_config.py` has useful output even before the first real run is ingested.
-- All new Python files must be executable (`#!/usr/bin/env python3`) and use the same docstring / import style as `scripts/suggest_config.py` and `scripts/extract_ppa.py`.
+- All new Python files must be executable (`#!/usr/bin/env python3`) and use the same docstring / import style as `knowledge/suggest_config.py` and `scripts/extract/extract_ppa.py`.
 - Never break the existing deterministic-script contract: new scripts read artifacts, they do not rewrite them. `suggest_config.py` still accepts the same CLI and still returns the same JSON shape — only the `recommendations` values change when learned data is available.
 
 ---
@@ -30,11 +30,11 @@
 | `skills/r2g-rtl2gds/knowledge/schema.sql` | DDL for `runs` and `failure_events` tables + indexes. Single source of truth for the DB schema. |
 | `skills/r2g-rtl2gds/knowledge/families.json` | Seed mapping `design_name → design_family` + regex patterns for unknown designs. Seeds the 7 validated families. |
 | `skills/r2g-rtl2gds/knowledge/.gitkeep` | Keeps the directory present when `runs.sqlite`, `heuristics.json`, `failure_candidates.json` are absent (pre-first-run state). |
-| `skills/r2g-rtl2gds/scripts/knowledge_db.py` | Thin module: `connect(db_path)`, `ensure_schema(conn)`, `FAMILIES` loader, `infer_family(design_name)`. Shared by ingest / learn / query / mine. |
-| `skills/r2g-rtl2gds/scripts/ingest_run.py` | Reads one `eda-runs/<project>/` directory, upserts a row into `runs.sqlite`, writes any failure events. Idempotent. |
-| `skills/r2g-rtl2gds/scripts/learn_heuristics.py` | Rebuilds `knowledge/heuristics.json` from `runs.sqlite`. Pure derivation, no network. |
-| `skills/r2g-rtl2gds/scripts/query_knowledge.py` | Read-only CLI + importable API (`get_family_heuristics`). Consumed by `suggest_config.py` and the agent. |
-| `skills/r2g-rtl2gds/scripts/mine_rules.py` | Scans `failure_events` for repeated signatures and writes `knowledge/failure_candidates.json` as a review queue. |
+| `skills/r2g-rtl2gds/knowledge/knowledge_db.py` | Thin module: `connect(db_path)`, `ensure_schema(conn)`, `FAMILIES` loader, `infer_family(design_name)`. Shared by ingest / learn / query / mine. |
+| `skills/r2g-rtl2gds/knowledge/ingest_run.py` | Reads one `eda-runs/<project>/` directory, upserts a row into `runs.sqlite`, writes any failure events. Idempotent. |
+| `skills/r2g-rtl2gds/knowledge/learn_heuristics.py` | Rebuilds `knowledge/heuristics.json` from `runs.sqlite`. Pure derivation, no network. |
+| `skills/r2g-rtl2gds/knowledge/query_knowledge.py` | Read-only CLI + importable API (`get_family_heuristics`). Consumed by `suggest_config.py` and the agent. |
+| `skills/r2g-rtl2gds/knowledge/mine_rules.py` | Scans `failure_events` for repeated signatures and writes `knowledge/failure_candidates.json` as a review queue. |
 | `skills/r2g-rtl2gds/tests/__init__.py` | Empty, marks `tests` as a package. |
 | `skills/r2g-rtl2gds/tests/conftest.py` | Adds `scripts/` to `sys.path`; shared fixtures for a tmp skill root with a seeded `families.json`. |
 | `skills/r2g-rtl2gds/tests/fixtures/sample_run_success/...` | Minimal `eda-runs/<project>` skeleton for a clean aes128_core pass. |
@@ -50,8 +50,8 @@
 
 | Path | Change |
 |---|---|
-| `skills/r2g-rtl2gds/scripts/suggest_config.py` | Load `knowledge/heuristics.json` via `query_knowledge.get_family_heuristics`. When a match exists, override `CORE_UTILIZATION` / `PLACE_DENSITY_LB_ADDON` with learned values and push an `explanations` note citing the sample size. Otherwise behave exactly as today. |
-| `skills/r2g-rtl2gds/SKILL.md` | Add a new numbered workflow step **"13. Ingest Run"** after Reports; document that `scripts/ingest_run.py` must run after every successful *or* failed flow to feed the store. Add a short subsection under "Workflow" explaining `heuristics.json`. |
+| `skills/r2g-rtl2gds/knowledge/suggest_config.py` | Load `knowledge/heuristics.json` via `query_knowledge.get_family_heuristics`. When a match exists, override `CORE_UTILIZATION` / `PLACE_DENSITY_LB_ADDON` with learned values and push an `explanations` note citing the sample size. Otherwise behave exactly as today. |
+| `skills/r2g-rtl2gds/SKILL.md` | Add a new numbered workflow step **"13. Ingest Run"** after Reports; document that `knowledge/ingest_run.py` must run after every successful *or* failed flow to feed the store. Add a short subsection under "Workflow" explaining `heuristics.json`. |
 | `CLAUDE.md` (project-level) | Append the 4 new scripts to the Script Inventory table; add a "Knowledge Store" subsection under "Project Layout" describing `skills/r2g-rtl2gds/knowledge/`. |
 
 ---
@@ -63,7 +63,7 @@
 - Create: `skills/r2g-rtl2gds/knowledge/schema.sql`
 - Create: `skills/r2g-rtl2gds/knowledge/families.json`
 - Create: `skills/r2g-rtl2gds/knowledge/.gitkeep`
-- Create: `skills/r2g-rtl2gds/scripts/knowledge_db.py`
+- Create: `skills/r2g-rtl2gds/knowledge/knowledge_db.py`
 - Create: `skills/r2g-rtl2gds/tests/__init__.py`
 - Create: `skills/r2g-rtl2gds/tests/conftest.py`
 - Create: `skills/r2g-rtl2gds/tests/test_knowledge_db.py`
@@ -72,7 +72,7 @@
 
 ```sql
 -- r2g-rtl2gds knowledge store schema. DO NOT edit at runtime —
--- all writes go through scripts/knowledge_db.py::ensure_schema.
+-- all writes go through knowledge/knowledge_db.py::ensure_schema.
 
 CREATE TABLE IF NOT EXISTS runs (
     run_id                  TEXT PRIMARY KEY,
@@ -162,11 +162,11 @@ the input to `suggest_config.py` and `failure-patterns.md` review.
 
 | File | Producer | Consumer |
 |---|---|---|
-| `schema.sql` | hand-edited | `scripts/knowledge_db.py` at `ensure_schema` time |
-| `families.json` | hand-edited seed; append as new designs ship | `scripts/knowledge_db.py::infer_family` |
-| `runs.sqlite` | `scripts/ingest_run.py` (one row per ingested run) | `learn_heuristics.py`, `mine_rules.py`, `query_knowledge.py` |
-| `heuristics.json` | `scripts/learn_heuristics.py` | `suggest_config.py`, agent, dashboard |
-| `failure_candidates.json` | `scripts/mine_rules.py` | human reviewer → `references/failure-patterns.md` |
+| `schema.sql` | hand-edited | `knowledge/knowledge_db.py` at `ensure_schema` time |
+| `families.json` | hand-edited seed; append as new designs ship | `knowledge/knowledge_db.py::infer_family` |
+| `runs.sqlite` | `knowledge/ingest_run.py` (one row per ingested run) | `learn_heuristics.py`, `mine_rules.py`, `query_knowledge.py` |
+| `heuristics.json` | `knowledge/learn_heuristics.py` | `suggest_config.py`, agent, dashboard |
+| `failure_candidates.json` | `knowledge/mine_rules.py` | human reviewer → `references/failure-patterns.md` |
 
 ## Loop
 
@@ -292,7 +292,7 @@ cd /data1/shenshan/agent_with_openroad && \
 
 Expected: **all 5 tests FAIL** with `ModuleNotFoundError: No module named 'knowledge_db'`.
 
-- [ ] **Step 1.9: Implement `skills/r2g-rtl2gds/scripts/knowledge_db.py`**
+- [ ] **Step 1.9: Implement `skills/r2g-rtl2gds/knowledge/knowledge_db.py`**
 
 ```python
 #!/usr/bin/env python3
@@ -371,7 +371,7 @@ Log: `Task 1 complete: knowledge-store scaffolding in place.`
 ## Task 2: `ingest_run.py` — read structured artifacts into `runs.sqlite`
 
 **Files:**
-- Create: `skills/r2g-rtl2gds/scripts/ingest_run.py`
+- Create: `skills/r2g-rtl2gds/knowledge/ingest_run.py`
 - Create: `skills/r2g-rtl2gds/tests/fixtures/sample_run_success/` (tree below)
 - Create: `skills/r2g-rtl2gds/tests/fixtures/sample_run_fail_pdn/` (tree below)
 - Create: `skills/r2g-rtl2gds/tests/test_ingest_run.py`
@@ -396,7 +396,7 @@ export ABC_AREA = 1
 create_clock -name core_clock -period 4.0 [get_ports clk]
 ```
 
-`reports/ppa.json` (must match the nested shape that `scripts/extract_ppa.py` actually emits — see `extract_ppa.py:152-249`):
+`reports/ppa.json` (must match the nested shape that `scripts/extract/extract_ppa.py` actually emits — see `extract_ppa.py:152-249`):
 ```json
 {
   "summary": {
@@ -621,7 +621,7 @@ cd /data1/shenshan/agent_with_openroad && \
 
 Expected: **FAIL** with `ModuleNotFoundError: No module named 'ingest_run'`.
 
-- [ ] **Step 2.5: Implement `skills/r2g-rtl2gds/scripts/ingest_run.py`**
+- [ ] **Step 2.5: Implement `skills/r2g-rtl2gds/knowledge/ingest_run.py`**
 
 ```python
 #!/usr/bin/env python3
@@ -930,7 +930,7 @@ Log: `Task 2 complete: ingest_run.py + success/fail fixtures.`
 ## Task 3: `learn_heuristics.py` — derive `heuristics.json` from runs.sqlite
 
 **Files:**
-- Create: `skills/r2g-rtl2gds/scripts/learn_heuristics.py`
+- Create: `skills/r2g-rtl2gds/knowledge/learn_heuristics.py`
 - Create: `skills/r2g-rtl2gds/tests/test_learn_heuristics.py`
 
 - [ ] **Step 3.1: Write the failing test**
@@ -1031,7 +1031,7 @@ cd /data1/shenshan/agent_with_openroad && \
 
 Expected: **FAIL** with `ModuleNotFoundError: No module named 'learn_heuristics'`.
 
-- [ ] **Step 3.3: Implement `skills/r2g-rtl2gds/scripts/learn_heuristics.py`**
+- [ ] **Step 3.3: Implement `skills/r2g-rtl2gds/knowledge/learn_heuristics.py`**
 
 ```python
 #!/usr/bin/env python3
@@ -1195,7 +1195,7 @@ Log: `Task 3 complete: learn_heuristics.py derives family/platform bounds.`
 ## Task 4: `query_knowledge.py` — read API consumed by other scripts
 
 **Files:**
-- Create: `skills/r2g-rtl2gds/scripts/query_knowledge.py`
+- Create: `skills/r2g-rtl2gds/knowledge/query_knowledge.py`
 - Create: `skills/r2g-rtl2gds/tests/test_query_knowledge.py`
 
 - [ ] **Step 4.1: Write the failing test**
@@ -1263,7 +1263,7 @@ cd /data1/shenshan/agent_with_openroad && \
 
 Expected: **FAIL** with `ModuleNotFoundError`.
 
-- [ ] **Step 4.3: Implement `skills/r2g-rtl2gds/scripts/query_knowledge.py`**
+- [ ] **Step 4.3: Implement `skills/r2g-rtl2gds/knowledge/query_knowledge.py`**
 
 ```python
 #!/usr/bin/env python3
@@ -1378,7 +1378,7 @@ Log: `Task 4 complete: query_knowledge.py read API.`
 ## Task 5: `mine_rules.py` — failure-signature review queue
 
 **Files:**
-- Create: `skills/r2g-rtl2gds/scripts/mine_rules.py`
+- Create: `skills/r2g-rtl2gds/knowledge/mine_rules.py`
 - Create: `skills/r2g-rtl2gds/tests/test_mine_rules.py`
 
 - [ ] **Step 5.1: Write the failing test**
@@ -1461,7 +1461,7 @@ cd /data1/shenshan/agent_with_openroad && \
 
 Expected: **FAIL** with `ModuleNotFoundError`.
 
-- [ ] **Step 5.3: Implement `skills/r2g-rtl2gds/scripts/mine_rules.py`**
+- [ ] **Step 5.3: Implement `skills/r2g-rtl2gds/knowledge/mine_rules.py`**
 
 ```python
 #!/usr/bin/env python3
@@ -1599,7 +1599,7 @@ Log: `Task 5 complete: mine_rules.py review queue.`
 ## Task 6: Integrate learned heuristics into `suggest_config.py`
 
 **Files:**
-- Modify: `skills/r2g-rtl2gds/scripts/suggest_config.py`
+- Modify: `skills/r2g-rtl2gds/knowledge/suggest_config.py`
 - Create: `skills/r2g-rtl2gds/tests/test_suggest_config_integration.py`
 
 - [ ] **Step 6.1: Write the failing integration test**
@@ -1820,13 +1820,13 @@ Expected: **all ≥15 tests PASS** (5 in test_knowledge_db + 3 in test_ingest_ru
 cd /data1/shenshan/agent_with_openroad && \
   rm -f skills/r2g-rtl2gds/knowledge/runs.sqlite \
          skills/r2g-rtl2gds/knowledge/heuristics.json && \
-  python3 skills/r2g-rtl2gds/scripts/ingest_run.py \
+  python3 skills/r2g-rtl2gds/knowledge/ingest_run.py \
     skills/r2g-rtl2gds/tests/fixtures/sample_run_success && \
-  python3 skills/r2g-rtl2gds/scripts/ingest_run.py \
+  python3 skills/r2g-rtl2gds/knowledge/ingest_run.py \
     skills/r2g-rtl2gds/tests/fixtures/sample_run_fail_pdn && \
-  python3 skills/r2g-rtl2gds/scripts/learn_heuristics.py && \
-  python3 skills/r2g-rtl2gds/scripts/query_knowledge.py list && \
-  python3 skills/r2g-rtl2gds/scripts/mine_rules.py --min-occurrences 1 --min-distinct-designs 1 && \
+  python3 skills/r2g-rtl2gds/knowledge/learn_heuristics.py && \
+  python3 skills/r2g-rtl2gds/knowledge/query_knowledge.py list && \
+  python3 skills/r2g-rtl2gds/knowledge/mine_rules.py --min-occurrences 1 --min-distinct-designs 1 && \
   rm -f skills/r2g-rtl2gds/knowledge/runs.sqlite \
          skills/r2g-rtl2gds/knowledge/heuristics.json \
          skills/r2g-rtl2gds/knowledge/failure_candidates.json
@@ -1858,7 +1858,7 @@ After the existing Reports section, insert:
 After **every** flow — successful, failed, or partial — run:
 
 ```bash
-python3 skills/r2g-rtl2gds/scripts/ingest_run.py eda-runs/<project>
+python3 skills/r2g-rtl2gds/knowledge/ingest_run.py eda-runs/<project>
 ```
 
 This reads the structured JSON artifacts produced by the extraction scripts
@@ -1868,8 +1868,8 @@ parses raw ORFS logs.
 Then rebuild derived artifacts:
 
 ```bash
-python3 skills/r2g-rtl2gds/scripts/learn_heuristics.py
-python3 skills/r2g-rtl2gds/scripts/mine_rules.py
+python3 skills/r2g-rtl2gds/knowledge/learn_heuristics.py
+python3 skills/r2g-rtl2gds/knowledge/mine_rules.py
 ```
 
 - `knowledge/heuristics.json` is consumed automatically by
@@ -1898,9 +1898,9 @@ skills/r2g-rtl2gds/knowledge/
   failure_candidates.json  # review queue for new failure-patterns.md entries (generated)
 ```
 
-Populated by `scripts/ingest_run.py`, derived by `scripts/learn_heuristics.py`
-and `scripts/mine_rules.py`, consumed by `scripts/suggest_config.py` and
-`scripts/query_knowledge.py`. Phase 2 only — no version DAG yet (deferred).
+Populated by `knowledge/ingest_run.py`, derived by `knowledge/learn_heuristics.py`
+and `knowledge/mine_rules.py`, consumed by `knowledge/suggest_config.py` and
+`knowledge/query_knowledge.py`. Phase 2 only — no version DAG yet (deferred).
 ```
 
 - [ ] **Step 7.3: Append the 4 new scripts to the Script Inventory tables in `CLAUDE.md`**

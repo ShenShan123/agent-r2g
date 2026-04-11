@@ -14,7 +14,7 @@ def main():
         sys.exit(1)
 
     design_name = sys.argv[1]
-    base_dir = Path(sys.argv[2]) if len(sys.argv) > 2 else Path("eda-runs")
+    base_dir = Path(sys.argv[2]) if len(sys.argv) > 2 else Path("design_cases")
     root = base_dir / design_name
     root.mkdir(parents=True, exist_ok=True)
 

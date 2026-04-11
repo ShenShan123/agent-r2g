@@ -17,7 +17,7 @@
 ### Task 1: Fix `run_synth.sh` — Capture Yosys Exit Code
 
 **Files:**
-- Modify: `skills/r2g-rtl2gds/scripts/run_synth.sh`
+- Modify: `skills/r2g-rtl2gds/scripts/flow/run_synth.sh`
 
 - [ ] **Step 1: Fix exit code capture and Tcl quoting**
 
@@ -67,14 +67,14 @@ exit $SYNTH_STATUS
 
 - [ ] **Step 2: Verify script is executable**
 
-Run: `chmod +x skills/r2g-rtl2gds/scripts/run_synth.sh`
+Run: `chmod +x skills/r2g-rtl2gds/scripts/flow/run_synth.sh`
 
 ---
 
 ### Task 2: Fix `run_sim.sh` — Remove Silent Error Suppression
 
 **Files:**
-- Modify: `skills/r2g-rtl2gds/scripts/run_sim.sh`
+- Modify: `skills/r2g-rtl2gds/scripts/flow/run_sim.sh`
 
 - [ ] **Step 1: Fix error propagation**
 
@@ -139,7 +139,7 @@ exit 0
 ### Task 3: Fix `run_lint.sh` — Conditional `lint_ok` Marker
 
 **Files:**
-- Modify: `skills/r2g-rtl2gds/scripts/run_lint.sh`
+- Modify: `skills/r2g-rtl2gds/scripts/flow/run_lint.sh`
 
 - [ ] **Step 1: Fix lint_ok to be conditional on linter success**
 
@@ -184,7 +184,7 @@ exit $LINT_STATUS
 ### Task 4: Add Clock Port Validation to `validate_config.py`
 
 **Files:**
-- Modify: `skills/r2g-rtl2gds/scripts/validate_config.py`
+- Modify: `skills/r2g-rtl2gds/scripts/project/validate_config.py`
 
 - [ ] **Step 1: Add SDC clock port cross-check function**
 
@@ -306,7 +306,7 @@ In the `validate()` function, add before the return statement (before `return {"
 ### Task 5: Add Unconstrained Timing + Routing Congestion Detection to `build_diagnosis.py`
 
 **Files:**
-- Modify: `skills/r2g-rtl2gds/scripts/build_diagnosis.py`
+- Modify: `skills/r2g-rtl2gds/scripts/reports/build_diagnosis.py`
 
 - [ ] **Step 1: Refactor to return ALL issues (not just first match)**
 
@@ -380,9 +380,9 @@ Change `detect_issue(full_text)` to `detect_issues(full_text, project)`. Write a
 ### Task 6: Fix Tcl Quoting in Shell Scripts
 
 **Files:**
-- Modify: `skills/r2g-rtl2gds/scripts/run_magic_drc.sh` (lines 91-119)
-- Modify: `skills/r2g-rtl2gds/scripts/run_netgen_lvs.sh` (lines 131-141)
-- Modify: `skills/r2g-rtl2gds/scripts/run_rcx.sh` (lines 92-106)
+- Modify: `skills/r2g-rtl2gds/scripts/flow/run_magic_drc.sh` (lines 91-119)
+- Modify: `skills/r2g-rtl2gds/scripts/flow/run_netgen_lvs.sh` (lines 131-141)
+- Modify: `skills/r2g-rtl2gds/scripts/flow/run_rcx.sh` (lines 92-106)
 
 - [ ] **Step 1: Fix `run_magic_drc.sh` Tcl heredoc**
 
@@ -463,7 +463,7 @@ grep "clk_port_name" eda-runs/{ac97_ctrl,i2c_verilog,mem_ctrl,simple_spi_top}_cf
 ### Task 8: Refactor `run_orfs.sh` for Stage-by-Stage Execution
 
 **Files:**
-- Modify: `skills/r2g-rtl2gds/scripts/run_orfs.sh`
+- Modify: `skills/r2g-rtl2gds/scripts/flow/run_orfs.sh`
 
 - [ ] **Step 1: Add stage-by-stage execution with checkpoints**
 
@@ -551,11 +551,11 @@ fi
 ### Task 9: Add Timeouts to All Signoff & Frontend Scripts
 
 **Files:**
-- Modify: `skills/r2g-rtl2gds/scripts/run_drc.sh`
-- Modify: `skills/r2g-rtl2gds/scripts/run_lvs.sh`
-- Modify: `skills/r2g-rtl2gds/scripts/run_rcx.sh`
-- Modify: `skills/r2g-rtl2gds/scripts/run_magic_drc.sh`
-- Modify: `skills/r2g-rtl2gds/scripts/run_netgen_lvs.sh`
+- Modify: `skills/r2g-rtl2gds/scripts/flow/run_drc.sh`
+- Modify: `skills/r2g-rtl2gds/scripts/flow/run_lvs.sh`
+- Modify: `skills/r2g-rtl2gds/scripts/flow/run_rcx.sh`
+- Modify: `skills/r2g-rtl2gds/scripts/flow/run_magic_drc.sh`
+- Modify: `skills/r2g-rtl2gds/scripts/flow/run_netgen_lvs.sh`
 
 - [ ] **Step 1: Add timeout to `run_drc.sh`**
 
@@ -597,7 +597,7 @@ Wrap both Magic extraction (line 144) and Netgen comparison (line 158) with `NET
 ### Task 10: Create `suggest_config.py` — Design-Aware Parameter Recommender
 
 **Files:**
-- Create: `skills/r2g-rtl2gds/scripts/suggest_config.py`
+- Create: `skills/r2g-rtl2gds/knowledge/suggest_config.py`
 
 - [ ] **Step 1: Implement parameter recommender**
 
@@ -623,7 +623,7 @@ Logic:
 - [ ] **Step 2: Make executable**
 
 ```bash
-chmod +x skills/r2g-rtl2gds/scripts/suggest_config.py
+chmod +x skills/r2g-rtl2gds/knowledge/suggest_config.py
 ```
 
 ---
@@ -710,7 +710,7 @@ set_output_delay [expr $clk_period * $clk_io_pct] -clock $clk_name [all_outputs]
 ### Task 13: Add Congestion Extraction to `extract_progress.py`
 
 **Files:**
-- Modify: `skills/r2g-rtl2gds/scripts/extract_progress.py`
+- Modify: `skills/r2g-rtl2gds/scripts/extract/extract_progress.py`
 
 - [ ] **Step 1: Add per-stage timing extraction from `stage_log.jsonl`**
 
@@ -768,7 +768,7 @@ Include congestion data in the output JSON.
 ### Task 14: Enhance Dashboard with Power Breakdown, Hold Violations, and Clock Skew
 
 **Files:**
-- Modify: `skills/r2g-rtl2gds/scripts/generate_multi_project_dashboard.py`
+- Modify: `skills/r2g-rtl2gds/scripts/dashboard/generate_multi_project_dashboard.py`
 
 - [ ] **Step 1: Add timing quality indicators to PPA table**
 

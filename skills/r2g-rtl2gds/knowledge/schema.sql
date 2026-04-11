@@ -1,5 +1,5 @@
 -- r2g-rtl2gds knowledge store schema. DO NOT edit at runtime —
--- all writes go through scripts/knowledge_db.py::ensure_schema.
+-- all writes go through knowledge/knowledge_db.py::ensure_schema.
 
 CREATE TABLE IF NOT EXISTS runs (
     run_id                  TEXT PRIMARY KEY,

@@ -165,7 +165,7 @@ if [[ $MAKE_STATUS -ne 0 ]]; then
     echo "" | tee -a "$BACKEND_DIR/flow.log"
     echo "HINT: Routing congestion detected. Try re-running with:" | tee -a "$BACKEND_DIR/flow.log"
     echo "  1. Add to config.mk: export ROUTING_LAYER_ADJUSTMENT = 0.10" | tee -a "$BACKEND_DIR/flow.log"
-    echo "  2. Resume: FROM_STAGE=route scripts/run_orfs.sh $PROJECT_DIR $PLATFORM" | tee -a "$BACKEND_DIR/flow.log"
+    echo "  2. Resume: FROM_STAGE=route scripts/flow/run_orfs.sh $PROJECT_DIR $PLATFORM" | tee -a "$BACKEND_DIR/flow.log"
   elif [[ "$FAILED_STAGE" == "floorplan" ]]; then
     if grep -q "PDN-0179\|Insufficient width to add straps\|Unable to repair all channels" "$BACKEND_DIR/flow.log" 2>/dev/null; then
       echo "" | tee -a "$BACKEND_DIR/flow.log"

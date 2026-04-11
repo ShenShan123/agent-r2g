@@ -173,8 +173,8 @@ Multiple project configs sharing the same `DESIGN_NAME` use a shared `FLOW_VARIA
 Large designs (swerv, bp_multi_top, tinyRocket) can take hours for PnR. The process may have been killed by an OOM killer, the ORFS_TIMEOUT limit, or resource limits.
 
 **Action:**
-- Increase timeout: `ORFS_TIMEOUT=14400 scripts/run_orfs.sh ...` (4 hours)
-- Limit CPU usage: `ORFS_MAX_CPUS=4 scripts/run_orfs.sh ...` (prevent thermal/resource issues)
+- Increase timeout: `ORFS_TIMEOUT=14400 scripts/flow/run_orfs.sh ...` (4 hours)
+- Limit CPU usage: `ORFS_MAX_CPUS=4 scripts/flow/run_orfs.sh ...` (prevent thermal/resource issues)
 - For faster convergence, add to config.mk:
   - `export SKIP_LAST_GASP = 1` (skip last-gasp optimization)
   - `export SKIP_CTS_REPAIR_TIMING = 1` (skip CTS timing repair)
@@ -224,12 +224,12 @@ Yosys crash, typically caused by very large designs or specific RTL constructs t
 
 ### DRC Violations
 - **Symptom:** `X violations found` in DRC report; `6_drc_count.rpt` shows non-zero count
-- **Diagnosis:** Run `scripts/extract_drc.py` to get per-category violation breakdown from `6_drc.lyrdb`
+- **Diagnosis:** Run `scripts/extract/extract_drc.py` to get per-category violation breakdown from `6_drc.lyrdb`
 - **Common causes:**
   - Routing density too high → reduce `PLACE_DENSITY_LB_ADDON` or increase die area
   - Insufficient spacing → increase `DIE_AREA`/`CORE_AREA`
   - Metal width violations → may indicate congestion, try lower utilization
-- **Tool:** `scripts/run_drc.sh` → `scripts/extract_drc.py` for detailed category breakdown
+- **Tool:** `scripts/flow/run_drc.sh` → `scripts/extract/extract_drc.py` for detailed category breakdown
 
 ### LVS Mismatch
 - **Symptom:** `ERROR : Netlists don't match` in LVS log; mismatches in `6_lvs.lvsdb`
@@ -244,7 +244,7 @@ Yosys crash, typically caused by very large designs or specific RTL constructs t
   - **Unused cell pins:** design doesn't connect all CDL pins → add `schematic.purge` and `schematic.purge_nets`
   - Extra devices from fill/tap cells
   - Port name mismatches between GDS and CDL netlist
-- **Tool:** `scripts/run_lvs.sh` → `scripts/extract_lvs.py`
+- **Tool:** `scripts/flow/run_lvs.sh` → `scripts/extract/extract_lvs.py`
 
 ### LVS Skipped (No Rules)
 - **Symptom:** `LVS is not supported on this platform` or `lvs_result.json` shows status "skipped"
@@ -258,7 +258,7 @@ Yosys crash, typically caused by very large designs or specific RTL constructs t
   - sky130A tech file missing at `/opt/pdks/sky130A/libs.tech/magic/sky130A.tech`
   - Platform not supported (Magic DRC only works for sky130hd/sky130hs)
   - GDS file corrupted or from incomplete backend run
-- **Tool:** `scripts/run_magic_drc.sh`
+- **Tool:** `scripts/flow/run_magic_drc.sh`
 
 ### Netgen LVS Failure
 - **Symptom:** Magic SPICE extraction fails or Netgen comparison fails
@@ -267,7 +267,7 @@ Yosys crash, typically caused by very large designs or specific RTL constructs t
   - No Verilog netlist found (6_final.v or synth_output.v)
   - Platform not supported (Netgen LVS only works for sky130hd/sky130hs)
 - **Diagnosis:** Check `lvs/magic_extract.log` for extraction errors, `lvs/netgen_lvs.log` for comparison errors
-- **Tool:** `scripts/run_netgen_lvs.sh`
+- **Tool:** `scripts/flow/run_netgen_lvs.sh`
 
 ### RCX Extraction Failure
 - **Symptom:** `extract_parasitics` error in OpenROAD; no SPEF output
@@ -277,7 +277,7 @@ Yosys crash, typically caused by very large designs or specific RTL constructs t
   - `6_final.odb` is invalid or corrupted
   - Backend did not complete successfully
 - **Fix:** Verify platform has `rcx_patterns.rules`. Ensure `6_final.odb` exists. Re-run backend if needed.
-- **Tool:** `scripts/run_rcx.sh` → `scripts/extract_rcx.py`
+- **Tool:** `scripts/flow/run_rcx.sh` → `scripts/extract/extract_rcx.py`
 
 ### LVS CDL_FILE Override by Platform Config
 

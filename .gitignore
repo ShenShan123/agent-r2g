@@ -208,10 +208,8 @@ __marimo__/
 
 # --- Project-specific: r2g-rtl2gds / OpenROAD ---
 
-# EDA run data (huge — user-requested exclusion)
+# EDA run data (huge — never commit)
 design_cases/
-eda-runs
-validation_*/
 
 # ORFS / flow artifacts
 *.jsonl

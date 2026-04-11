@@ -3,7 +3,7 @@
 ## Phase 0: Environment Check
 
 1. Source the environment: `source /opt/openroad_tools_env.sh`
-2. Run `scripts/check_env.sh`.
+2. Run `scripts/flow/check_env.sh`.
 3. Verify at minimum that `python3`, `yosys`, `iverilog`/`verilator`, `vvp`, and `openroad` are available.
 4. Verify ORFS exists at `/opt/EDA4AI/OpenROAD-flow-scripts/flow/`.
 5. If any tools are missing, stop early and report exactly which ones are absent.
@@ -37,16 +37,16 @@
 
 1. Build `constraints/config.mk` and `constraints/constraint.sdc` for ORFS.
 2. Use `assets/config-template.mk` and `assets/constraint-template.sdc` as starting points.
-3. Run `scripts/run_orfs.sh <project-dir> [platform]`.
+3. Run `scripts/flow/run_orfs.sh <project-dir> [platform]`.
 4. Default platform is `nangate45`.
-5. Collect results with `scripts/collect_orfs_results.py`.
+5. Collect results with `scripts/reports/collect_orfs_results.py`.
 
 ## Phase 5b: Timing Gate (Tiered WNS + TNS)
 
 After backend completes, extract PPA and run the timing gate:
 
-1. Run `scripts/extract_ppa.py <project-dir> reports/ppa.json`.
-2. Run `scripts/check_timing.py <project-dir>`.
+1. Run `scripts/extract/extract_ppa.py <project-dir> reports/ppa.json`.
+2. Run `scripts/reports/check_timing.py <project-dir>`.
 3. The script classifies WNS and TNS independently and takes the **worse** as the combined tier.
 4. Read `reports/timing_check.json` and act on the `tier` field:
    - **clean** (WNS >= 0, TNS >= 0): Proceed to Phase 6.
@@ -74,26 +74,26 @@ After a successful backend run, run signoff checks in order:
 
 ### 6a. DRC (Design Rule Check)
 ```bash
-scripts/run_drc.sh <project-dir> [platform]
+scripts/flow/run_drc.sh <project-dir> [platform]
 ```
 - Uses ORFS `make drc` target → KLayout with platform `.lydrc` rules
 - Outputs: `drc/6_drc.lyrdb` (violation database, XML), `drc/6_drc_count.rpt` (count), `drc/6_drc.log`
-- Extract: `scripts/extract_drc.py <project-root> reports/drc.json`
+- Extract: `scripts/extract/extract_drc.py <project-root> reports/drc.json`
 - Result JSON contains: `status` (clean/fail), `total_violations`, `categories` (per-rule breakdown)
 
 ### 6b. LVS (Layout vs Schematic)
 ```bash
-scripts/run_lvs.sh <project-dir> [platform]
+scripts/flow/run_lvs.sh <project-dir> [platform]
 ```
 - Uses ORFS `make lvs` target → KLayout with platform `.lylvs` rules + CDL netlist
 - **Gracefully skips** if platform has no LVS rules (e.g., asap7)
 - Outputs: `lvs/6_lvs.lvsdb`, `lvs/6_lvs.log`, `lvs/6_final.cdl`
-- Extract: `scripts/extract_lvs.py <project-root> reports/lvs.json`
+- Extract: `scripts/extract/extract_lvs.py <project-root> reports/lvs.json`
 - Result JSON contains: `status` (clean/fail/skipped), `mismatch_count`, `lvsdb` details
 
 ### 6c. RCX (Parasitic Extraction via OpenRCX)
 ```bash
-scripts/run_rcx.sh <project-dir> [platform]
+scripts/flow/run_rcx.sh <project-dir> [platform]
 ```
 - Generates Tcl script (`rcx/run_rcx.tcl`) with OpenRCX commands:
   - `read_db` → load `6_final.odb`
@@ -102,7 +102,7 @@ scripts/run_rcx.sh <project-dir> [platform]
   - `write_spef` → output SPEF file
 - Runs via `openroad -no_splash -exit rcx/run_rcx.tcl`
 - Outputs: `rcx/6_final.spef`, `rcx/rcx.log`, `rcx/run_rcx.tcl`
-- Extract: `scripts/extract_rcx.py <project-root> reports/rcx.json`
+- Extract: `scripts/extract/extract_rcx.py <project-root> reports/rcx.json`
 - Result JSON contains: `status` (complete/empty/skipped), `net_count`, `total_cap_ff`, `total_res_ohm`, SPEF header metadata
 
 ### Platform Support
@@ -123,12 +123,12 @@ Note: `extract_ppa.py` already ran in Phase 5b. Re-run only if backend was re-ru
 
 ```bash
 # PPA was already extracted in Phase 5b; re-extract only if backend was re-run:
-# scripts/extract_ppa.py <project-root> reports/ppa.json
-scripts/extract_drc.py <project-root> reports/drc.json
-scripts/extract_lvs.py <project-root> reports/lvs.json
-scripts/extract_rcx.py <project-root> reports/rcx.json
-scripts/extract_progress.py <project-root> reports/progress.json
-scripts/build_diagnosis.py <project-root> reports/diagnosis.json
+# scripts/extract/extract_ppa.py <project-root> reports/ppa.json
+scripts/extract/extract_drc.py <project-root> reports/drc.json
+scripts/extract/extract_lvs.py <project-root> reports/lvs.json
+scripts/extract/extract_rcx.py <project-root> reports/rcx.json
+scripts/extract/extract_progress.py <project-root> reports/progress.json
+scripts/reports/build_diagnosis.py <project-root> reports/diagnosis.json
 ```
 
 ## Phase 8: Summary & Dashboard
@@ -147,6 +147,6 @@ Always produce the following:
 
 Generate and serve dashboard:
 ```bash
-scripts/generate_multi_project_dashboard.py <eda-runs-dir>
-scripts/serve_multi_project_dashboard.py 8765 <eda-runs-dir>
+scripts/dashboard/generate_multi_project_dashboard.py <design-cases-dir>
+scripts/dashboard/serve_multi_project_dashboard.py 8765 <design-cases-dir>
 ```

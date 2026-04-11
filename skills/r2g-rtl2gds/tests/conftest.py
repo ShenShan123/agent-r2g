@@ -7,11 +7,12 @@ from pathlib import Path
 
 import pytest
 
-# Make scripts/ importable as plain modules.
+# Make knowledge/ importable as plain modules — the knowledge store is a
+# self-contained subsystem (data + code) at skills/r2g-rtl2gds/knowledge/.
 SKILL_ROOT = Path(__file__).resolve().parents[1]
-SCRIPTS_DIR = SKILL_ROOT / "scripts"
-if str(SCRIPTS_DIR) not in sys.path:
-    sys.path.insert(0, str(SCRIPTS_DIR))
+KNOWLEDGE_DIR = SKILL_ROOT / "knowledge"
+if str(KNOWLEDGE_DIR) not in sys.path:
+    sys.path.insert(0, str(KNOWLEDGE_DIR))
 
 
 @pytest.fixture

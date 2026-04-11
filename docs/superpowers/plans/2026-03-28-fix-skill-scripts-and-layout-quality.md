@@ -16,9 +16,9 @@
 
 | File | Responsibility | Action |
 |------|---------------|--------|
-| `skills/r2g-rtl2gds/scripts/extract_ppa.py` | Parse PPA metrics from ORFS reports | Fix: read timing/power from `6_report.json` instead of regex on flow.log |
-| `skills/r2g-rtl2gds/scripts/extract_lvs.py` | Parse LVS results from KLayout lvsdb | Fix: handle non-XML lvsdb format, fix contraction matching |
-| `skills/r2g-rtl2gds/scripts/build_diagnosis.py` | Detect issues from flow logs | Fix: eliminate false positives in pattern matching |
+| `skills/r2g-rtl2gds/scripts/extract/extract_ppa.py` | Parse PPA metrics from ORFS reports | Fix: read timing/power from `6_report.json` instead of regex on flow.log |
+| `skills/r2g-rtl2gds/scripts/extract/extract_lvs.py` | Parse LVS results from KLayout lvsdb | Fix: handle non-XML lvsdb format, fix contraction matching |
+| `skills/r2g-rtl2gds/scripts/reports/build_diagnosis.py` | Detect issues from flow logs | Fix: eliminate false positives in pattern matching |
 | `skills/r2g-rtl2gds/references/failure-patterns.md` | Document known failure modes | Update: add antenna DRC, hold violations, IR-drop, unconstrained timing |
 
 Temporary test designs (one representative per family, in `eda-runs/`):
@@ -42,7 +42,7 @@ Temporary test designs (one representative per family, in `eda-runs/`):
 2. Log check (line 71) looks for `"netlists do not match"` but KLayout uses the contraction `"don't match"`.
 
 **Files:**
-- Modify: `skills/r2g-rtl2gds/scripts/extract_lvs.py`
+- Modify: `skills/r2g-rtl2gds/scripts/extract/extract_lvs.py`
 - Test data: `eda-runs/riscv32i_cfg1/lvs/6_lvs.log`, `eda-runs/riscv32i_cfg1/lvs/6_lvs.lvsdb`
 
 - [ ] **Step 1: Read current riscv32i LVS artifacts to confirm the bug**
@@ -128,7 +128,7 @@ else:
 
 ```bash
 cd /data/shenshan/agent_with_openroad
-python3 skills/r2g-rtl2gds/scripts/extract_lvs.py eda-runs/riscv32i_cfg1 /tmp/test_lvs.json
+python3 skills/r2g-rtl2gds/scripts/extract/extract_lvs.py eda-runs/riscv32i_cfg1 /tmp/test_lvs.json
 cat /tmp/test_lvs.json
 ```
 
@@ -137,7 +137,7 @@ Expected: `"status": "fail"` (not "clean").
 - [ ] **Step 6: Verify no regression on a known-clean design**
 
 ```bash
-python3 skills/r2g-rtl2gds/scripts/extract_lvs.py eda-runs/fifo_v3 /tmp/test_lvs_clean.json
+python3 skills/r2g-rtl2gds/scripts/extract/extract_lvs.py eda-runs/fifo_v3 /tmp/test_lvs_clean.json
 cat /tmp/test_lvs_clean.json
 ```
 
@@ -150,7 +150,7 @@ Expected: `"status": "clean"`.
 **Problem:** The regex `r'tns\s+([-\d.]+)'` on flow.log matches the ORFS command `-repair_tns 100` instead of the actual TNS value. Every design gets `setup_tns: 100.0`. The script already reads `6_report.json` for geometry but doesn't extract timing or power from it.
 
 **Files:**
-- Modify: `skills/r2g-rtl2gds/scripts/extract_ppa.py`
+- Modify: `skills/r2g-rtl2gds/scripts/extract/extract_ppa.py`
 - Test data: `eda-runs/swerv_cfg1/backend/` (latest RUN directory)
 
 - [ ] **Step 1: Check what timing/power keys exist in a real 6_report.json**
@@ -216,7 +216,7 @@ This should **replace** the flow.log-parsed values when `6_report.json` is avail
 - [ ] **Step 3: Verify against swerv_cfg1**
 
 ```bash
-python3 skills/r2g-rtl2gds/scripts/extract_ppa.py eda-runs/swerv_cfg1 /tmp/test_ppa.json
+python3 skills/r2g-rtl2gds/scripts/extract/extract_ppa.py eda-runs/swerv_cfg1 /tmp/test_ppa.json
 python3 -c "import json; d=json.load(open('/tmp/test_ppa.json')); print(json.dumps(d['summary']['timing'], indent=2)); print(json.dumps(d['summary']['power'], indent=2))"
 ```
 
@@ -225,7 +225,7 @@ Expected: `setup_tns` should NOT be 100.0. `hold_tns` should be approximately -0
 - [ ] **Step 4: Verify against a simple design (fifo_cfg1)**
 
 ```bash
-python3 skills/r2g-rtl2gds/scripts/extract_ppa.py eda-runs/fifo_cfg1 /tmp/test_ppa_fifo.json
+python3 skills/r2g-rtl2gds/scripts/extract/extract_ppa.py eda-runs/fifo_cfg1 /tmp/test_ppa_fifo.json
 python3 -c "import json; d=json.load(open('/tmp/test_ppa_fifo.json')); print(json.dumps(d['summary']['timing'], indent=2))"
 ```
 
@@ -240,7 +240,7 @@ Expected: `setup_tns` should be 0 or a small real value, not 100.0.
 2. `make_error` (72/348): matches `"make: ***"` from older failed runs when the latest run succeeded.
 
 **Files:**
-- Modify: `skills/r2g-rtl2gds/scripts/build_diagnosis.py`
+- Modify: `skills/r2g-rtl2gds/scripts/reports/build_diagnosis.py`
 - Test data: `eda-runs/fifo_cfg1/` (should detect DRC issue, not utilization overflow), `eda-runs/des_cfg1/` (should detect nothing — clean design)
 
 - [ ] **Step 1: Fix the utilization overflow check (line 65)**
@@ -322,7 +322,7 @@ if antenna_match and int(antenna_match.group(1)) > 0 and 'antenna' in lower:
 - [ ] **Step 5: Verify against fifo_cfg1**
 
 ```bash
-python3 skills/r2g-rtl2gds/scripts/build_diagnosis.py eda-runs/fifo_cfg1 /tmp/test_diag_fifo.json
+python3 skills/r2g-rtl2gds/scripts/reports/build_diagnosis.py eda-runs/fifo_cfg1 /tmp/test_diag_fifo.json
 cat /tmp/test_diag_fifo.json
 ```
 
@@ -331,7 +331,7 @@ Expected: Should NOT show `placement_utilization_overflow`. Should ideally show 
 - [ ] **Step 6: Verify against des_cfg1 (clean design)**
 
 ```bash
-python3 skills/r2g-rtl2gds/scripts/build_diagnosis.py eda-runs/des_cfg1 /tmp/test_diag_des.json
+python3 skills/r2g-rtl2gds/scripts/reports/build_diagnosis.py eda-runs/des_cfg1 /tmp/test_diag_des.json
 cat /tmp/test_diag_des.json
 ```
 
@@ -529,31 +529,31 @@ Document: which files need editing, which identifiers need renaming, what they s
 **Purpose:** After Tasks 1-3 verification (done via `/tmp/` in each task's own steps), update the actual `reports/` files in `eda-runs/` so the dashboard and other consumers see corrected data. This is NOT re-verification — it's the commit step for the report data.
 
 **Files:**
-- Run: `skills/r2g-rtl2gds/scripts/extract_lvs.py`
-- Run: `skills/r2g-rtl2gds/scripts/extract_ppa.py`
-- Run: `skills/r2g-rtl2gds/scripts/build_diagnosis.py`
+- Run: `skills/r2g-rtl2gds/scripts/extract/extract_lvs.py`
+- Run: `skills/r2g-rtl2gds/scripts/extract/extract_ppa.py`
+- Run: `skills/r2g-rtl2gds/scripts/reports/build_diagnosis.py`
 
 - [ ] **Step 1: Update LVS report for riscv32i_cfg1**
 
 ```bash
 cd /data/shenshan/agent_with_openroad
-python3 skills/r2g-rtl2gds/scripts/extract_lvs.py eda-runs/riscv32i_cfg1 eda-runs/riscv32i_cfg1/reports/lvs.json
+python3 skills/r2g-rtl2gds/scripts/extract/extract_lvs.py eda-runs/riscv32i_cfg1 eda-runs/riscv32i_cfg1/reports/lvs.json
 ```
 
 - [ ] **Step 2: Update PPA reports for swerv_cfg1 and fifo_cfg1**
 
 ```bash
-python3 skills/r2g-rtl2gds/scripts/extract_ppa.py eda-runs/swerv_cfg1 eda-runs/swerv_cfg1/reports/ppa.json
-python3 skills/r2g-rtl2gds/scripts/extract_ppa.py eda-runs/fifo_cfg1 eda-runs/fifo_cfg1/reports/ppa.json
+python3 skills/r2g-rtl2gds/scripts/extract/extract_ppa.py eda-runs/swerv_cfg1 eda-runs/swerv_cfg1/reports/ppa.json
+python3 skills/r2g-rtl2gds/scripts/extract/extract_ppa.py eda-runs/fifo_cfg1 eda-runs/fifo_cfg1/reports/ppa.json
 ```
 
 - [ ] **Step 3: Update diagnosis reports for des_cfg1, fifo_cfg1, swerv_cfg1, aes_cfg2**
 
 ```bash
-python3 skills/r2g-rtl2gds/scripts/build_diagnosis.py eda-runs/des_cfg1 eda-runs/des_cfg1/reports/diagnosis.json
-python3 skills/r2g-rtl2gds/scripts/build_diagnosis.py eda-runs/fifo_cfg1 eda-runs/fifo_cfg1/reports/diagnosis.json
-python3 skills/r2g-rtl2gds/scripts/build_diagnosis.py eda-runs/swerv_cfg1 eda-runs/swerv_cfg1/reports/diagnosis.json
-python3 skills/r2g-rtl2gds/scripts/build_diagnosis.py eda-runs/aes_cfg2 eda-runs/aes_cfg2/reports/diagnosis.json
+python3 skills/r2g-rtl2gds/scripts/reports/build_diagnosis.py eda-runs/des_cfg1 eda-runs/des_cfg1/reports/diagnosis.json
+python3 skills/r2g-rtl2gds/scripts/reports/build_diagnosis.py eda-runs/fifo_cfg1 eda-runs/fifo_cfg1/reports/diagnosis.json
+python3 skills/r2g-rtl2gds/scripts/reports/build_diagnosis.py eda-runs/swerv_cfg1 eda-runs/swerv_cfg1/reports/diagnosis.json
+python3 skills/r2g-rtl2gds/scripts/reports/build_diagnosis.py eda-runs/aes_cfg2 eda-runs/aes_cfg2/reports/diagnosis.json
 ```
 
 ---

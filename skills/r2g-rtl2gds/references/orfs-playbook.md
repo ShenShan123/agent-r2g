@@ -73,7 +73,7 @@ set_output_delay [expr $clk_period * $clk_io_pct] -clock $clk_name [all_outputs]
 
 ### Via Script (Recommended)
 ```bash
-scripts/run_orfs.sh <project-dir> [platform]
+scripts/flow/run_orfs.sh <project-dir> [platform]
 ```
 
 ### Manually
@@ -98,7 +98,7 @@ After a successful ORFS backend run, run signoff checks using the ORFS results i
 
 ### DRC (Design Rule Check)
 ```bash
-scripts/run_drc.sh <project-dir> [platform]
+scripts/flow/run_drc.sh <project-dir> [platform]
 # or manually:
 cd /opt/EDA4AI/OpenROAD-flow-scripts/flow
 make DESIGN_CONFIG=/path/to/config.mk drc
@@ -109,7 +109,7 @@ make DESIGN_CONFIG=/path/to/config.mk drc
 
 ### LVS (Layout vs Schematic)
 ```bash
-scripts/run_lvs.sh <project-dir> [platform]
+scripts/flow/run_lvs.sh <project-dir> [platform]
 # or manually:
 cd /opt/EDA4AI/OpenROAD-flow-scripts/flow
 make DESIGN_CONFIG=/path/to/config.mk lvs
@@ -121,7 +121,7 @@ make DESIGN_CONFIG=/path/to/config.mk lvs
 
 ### RCX (Parasitic Extraction)
 ```bash
-scripts/run_rcx.sh <project-dir> [platform]
+scripts/flow/run_rcx.sh <project-dir> [platform]
 ```
 - Does NOT use ORFS Makefile; runs OpenROAD directly
 - Generates `rcx/run_rcx.tcl` with commands:

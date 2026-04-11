@@ -46,7 +46,7 @@ Key paths:
 
 ### 2. Initialize a Project Directory
 
-- Create a run folder under `eda-runs/<design-name>/` using `scripts/init_project.py`.
+- Create a run folder under `design_cases/<design-name>/` using `scripts/project/init_project.py`.
 - The layout follows `references/workflow.md`.
 - Directories created: `input/`, `rtl/`, `tb/`, `constraints/`, `lint/`, `sim/`, `synth/`, `backend/`, `drc/`, `lvs/`, `rcx/`, `reports/`.
 
@@ -58,7 +58,7 @@ Key paths:
 
 ### 4. Run Validation in Strict Order
 
-1. Run `scripts/validate_config.py <project-dir>` before ORFS backend to catch config/RTL issues early.
+1. Run `scripts/project/validate_config.py <project-dir>` before ORFS backend to catch config/RTL issues early.
 2. Run lint/syntax checks before simulation.
 3. Run simulation before synthesis.
 4. Run synthesis before backend (ORFS).
@@ -67,7 +67,7 @@ Key paths:
 ### 5. Run Backend with ORFS
 
 - Prepare `constraints/config.mk` and `constraints/constraint.sdc`.
-- Use `scripts/run_orfs.sh` to invoke the ORFS Makefile.
+- Use `scripts/flow/run_orfs.sh` to invoke the ORFS Makefile.
 - ORFS runs place-and-route natively (no Docker required).
 - Collect results from the ORFS results directory.
 
@@ -75,8 +75,8 @@ Key paths:
 
 After ORFS completes, extract PPA and run the timing gate:
 
-1. Run `scripts/extract_ppa.py <project-dir> reports/ppa.json` to extract timing metrics.
-2. Run `scripts/check_timing.py <project-dir>` to classify WNS and TNS and write `reports/timing_check.json`.
+1. Run `scripts/extract/extract_ppa.py <project-dir> reports/ppa.json` to extract timing metrics.
+2. Run `scripts/reports/check_timing.py <project-dir>` to classify WNS and TNS and write `reports/timing_check.json`.
 3. The script independently classifies WNS and TNS, then takes the **worse** of the two as the combined tier. A design with small WNS but large TNS (many slightly-violating paths) is caught.
 4. Read `reports/timing_check.json` and act on the `tier`:
 
@@ -99,11 +99,11 @@ After a successful backend run, run signoff checks in order:
 
 Two tool options are available:
 
-1. **KLayout DRC** (default) — `scripts/run_drc.sh <project-dir> [platform]`
+1. **KLayout DRC** (default) — `scripts/flow/run_drc.sh <project-dir> [platform]`
    - Uses ORFS `make drc` target with platform `.lydrc` rules
    - Outputs: `drc/6_drc.lyrdb`, `drc/6_drc_count.rpt`, `drc/6_drc.log`
 
-2. **Magic DRC** (sky130 only) — `scripts/run_magic_drc.sh <project-dir> [platform]`
+2. **Magic DRC** (sky130 only) — `scripts/flow/run_magic_drc.sh <project-dir> [platform]`
    - Uses Magic's built-in DRC engine with sky130A tech file
    - Requires sky130A PDK at `/opt/pdks/sky130A/`
    - Outputs: `drc/magic_drc.rpt`, `drc/magic_drc_count.rpt`, `drc/magic_drc_result.json`
@@ -113,14 +113,14 @@ Two tool options are available:
 
 Two tool options are available:
 
-1. **KLayout LVS** (default) — `scripts/run_lvs.sh <project-dir> [platform]`
+1. **KLayout LVS** (default) — `scripts/flow/run_lvs.sh <project-dir> [platform]`
    - Uses ORFS `make lvs` target with platform `.lylvs` rules + CDL netlist
    - **Gracefully skips** platforms without LVS rules (produces `lvs/lvs_result.json` with status "skipped")
    - Outputs: `lvs/6_lvs.lvsdb`, `lvs/6_lvs.log`, `lvs/6_final.cdl`
    - nangate45: uses adapted FreePDK45 rules with `connect_implicit("VDD"/"VSS")` for bulk merging and `schematic.purge` for unused cell pins (e.g., QN on DFFR_X1)
    - **Large design warning**: KLayout LVS on designs >100K cells (black_parrot, swerv) takes >60 minutes. Use `LVS_TIMEOUT=7200` for these designs. The default 3600s may not be enough.
 
-2. **Netgen LVS** (sky130 only) — `scripts/run_netgen_lvs.sh <project-dir> [platform]`
+2. **Netgen LVS** (sky130 only) — `scripts/flow/run_netgen_lvs.sh <project-dir> [platform]`
    - Two-step flow: Magic extracts SPICE from GDS, then Netgen compares against Verilog netlist
    - Requires sky130A PDK at `/opt/pdks/sky130A/` (Magic tech + Netgen setup.tcl)
    - Outputs: `lvs/extracted.spice`, `lvs/netgen_lvs.rpt`, `lvs/netgen_lvs_result.json`
@@ -128,16 +128,16 @@ Two tool options are available:
 
 #### RCX (Parasitic Extraction)
 
-3. **RCX** — `scripts/run_rcx.sh <project-dir> [platform]`
+3. **RCX** — `scripts/flow/run_rcx.sh <project-dir> [platform]`
    - OpenRCX parasitic extraction via OpenROAD
    - Generates Tcl script (`rcx/run_rcx.tcl`) with `define_process_corner`, `extract_parasitics`, `write_spef`
    - Reads `6_final.odb` from ORFS results, writes SPEF output
    - Outputs: `rcx/6_final.spef`, `rcx/rcx.log`, `rcx/run_rcx.tcl`
 
 Extract results into JSON for reporting and dashboard:
-- `scripts/extract_drc.py <project-root> reports/drc.json`
-- `scripts/extract_lvs.py <project-root> reports/lvs.json`
-- `scripts/extract_rcx.py <project-root> reports/rcx.json`
+- `scripts/extract/extract_drc.py <project-root> reports/drc.json`
+- `scripts/extract/extract_lvs.py <project-root> reports/lvs.json`
+- `scripts/extract/extract_rcx.py <project-root> reports/rcx.json`
 
 #### Platform Support Matrix
 
@@ -173,7 +173,7 @@ Extract results into JSON for reporting and dashboard:
 After **every** flow — successful, failed, or partial — run:
 
 ```bash
-python3 skills/r2g-rtl2gds/scripts/ingest_run.py eda-runs/<project>
+python3 skills/r2g-rtl2gds/knowledge/ingest_run.py design_cases/<project>
 ```
 
 This reads the structured JSON artifacts produced by the extraction scripts
@@ -183,8 +183,8 @@ parses raw ORFS logs.
 Then rebuild derived artifacts:
 
 ```bash
-python3 skills/r2g-rtl2gds/scripts/learn_heuristics.py
-python3 skills/r2g-rtl2gds/scripts/mine_rules.py
+python3 skills/r2g-rtl2gds/knowledge/learn_heuristics.py
+python3 skills/r2g-rtl2gds/knowledge/mine_rules.py
 ```
 
 - `knowledge/heuristics.json` is consumed automatically by
@@ -210,7 +210,7 @@ A family/platform pair appears in `heuristics.json` only after at least
 ## Default Project Layout
 
 ```text
-eda-runs/<design-name>/
+design_cases/<design-name>/
 ├── input/
 │   ├── raw-spec.md
 │   └── normalized-spec.yaml
@@ -298,35 +298,35 @@ eda-runs/<design-name>/
 ### Running a Full Flow
 
 1. Source the environment: `source /opt/openroad_tools_env.sh`
-2. Initialize a run directory with `scripts/init_project.py <design-name>`.
+2. Initialize a run directory with `scripts/project/init_project.py <design-name>`.
 3. Save user requirements to `input/raw-spec.md`.
-4. Normalize them into `input/normalized-spec.yaml` using `scripts/normalize_spec.py`.
+4. Normalize them into `input/normalized-spec.yaml` using `scripts/project/normalize_spec.py`.
 5. Write or copy `rtl/design.v` and `tb/testbench.v`.
-6. Run `scripts/check_env.sh` to verify tool availability.
-7. Run `scripts/run_lint.sh`, then `scripts/run_sim.sh`, then `scripts/run_synth.sh`.
+6. Run `scripts/flow/check_env.sh` to verify tool availability.
+7. Run `scripts/flow/run_lint.sh`, then `scripts/flow/run_sim.sh`, then `scripts/flow/run_synth.sh`.
 8. After those pass, prepare `constraints/config.mk` and `constraints/constraint.sdc`.
-9. Run `scripts/run_orfs.sh <project-dir>` for the backend.
-10. Extract PPA: `scripts/extract_ppa.py <project-dir> reports/ppa.json`
-11. Run timing gate: `scripts/check_timing.py <project-dir>` — reads `reports/timing_check.json`:
+9. Run `scripts/flow/run_orfs.sh <project-dir>` for the backend.
+10. Extract PPA: `scripts/extract/extract_ppa.py <project-dir> reports/ppa.json`
+11. Run timing gate: `scripts/reports/check_timing.py <project-dir>` — reads `reports/timing_check.json`:
     - `tier=clean`: proceed to step 12.
     - `tier=minor`: auto-fix clock period per `suggested_clock_period`, re-run step 9, then re-check.
     - `tier=moderate/severe/unconstrained`: **stop, present options to user, wait for decision**.
     - Check `wns_tier` and `tns_tier` to explain which metric drove the tier.
 12. Run signoff checks (only after timing gate passes or user approves):
-    - `scripts/run_drc.sh <project-dir> [platform]` (KLayout DRC)
-    - `scripts/run_magic_drc.sh <project-dir> [platform]` (Magic DRC, sky130 only)
-    - `scripts/run_lvs.sh <project-dir> [platform]` (KLayout LVS)
-    - `scripts/run_netgen_lvs.sh <project-dir> [platform]` (Netgen LVS, sky130 only)
-    - `scripts/run_rcx.sh <project-dir> [platform]`
+    - `scripts/flow/run_drc.sh <project-dir> [platform]` (KLayout DRC)
+    - `scripts/flow/run_magic_drc.sh <project-dir> [platform]` (Magic DRC, sky130 only)
+    - `scripts/flow/run_lvs.sh <project-dir> [platform]` (KLayout LVS)
+    - `scripts/flow/run_netgen_lvs.sh <project-dir> [platform]` (Netgen LVS, sky130 only)
+    - `scripts/flow/run_rcx.sh <project-dir> [platform]`
 13. Extract remaining results:
-    - `scripts/extract_drc.py <project-root> reports/drc.json`
-    - `scripts/extract_lvs.py <project-root> reports/lvs.json`
-    - `scripts/extract_rcx.py <project-root> reports/rcx.json`
-14. Diagnose issues: `scripts/build_diagnosis.py <project-root> reports/diagnosis.json`
-15. Get config suggestions: `scripts/suggest_config.py <project-dir>` (optional, useful for tuning)
-16. Collect artifacts with `scripts/collect_reports.py` and summarize with `scripts/summarize_run.py`.
-17. Generate the dashboard with `scripts/generate_multi_project_dashboard.py`.
-18. Serve it with `scripts/serve_multi_project_dashboard.py 8765`.
+    - `scripts/extract/extract_drc.py <project-root> reports/drc.json`
+    - `scripts/extract/extract_lvs.py <project-root> reports/lvs.json`
+    - `scripts/extract/extract_rcx.py <project-root> reports/rcx.json`
+14. Diagnose issues: `scripts/reports/build_diagnosis.py <project-root> reports/diagnosis.json`
+15. Get config suggestions: `knowledge/suggest_config.py <project-dir>` (optional, useful for tuning)
+16. Collect artifacts with `scripts/reports/collect_reports.py` and summarize with `scripts/reports/summarize_run.py`.
+17. Generate the dashboard with `scripts/dashboard/generate_multi_project_dashboard.py`.
+18. Serve it with `scripts/dashboard/serve_multi_project_dashboard.py 8765`.
 
 ## MVP Scope
 
@@ -429,7 +429,7 @@ set_output_delay [expr $clk_period * $clk_io_pct] -clock $clk_name [all_outputs]
 
 ### Running ORFS
 
-The `scripts/run_orfs.sh` script:
+The `scripts/flow/run_orfs.sh` script:
 1. Copies RTL and constraints to an ORFS-compatible design directory
 2. Derives a unique `FLOW_VARIANT` from the project directory name (prevents collisions)
 3. Runs `make DESIGN_CONFIG=<config.mk> FLOW_VARIANT=<variant>` with optional timeout

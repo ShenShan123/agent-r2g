@@ -14,10 +14,10 @@ import os
 import sys
 
 
-SKILL_DIR = Path(__file__).resolve().parent.parent
-BASE = Path(sys.argv[2]).resolve() if len(sys.argv) > 2 else (SKILL_DIR.parent / 'eda-runs').resolve()
+SKILL_DIR = Path(__file__).resolve().parents[2]
+BASE = Path(sys.argv[2]).resolve() if len(sys.argv) > 2 else (SKILL_DIR.parent / 'design_cases').resolve()
 OUT = BASE / '_dashboard'
-GENERATE_SCRIPT = SKILL_DIR / 'scripts' / 'generate_multi_project_dashboard.py'
+GENERATE_SCRIPT = SKILL_DIR / 'scripts' / 'dashboard' / 'generate_multi_project_dashboard.py'
 
 
 def refresh():
