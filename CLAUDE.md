@@ -15,6 +15,21 @@ eda-runs/                # Working directory for all design runs
   _dashboard/            # Auto-generated HTML dashboard
 ```
 
+### Knowledge Store (inside the skill)
+
+```
+skills/r2g-rtl2gds/knowledge/
+  schema.sql               # SQLite DDL
+  families.json            # design_name → design_family mapping + patterns
+  runs.sqlite              # one row per ingested run (generated, gitignored)
+  heuristics.json          # empirical per-family bounds (generated, gitignored)
+  failure_candidates.json  # review queue for new failure-patterns.md entries (generated, gitignored)
+```
+
+Populated by `scripts/ingest_run.py`, derived by `scripts/learn_heuristics.py`
+and `scripts/mine_rules.py`, consumed by `scripts/suggest_config.py` and
+`scripts/query_knowledge.py`. Phase 2 only — no version DAG yet (deferred).
+
 ## EDA Toolchain (Pre-installed)
 
 ```
@@ -84,6 +99,12 @@ Sky130 PDK for Magic/Netgen: `/opt/pdks/sky130A/` (tech file + netgen setup.tcl)
 | `validate_config.py` | SDC↔RTL port cross-check, param range validation | `<project-dir>` | stdout warnings |
 | `build_run_history.py` | Multi-run comparison | `<project-root> <output.json>` | `run-history.json` |
 | `build_run_compare.py` | Baseline vs current delta | `<project-root> <base-json> <output.json>` | `run-compare.json` |
+| `ingest_run.py` | Ingest one eda-runs/<project> directory into the knowledge store | `<project-dir> [--db <path>]` | `knowledge/runs.sqlite` (upsert) |
+| `learn_heuristics.py` | Derive empirical per-family bounds from runs.sqlite | `[--db <path>] [--out <path>]` | `knowledge/heuristics.json` |
+| `query_knowledge.py` | Read-only API + CLI over heuristics.json | `family <name> \| list` | stdout JSON |
+| `mine_rules.py` | Surface repeated failure signatures as a review queue | `[--min-occurrences N]` | `knowledge/failure_candidates.json` |
+
+Internal module: `knowledge_db.py` — shared SQLite/family-inference helpers used by the four scripts above (not a standalone CLI).
 
 ### Project Management Scripts (Python)
 | Script | Purpose |

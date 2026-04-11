@@ -168,6 +168,34 @@ Extract results into JSON for reporting and dashboard:
 - Record assumptions, blockers, and next recommended actions.
 - For signoff: report DRC violation count, LVS match/skip status, RCX net count and total capacitance.
 
+### 10. Ingest the Run into the Knowledge Store
+
+After **every** flow — successful, failed, or partial — run:
+
+```bash
+python3 skills/r2g-rtl2gds/scripts/ingest_run.py eda-runs/<project>
+```
+
+This reads the structured JSON artifacts produced by the extraction scripts
+and appends one row to `skills/r2g-rtl2gds/knowledge/runs.sqlite`. It never
+parses raw ORFS logs.
+
+Then rebuild derived artifacts:
+
+```bash
+python3 skills/r2g-rtl2gds/scripts/learn_heuristics.py
+python3 skills/r2g-rtl2gds/scripts/mine_rules.py
+```
+
+- `knowledge/heuristics.json` is consumed automatically by
+  `suggest_config.py` on the next project — no CLI changes required.
+- `knowledge/failure_candidates.json` is a **review queue**, not a rule
+  source. Surface new signatures to the user and, if confirmed, edit
+  `references/failure-patterns.md` by hand.
+
+A family/platform pair appears in `heuristics.json` only after at least
+**3 successful runs** under that configuration.
+
 ## Hard Rules
 
 - Do not start backend if simulation is failing.
