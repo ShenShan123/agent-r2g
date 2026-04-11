@@ -1,0 +1,9 @@
+export DESIGN_NAME = black_parrot
+export PLATFORM    = nangate45
+export VERILOG_FILES = /tmp/fake/bp.v
+export SDC_FILE      = /tmp/fake/constraint.sdc
+export CORE_UTILIZATION = 40
+export PLACE_DENSITY_LB_ADDON = 0.20
+export SYNTH_HIERARCHICAL = 1
+export ABC_AREA = 1
+export DIE_AREA = 0 0 1800 1800

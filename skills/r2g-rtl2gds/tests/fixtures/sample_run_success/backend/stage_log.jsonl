@@ -1,0 +1,6 @@
+{"stage": "synth",     "status": "pass", "elapsed_s": 35.2}
+{"stage": "floorplan", "status": "pass", "elapsed_s": 18.4}
+{"stage": "place",     "status": "pass", "elapsed_s": 210.1}
+{"stage": "cts",       "status": "pass", "elapsed_s": 64.0}
+{"stage": "route",     "status": "pass", "elapsed_s": 420.9}
+{"stage": "finish",    "status": "pass", "elapsed_s": 55.3}

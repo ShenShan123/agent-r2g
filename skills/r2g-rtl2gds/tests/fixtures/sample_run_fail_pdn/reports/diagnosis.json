@@ -1,0 +1,10 @@
+{
+  "issues": [
+    {
+      "kind": "pdn-0179",
+      "stage": "floorplan",
+      "summary": "PDN-0179: Unable to repair all channels.",
+      "suggestion": "Increase DIE_AREA, reduce PLACE_DENSITY_LB_ADDON, or remove SYNTH_HIERARCHICAL+ABC_AREA combination."
+    }
+  ]
+}

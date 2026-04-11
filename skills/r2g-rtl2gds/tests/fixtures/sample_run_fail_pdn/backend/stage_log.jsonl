@@ -1,0 +1,2 @@
+{"stage": "synth",     "status": "pass", "elapsed_s": 1180.0}
+{"stage": "floorplan", "status": "fail", "elapsed_s": 95.4}
