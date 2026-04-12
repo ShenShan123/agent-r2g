@@ -12,7 +12,7 @@ def test_ensure_schema_creates_tables(tmp_knowledge_dir):
         "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
     ).fetchall()
     names = {r[0] for r in rows}
-    assert {"runs", "failure_events"}.issubset(names)
+    assert {"runs", "failure_events", "config_lineage"}.issubset(names)
     conn.close()
 
 

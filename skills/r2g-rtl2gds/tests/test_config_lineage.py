@@ -1,9 +1,6 @@
 """Tests for config lineage tracking."""
 from __future__ import annotations
 
-import json
-import sqlite3
-
 import knowledge_db
 
 
