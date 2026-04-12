@@ -524,10 +524,16 @@ BSG pickled.v files instantiate `hard_mem_1rw_*_wrapper` modules that bridge BSG
 - Log stops at "Flatten schematic circuit" messages — the heavy compare phase produces no output until completion
 
 **Root Cause:**
-KLayout LVS on >150K cell designs takes 60-180+ minutes depending on cell count and system load. The auto-scaled timeout (7200s for >150K cells) can be insufficient, especially when DRC or other KLayout processes run concurrently (memory contention inflates wall time 2-3x).
+KLayout LVS scales super-linearly with cell count. Empirical data:
+- 145K cells (swerv): 57 min solo
+- 282K cells (black_parrot, SYNTH_HIERARCHICAL+ABC_AREA): >8 hours, did not complete
+
+The compare phase produces no log output — only "Flatten schematic circuit" lines appear before the silent phase.
 
 **Action:**
-- Run LVS solo — kill or defer DRC/other KLayout processes first
-- For ~200K cell designs (black_parrot), set `LVS_TIMEOUT=14400` (4 hours)
-- Never run multiple LVS jobs concurrently for >100K cell designs
-- The process is NOT stuck if CPU is at 100% — the compare phase is silent until completion
+- **>250K cells:** skip KLayout LVS — it is impractical (>8 hours and may never finish). Accept ORFS+RCX pass as sufficient evidence, especially when smaller designs in the same family pass LVS clean.
+- **150K-250K cells:** run LVS solo with `LVS_TIMEOUT=14400`. Expect 60-120 min.
+- **<150K cells:** default timeout (3600-7200s) is sufficient.
+- Never run multiple LVS jobs concurrently for >100K cell designs.
+- The process is NOT stuck if CPU is at 100% — the compare phase is silent until completion.
+- To reduce cell count, try removing `SYNTH_HIERARCHICAL=1` and `ABC_AREA=1` from config.mk.
