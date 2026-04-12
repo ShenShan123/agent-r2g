@@ -132,6 +132,84 @@ def _coerce_bool_int(s: str | None) -> int | None:
     return None
 
 
+def _record_lineage(conn: sqlite3.Connection, run_id: str,
+                    design_name: str, platform: str,
+                    cfg: dict[str, str], orfs_status: str) -> None:
+    """If a previous run exists for this design/platform, record the config diff."""
+    prev = conn.execute(
+        "SELECT run_id, extra_config_json, core_utilization, "
+        "place_density_lb_addon, synth_hierarchical, abc_area, die_area, "
+        "clock_period_ns "
+        "FROM runs "
+        "WHERE design_name = ? AND platform = ? AND run_id != ? "
+        "ORDER BY ingested_at DESC LIMIT 1",
+        (design_name, platform, run_id),
+    ).fetchone()
+    if prev is None:
+        return
+
+    # Keys that are design identity, not tuning parameters — exclude from diff
+    _IDENTITY_KEYS = {"DESIGN_NAME", "PLATFORM", "VERILOG_FILES", "SDC_FILE"}
+
+    prev_run_id = prev[0]
+    # Reconstruct previous config dict from stored columns
+    prev_cfg: dict[str, str] = {}
+    if prev[1]:  # extra_config_json
+        try:
+            extra = json.loads(prev[1])
+            prev_cfg.update({k: v for k, v in extra.items()
+                             if k not in _IDENTITY_KEYS})
+        except (json.JSONDecodeError, TypeError):
+            pass
+    col_map = {
+        "CORE_UTILIZATION": prev[2], "PLACE_DENSITY_LB_ADDON": prev[3],
+        "SYNTH_HIERARCHICAL": prev[4], "ABC_AREA": prev[5],
+        "DIE_AREA": prev[6], "CLOCK_PERIOD": prev[7],
+    }
+    for k, v in col_map.items():
+        if v is not None:
+            # Normalize float DB values so "30.0" matches raw config string "30"
+            s = str(v)
+            if s.endswith(".0") and s[:-2].lstrip("-").isdigit():
+                s = s[:-2]
+            prev_cfg[k] = s
+
+    # Normalize current config values to strings for comparison.
+    # Exclude identity keys — not tuning parameters, not stored in prev_cfg.
+    cur_cfg = {k: str(v).strip() for k, v in cfg.items()
+               if v and k not in _IDENTITY_KEYS}
+
+    # Canonicalize numeric strings so "0.20" == "0.2" and "30" == "30.0".
+    # This prevents spurious diffs caused by float DB round-trips.
+    def _canon(s: str) -> str:
+        try:
+            f = float(s)
+            # If it's a whole number, use integer string representation
+            if f == int(f):
+                return str(int(f))
+            # Otherwise use repr to avoid trailing zeros (0.20 → 0.2)
+            return str(f)
+        except (ValueError, OverflowError):
+            return s
+
+    prev_cfg = {k: _canon(v) for k, v in prev_cfg.items()}
+    cur_cfg = {k: _canon(v) for k, v in cur_cfg.items()}
+
+    diff = knowledge_db.diff_config_rows(prev_cfg, cur_cfg)
+    if not diff["changed"] and not diff["added"] and not diff["removed"]:
+        return
+
+    conn.execute(
+        "INSERT INTO config_lineage "
+        "(design_name, platform, current_run_id, previous_run_id, "
+        " diff_json, current_outcome, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (design_name, platform, run_id, prev_run_id,
+         json.dumps(diff, sort_keys=True), orfs_status,
+         _dt.datetime.utcnow().isoformat(timespec="seconds") + "Z"),
+    )
+
+
 def ingest(project: Path,
            conn: sqlite3.Connection,
            families_path: Path | None = None) -> str:
@@ -261,6 +339,7 @@ def ingest(project: Path,
             "VALUES (?, ?, ?, ?)",
             (run_id, fail_stage, f"orfs-fail-{fail_stage}", None),
         )
+    _record_lineage(conn, run_id, design_name, platform, cfg, orfs_status)
     conn.commit()
     return run_id
 
