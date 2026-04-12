@@ -124,7 +124,10 @@ if [[ -z "${LVS_TIMEOUT:-}" ]]; then
   if [[ -n "$_REPORT_JSON" ]]; then
     _CELL_COUNT=$(python3 -c "import json,sys; d=json.load(open(sys.argv[1])); print(int(d.get('finish__design__instance__count',0)))" "$_REPORT_JSON" 2>/dev/null || echo 0)
   fi
-  if [[ "$_CELL_COUNT" -gt 175000 ]] 2>/dev/null; then
+  if [[ "$_CELL_COUNT" -gt 250000 ]] 2>/dev/null; then
+    LVS_TIMEOUT=28800
+    echo "Auto-scaled LVS timeout to ${LVS_TIMEOUT}s (cell count: $_CELL_COUNT > 250K)"
+  elif [[ "$_CELL_COUNT" -gt 175000 ]] 2>/dev/null; then
     LVS_TIMEOUT=14400
     echo "Auto-scaled LVS timeout to ${LVS_TIMEOUT}s (cell count: $_CELL_COUNT > 175K)"
   elif [[ "$_CELL_COUNT" -gt 100000 ]] 2>/dev/null; then
