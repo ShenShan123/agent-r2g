@@ -500,6 +500,21 @@ Insufficient power delivery network (PDN) for the design's power density. Common
 - If possible, increase die area to reduce power density
 - Check that `PLACE_DENSITY_LB_ADDON` is not causing excessive local density
 
+## KLayout DRC Timeout on nangate45 (FreePDK45.lydrc)
+
+**Symptoms:**
+- `run_drc.sh` times out at 3600s even for small designs (~13K cells)
+- KLayout log shows "or" operations in FreePDK45.lydrc still processing at timeout
+- No `6_drc.lyrdb` or `6_drc_count.rpt` produced
+
+**Root Cause:**
+The FreePDK45.lydrc DRC rule deck involves expensive polygon boolean operations that scale with layout complexity and metal density, not just cell count. The default `DRC_TIMEOUT=3600` is insufficient for this rule deck on any design.
+
+**Action:**
+- Set `DRC_TIMEOUT=7200` or higher for nangate45
+- DRC is the least critical signoff check — LVS and RCX are more important for correctness
+- If DRC is not needed, skip it and rely on LVS+RCX for signoff
+
 ## Missing Hard-Memory Wrapper Stubs (BSG Macro Designs)
 
 **Symptoms:**

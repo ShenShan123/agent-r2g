@@ -71,7 +71,7 @@ cd "$FLOW_DIR"
 # Prevent env collision: ORFS Makefile uses SCRIPTS_DIR internally
 unset SCRIPTS_DIR 2>/dev/null || true
 
-DRC_TIMEOUT="${DRC_TIMEOUT:-3600}"
+DRC_TIMEOUT="${DRC_TIMEOUT:-7200}"
 echo "Timeout: ${DRC_TIMEOUT}s"
 
 DRC_STATUS=0
