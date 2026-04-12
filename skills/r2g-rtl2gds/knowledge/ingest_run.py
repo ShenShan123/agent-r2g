@@ -159,7 +159,21 @@ def ingest(project: Path,
     rcx = _read_json(project / "reports" / "rcx.json") or {}
     tcheck = _read_json(project / "reports" / "timing_check.json") or {}
     diag = _read_json(project / "reports" / "diagnosis.json") or {}
-    stage_log = _read_stage_log(project / "backend" / "stage_log.jsonl")
+    # stage_log.jsonl lives inside backend/RUN_<timestamp>/.  Find the
+    # most-recently-modified one, falling back to the legacy flat path.
+    stage_log_path = project / "backend" / "stage_log.jsonl"
+    run_dirs = sorted(
+        (d for d in (project / "backend").iterdir()
+         if d.is_dir() and d.name.startswith("RUN_")),
+        key=lambda d: d.stat().st_mtime,
+        reverse=True,
+    ) if (project / "backend").is_dir() else []
+    for rd in run_dirs:
+        candidate = rd / "stage_log.jsonl"
+        if candidate.exists():
+            stage_log_path = candidate
+            break
+    stage_log = _read_stage_log(stage_log_path)
 
     orfs_status, fail_stage = _derive_orfs_status(stage_log)
     total_elapsed = sum(_to_float(s.get("elapsed_s")) or 0.0 for s in stage_log) or None

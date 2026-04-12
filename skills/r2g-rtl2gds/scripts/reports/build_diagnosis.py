@@ -40,6 +40,14 @@ def parse_synth_errors(text: str) -> list:
 
 def detect_issues(text: str, project: Path) -> list:
     issues = []
+
+    ppa_file = project / 'reports' / 'ppa.json'
+    ppa_data = None
+    if ppa_file.exists():
+        try:
+            ppa_data = json.loads(ppa_file.read_text(encoding='utf-8', errors='ignore'))
+        except (json.JSONDecodeError, TypeError):
+            pass
     lower = text.lower()
 
     # 1. Lint errors
@@ -109,15 +117,19 @@ def detect_issues(text: str, project: Path) -> list:
             'suggestion': 'Inspect assertion timing and expected cycle alignment.'
         })
 
-    # 7. Timing violations
-    if 'no setup violations found' in lower and 'no hold violations found' in lower:
-        pass  # Timing is clean
-    elif 'setup violation' in lower or 'hold violation' in lower or 'slack (violated)' in lower:
-        issues.append({
-            'kind': 'timing_violation',
-            'summary': 'Timing violations detected.',
-            'suggestion': 'Try increasing clock period in constraint.sdc or optimizing RTL.'
-        })
+    # 7. Timing violations (log-based) — skip when PPA data is available,
+    # because flow.log contains intermediate repair messages that are not
+    # authoritative. The PPA-based checks (below) use 6_report.json which
+    # reflects the final state after all repairs.
+    if not ppa_data:
+        if 'no setup violations found' in lower and 'no hold violations found' in lower:
+            pass  # Timing is clean
+        elif 'setup violation' in lower or 'hold violation' in lower or 'slack (violated)' in lower:
+            issues.append({
+                'kind': 'timing_violation',
+                'summary': 'Timing violations detected.',
+                'suggestion': 'Try increasing clock period in constraint.sdc or optimizing RTL.'
+            })
 
     # 8. DRC errors — check 6_drc_count.rpt section (authoritative DRC count)
     drc_count = -1
@@ -182,14 +194,6 @@ def detect_issues(text: str, project: Path) -> list:
         })
 
     # === Timing checks from ppa.json (WNS + TNS) ===
-    ppa_file = project / 'reports' / 'ppa.json'
-    ppa_data = None
-    if ppa_file.exists():
-        try:
-            ppa_data = json.loads(ppa_file.read_text(encoding='utf-8', errors='ignore'))
-        except (json.JSONDecodeError, TypeError):
-            pass
-
     if ppa_data:
         timing = ppa_data.get('summary', {}).get('timing', {})
         wns = timing.get('setup_wns')

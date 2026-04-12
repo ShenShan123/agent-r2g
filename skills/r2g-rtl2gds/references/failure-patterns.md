@@ -499,3 +499,35 @@ Insufficient power delivery network (PDN) for the design's power density. Common
 - Strengthen PDN: add more power straps or increase strap width (platform-dependent config)
 - If possible, increase die area to reduce power density
 - Check that `PLACE_DENSITY_LB_ADDON` is not causing excessive local density
+
+## Missing Hard-Memory Wrapper Stubs (BSG Macro Designs)
+
+**Symptoms:**
+- Yosys synthesis fails with `ERROR: Module '\hard_mem_*_wrapper' ... is not part of the design`
+- Only affects designs using BSG-style pickled Verilog (black_parrot, bp_multi_top)
+
+**Root Cause:**
+BSG pickled.v files instantiate `hard_mem_1rw_*_wrapper` modules that bridge BSG memory interfaces (clk_i, v_i, w_i, addr_i, data_i, data_o, w_mask_i) to the platform's fakeram primitives. These wrappers are not included in the pickled file and must be provided separately.
+
+**Action:**
+- Write a `hard_mem_stubs.v` file containing real module implementations (NOT blackbox attributes) for each wrapper, plus blackbox declarations of the fakeram45 primitives
+- The wrappers map BSG ports to fakeram45 ports: `clk_i→clk`, `v_i→ce_in`, `w_i→we_in`, `addr_i→addr_in`, `data_i→wd_in`, `w_mask_i→w_mask_in`, `data_o→rd_out`
+- For wrappers without bit-mask ports (e.g., `hard_mem_1rw_d512_w64_wrapper`), broadcast `{N{1'b1}}` to `w_mask_in`
+- For byte-mask wrappers, expand byte enables to bit enables
+- Add stubs path to `VERILOG_FILES` in config.mk
+
+## LVS Timeout on Very Large Designs (>150K cells)
+
+**Symptoms:**
+- `run_lvs.sh` exits with code 124 (timeout) even though KLayout is making progress
+- KLayout uses 100% CPU and 5-6 GB RAM throughout the run
+- Log stops at "Flatten schematic circuit" messages — the heavy compare phase produces no output until completion
+
+**Root Cause:**
+KLayout LVS on >150K cell designs takes 60-180+ minutes depending on cell count and system load. The auto-scaled timeout (7200s for >150K cells) can be insufficient, especially when DRC or other KLayout processes run concurrently (memory contention inflates wall time 2-3x).
+
+**Action:**
+- Run LVS solo — kill or defer DRC/other KLayout processes first
+- For ~200K cell designs (black_parrot), set `LVS_TIMEOUT=14400` (4 hours)
+- Never run multiple LVS jobs concurrently for >100K cell designs
+- The process is NOT stuck if CPU is at 100% — the compare phase is silent until completion

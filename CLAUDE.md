@@ -294,7 +294,7 @@ Tested 2026-04-01, updated 2026-04-03 with LVS auto-timeout scaling, PDN-0179 fi
 
 **Key takeaways:**
 - **ORFS + LVS + RCX: 100% pass rate** for all 70 designs across 7 families
-- LVS auto-timeout scaling (2026-04-03): `run_lvs.sh` now auto-detects cell count from `6_report.json` and scales timeout: >150K → 7200s, >100K → 4200s, else 3600s
+- LVS auto-timeout scaling (2026-04-03): `run_lvs.sh` now auto-detects cell count from `6_report.json` and scales timeout: >150K → 7200s, >100K → 4200s, else 3600s. **Caveat (2026-04-12):** 7200s is insufficient for ~200K cell designs (black_parrot) even when running solo; use `LVS_TIMEOUT=14400` for these. Concurrent DRC/LVS inflates wall time 2-3x.
 - bp_multi_top 4 ORFS failures fixed: increased DIE_AREA from 1800x1800 to 2000x2000 for `SYNTH_HIERARCHICAL=1` + `ABC_AREA=1` configs (cfg3, cfg4, cfg6, cfg10) that exceeded PDN grid capacity
 - `run_orfs.sh` now detects PDN-0179 errors and suggests fixes (increase die area, reduce density, remove SYNTH_HIERARCHICAL/ABC_AREA)
 
