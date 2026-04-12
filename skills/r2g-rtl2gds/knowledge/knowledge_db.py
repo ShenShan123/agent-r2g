@@ -52,3 +52,20 @@ def infer_family(design_name: str, families: dict[str, Any]) -> str:
         if re.search(entry["regex"], design_name, re.IGNORECASE):
             return entry["family"]
     return design_name.split("_", 1)[0].lower()
+
+
+def diff_config_rows(old: dict[str, str], new: dict[str, str]) -> dict[str, Any]:
+    """Compute the config diff between two config.mk field dicts.
+
+    Returns {"changed": {key: {"old": v1, "new": v2}},
+             "added": {key: value}, "removed": {key: value}}.
+    """
+    old_keys = set(old)
+    new_keys = set(new)
+    changed = {}
+    for k in old_keys & new_keys:
+        if old[k] != new[k]:
+            changed[k] = {"old": old[k], "new": new[k]}
+    added = {k: new[k] for k in new_keys - old_keys}
+    removed = {k: old[k] for k in old_keys - new_keys}
+    return {"changed": changed, "added": added, "removed": removed}

@@ -50,3 +50,19 @@ CREATE TABLE IF NOT EXISTS failure_events (
 
 CREATE INDEX IF NOT EXISTS idx_failure_signature ON failure_events(signature);
 CREATE INDEX IF NOT EXISTS idx_failure_run ON failure_events(run_id);
+
+CREATE TABLE IF NOT EXISTS config_lineage (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    design_name     TEXT NOT NULL,
+    platform        TEXT NOT NULL,
+    current_run_id  TEXT NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
+    previous_run_id TEXT NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
+    diff_json       TEXT NOT NULL,
+    current_outcome TEXT,
+    created_at      TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_lineage_design_platform
+    ON config_lineage(design_name, platform);
+CREATE INDEX IF NOT EXISTS idx_lineage_current_run
+    ON config_lineage(current_run_id);
