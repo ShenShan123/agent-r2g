@@ -16,7 +16,7 @@ elif [[ -n "$PROJECT_DIR" && -d "$PROJECT_DIR" ]]; then
 else
   FLOW_VARIANT="base"
 fi
-ORFS_ROOT="${ORFS_ROOT:-/opt/EDA4AI/OpenROAD-flow-scripts}"
+ORFS_ROOT="${ORFS_ROOT:-/proj/workarea/user5/OpenROAD-flow-scripts}"
 FLOW_DIR="$ORFS_ROOT/flow"
 
 if [[ -z "$PROJECT_DIR" ]]; then
@@ -33,7 +33,9 @@ if [[ ! -f "$CONFIG_MK" ]]; then
 fi
 
 # Source environment
-if [[ -f /opt/openroad_tools_env.sh ]]; then
+if [[ -f "$ORFS_ROOT/env.sh" ]]; then
+  source "$ORFS_ROOT/env.sh"
+elif [[ -f /opt/openroad_tools_env.sh ]]; then
   source /opt/openroad_tools_env.sh
 fi
 

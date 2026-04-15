@@ -22,7 +22,7 @@ else
   FLOW_VARIANT="base"
 fi
 FROM_STAGE="${FROM_STAGE:-}"
-ORFS_ROOT="${ORFS_ROOT:-/opt/EDA4AI/OpenROAD-flow-scripts}"
+ORFS_ROOT="${ORFS_ROOT:-/proj/workarea/user5/OpenROAD-flow-scripts}"
 FLOW_DIR="$ORFS_ROOT/flow"
 
 if [[ -z "$PROJECT_DIR" ]]; then
@@ -45,13 +45,18 @@ if [[ ! -f "$SDC_FILE" ]]; then
 fi
 
 # Source environment
-if [[ -f /opt/openroad_tools_env.sh ]]; then
+if [[ -f "$ORFS_ROOT/env.sh" ]]; then
+  source "$ORFS_ROOT/env.sh"
+elif [[ -f /opt/openroad_tools_env.sh ]]; then
   source /opt/openroad_tools_env.sh
 fi
 
-# Create a design directory inside ORFS for this project
+# Create a design directory inside ORFS for this project.
+# Key fix: include FLOW_VARIANT in the path so concurrent runs that share
+# DESIGN_NAME (e.g. all ICCAD benchmarks use DESIGN_NAME=top) do not overwrite
+# each other's config.mk at the shared $FLOW_DIR/designs/<platform>/<name>/ path.
 DESIGN_NAME=$(grep 'DESIGN_NAME' "$CONFIG_MK" | head -1 | sed 's/.*=\s*//' | tr -d ' ')
-ORFS_DESIGN_DIR="$FLOW_DIR/designs/$PLATFORM/$DESIGN_NAME"
+ORFS_DESIGN_DIR="$FLOW_DIR/designs/$PLATFORM/$DESIGN_NAME/$FLOW_VARIANT"
 mkdir -p "$ORFS_DESIGN_DIR"
 
 # Copy config.mk and constraint.sdc

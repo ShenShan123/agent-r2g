@@ -1,0 +1,496 @@
+#!/usr/bin/env python3
+"""
+Set up design_cases/<name>/ from rtl_designs/<name>/ for batch ORFS flow.
+
+For each design in rtl_designs/:
+  1. Read design_meta.json for top module name and platform
+  2. Auto-detect clock port from RTL (posedge/negedge analysis + naming heuristics)
+  3. Create design_cases/<name>/ with proper directory structure
+  4. Copy RTL files
+  5. Generate config.mk and constraint.sdc
+
+Usage:
+  python3 tools/setup_rtl_designs.py [--designs design1,design2,...] [--force]
+"""
+
+import json
+import os
+import re
+import shutil
+import sys
+from pathlib import Path
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+RTL_DESIGNS_DIR = BASE_DIR / "rtl_designs"
+DESIGN_CASES_DIR = BASE_DIR / "design_cases"
+
+TEMPLATE_DIRS = [
+    "input", "rtl", "tb", "constraints", "lint", "sim",
+    "synth", "backend", "drc", "lvs", "rcx", "reports"
+]
+
+# Clock port detection priority (ordered by specificity)
+CLOCK_PORT_PATTERNS = [
+    # Exact common names
+    r'\bclk\b', r'\bclock\b', r'\bCLK\b', r'\bCLOCK\b',
+    # Suffixed/prefixed
+    r'\bclk_i\b', r'\bi_clk\b', r'\bsys_clk\b', r'\bclk_in\b',
+    # AXI
+    r'\bS_AXI_ACLK\b', r'\bACLK\b', r'\baclk\b', r'\bs_axi_aclk\b',
+    # Wishbone
+    r'\bwb_clk_i\b', r'\bi_wb_clk\b', r'\bwbm_clk_i\b', r'\bwbs_clk_i\b',
+    # Other
+    r'\bclock_c\b', r'\bCK\b', r'\bcp\b', r'\bclk_100\b',
+    r'\bclk_ref\b', r'\bcore_clk\b', r'\bmclk\b', r'\bpclk\b',
+    r'\bhclk\b', r'\bfclk\b', r'\bsclk\b',
+]
+
+
+def detect_clock_port(rtl_files, top_module):
+    """Detect the clock port name from RTL files.
+
+    Strategy:
+    1. Find signals used with posedge/negedge in the top module
+    2. Among those, pick the one matching common clock naming patterns
+    3. If no posedge/negedge found, search module port declarations for clock-like names
+    4. If still nothing, return None (combinational design → virtual clock)
+    """
+    all_content = ""
+    for f in rtl_files:
+        try:
+            all_content += Path(f).read_text(errors='replace') + "\n"
+        except Exception:
+            continue
+
+    if not all_content.strip():
+        return None
+
+    # Strategy 1: Find posedge/negedge signals
+    edge_signals = set()
+    for m in re.finditer(r'(?:posedge|negedge)\s+(\w+)', all_content):
+        sig = m.group(1)
+        # Filter out reset-like signals
+        if sig.lower() not in ('rst', 'reset', 'rst_n', 'reset_n', 'areset',
+                                'areset_n', 'rst_i', 'i_rst', 'rstn', 'resetn',
+                                'nreset', 'nrst', 'aresetn', 'async_rst',
+                                's_axi_aresetn', 'aresetn_i'):
+            edge_signals.add(sig)
+
+    # Strategy 2: Check edge signals against clock naming patterns
+    if edge_signals:
+        for pattern in CLOCK_PORT_PATTERNS:
+            for sig in edge_signals:
+                if re.fullmatch(pattern.strip(r'\b'), sig):
+                    return sig
+        # If edge signals exist but none match patterns, pick the most clock-like one
+        # Prefer shorter names that contain 'cl' or 'ck'
+        clock_like = [s for s in edge_signals
+                      if re.search(r'cl[ok]|ck|CLK|CK', s, re.IGNORECASE)]
+        if clock_like:
+            return min(clock_like, key=len)
+        # Just pick the first edge signal (likely the clock)
+        return sorted(edge_signals)[0]
+
+    # Strategy 3: Search port declarations for clock-like names
+    # Find top module's port list
+    top_pattern = re.compile(
+        r'module\s+' + re.escape(top_module) + r'\s*(?:#\s*\([^)]*\)\s*)?\(([^;]*?)\)\s*;',
+        re.DOTALL
+    )
+    top_match = top_pattern.search(all_content)
+    if top_match:
+        port_text = top_match.group(1)
+        # Look for input ports with clock-like names
+        for pattern in CLOCK_PORT_PATTERNS:
+            m = re.search(r'input\s+(?:wire\s+|reg\s+|logic\s+)?(?:\[.*?\]\s*)?' + pattern, port_text)
+            if m:
+                # Extract the actual port name
+                name_match = re.search(pattern, m.group(0))
+                if name_match:
+                    return name_match.group(0)
+
+    # Strategy 4: Broader search - any input with clock-like name
+    for pattern in CLOCK_PORT_PATTERNS:
+        m = re.search(r'input\s+(?:wire\s+|reg\s+|logic\s+)?(?:\[.*?\]\s*)?' + pattern, all_content)
+        if m:
+            name_match = re.search(pattern, m.group(0))
+            if name_match:
+                return name_match.group(0)
+
+    return None
+
+
+def estimate_rtl_complexity(rtl_files):
+    """Estimate design complexity from RTL line count (non-comment, non-blank)."""
+    total_lines = 0
+    for f in rtl_files:
+        try:
+            for line in Path(f).read_text(errors='replace').splitlines():
+                stripped = line.strip()
+                if stripped and not stripped.startswith('//'):
+                    total_lines += 1
+        except Exception:
+            continue
+    return total_lines
+
+
+PORT_DECL_RE = re.compile(
+    r'\b(input|output|inout)\b(?:\s+(?:wire|reg|logic))?'
+    r'(?:\s*\[[^\]]+\])?\s*([A-Za-z_][\w,\s]*?)\s*[,;)]',
+    re.MULTILINE,
+)
+
+
+def scan_port_pin_count(rtl_files, top_module):
+    """Rough estimate of total scalar IO pins on the top module.
+
+    Parses the module ... endmodule block for the top, counts each port name
+    plus its bit-vector width. Over-estimates are OK; the goal is to bump
+    tiny floorplans up when the pin count is clearly too high for a 50x50 die.
+    """
+    module_re = re.compile(
+        r'module\s+' + re.escape(top_module) + r'\b.*?endmodule',
+        re.DOTALL,
+    )
+    total = 0
+    for f in rtl_files:
+        try:
+            txt = Path(f).read_text(errors='replace')
+        except Exception:
+            continue
+        m = module_re.search(txt)
+        if not m:
+            continue
+        body = m.group(0)
+        for _, names in re.findall(
+            r'\b(input|output|inout)\b(?:\s+(?:wire|reg|logic))?'
+            r'(\s*\[[^\]]+\])?\s*([A-Za-z_][A-Za-z0-9_,\s]*?)\s*[;,)]',
+            body,
+        ) if False else []:  # placeholder; real parse below
+            pass
+        for match in re.finditer(
+            r'\b(input|output|inout)\b(?:\s+(?:wire|reg|logic))?'
+            r'\s*(\[[^\]]+\])?\s*([A-Za-z_][A-Za-z0-9_,\s]*?)\s*[;,)]',
+            body,
+        ):
+            width_spec = match.group(2) or ''
+            names = match.group(3)
+            names = [n.strip() for n in names.split(',') if n.strip()]
+            if not names:
+                continue
+            bits = 1
+            wm = re.match(r'\[\s*(\d+)\s*:\s*(\d+)\s*\]', width_spec)
+            if wm:
+                bits = abs(int(wm.group(1)) - int(wm.group(2))) + 1
+            total += bits * len(names)
+        break  # top module found
+    return total
+
+
+def scan_memory_bits(rtl_files):
+    """Detect the largest inferred memory (reg [W:0] mem [D:0]) across RTL."""
+    largest = 0
+    mem_re = re.compile(
+        r'reg(?:\s+(?:wire|signed))?'
+        r'\s*\[\s*(\d+)\s*:\s*(\d+)\s*\]'
+        r'\s*[A-Za-z_]\w*'
+        r'\s*\[\s*(\d+)\s*:\s*(\d+)\s*\]'
+    )
+    for f in rtl_files:
+        try:
+            txt = Path(f).read_text(errors='replace')
+        except Exception:
+            continue
+        for m in mem_re.finditer(txt):
+            w = abs(int(m.group(1)) - int(m.group(2))) + 1
+            d = abs(int(m.group(3)) - int(m.group(4))) + 1
+            bits = w * d
+            if bits > largest:
+                largest = bits
+    return largest
+
+
+def scan_unresolved_includes(rtl_files):
+    """Return set of `include targets not present in the RTL directories."""
+    referenced = set()
+    present = set()
+    for f in rtl_files:
+        try:
+            txt = Path(f).read_text(errors='replace')
+        except Exception:
+            continue
+        for m in re.finditer(r'`include\s+"([^"]+)"', txt):
+            referenced.add(m.group(1))
+        present.add(Path(f).name)
+    return referenced - present
+
+
+def generate_config_mk(project_dir, design_name, platform, rtl_files, sdc_path,
+                       place_density=0.20, top_module=None):
+    """Generate config.mk for ORFS.
+
+    Sizing policy (validated against a 495-design batch):
+    - Tiny (< 100 lines) with <=100 IO pins: explicit DIE_AREA 50x50
+    - Tiny with many IO pins or wide buses: CORE_UTILIZATION=15 (auto-sizes die)
+    - Small (100-500 lines): explicit DIE_AREA 120x120 unless pin count forces up
+    - Medium (500-5000 lines): CORE_UTILIZATION=25
+    - Large (> 5000 lines): CORE_UTILIZATION=20
+
+    Also injects SYNTH_MEMORY_MAX_BITS when RTL infers memories >4 Kbit so
+    Yosys doesn't reject with "Synthesized memory size exceeds ...".
+    """
+    verilog_files = " \\\n    ".join(str(f) for f in rtl_files)
+    complexity = estimate_rtl_complexity(rtl_files)
+
+    pin_count = scan_port_pin_count(rtl_files, top_module or design_name)
+    max_mem_bits = scan_memory_bits(rtl_files)
+    unresolved = scan_unresolved_includes(rtl_files)
+
+    # Per-perimeter rule: nangate45 IO pins fit roughly 1 per micron. A 50x50
+    # die has ~200 micron perimeter → ~200 pins max; 120x120 → ~480. Bump any
+    # design with significantly more pins up to CORE_UTILIZATION.
+    pin_forces_util = pin_count > 180
+
+    if complexity < 100 and not pin_forces_util:
+        sizing = "export DIE_AREA  = 0 0 50 50\nexport CORE_AREA = 2 2 48 48"
+        size_cat = "tiny"
+    elif complexity < 500 and not pin_forces_util:
+        sizing = "export DIE_AREA  = 0 0 120 120\nexport CORE_AREA = 5 5 115 115"
+        size_cat = "small"
+    elif complexity < 5000:
+        sizing = "export CORE_UTILIZATION = 25"
+        size_cat = "medium"
+    else:
+        sizing = "export CORE_UTILIZATION = 20"
+        size_cat = "large"
+
+    if pin_forces_util:
+        # High IO count → let ORFS pick die area. Low util keeps perimeter large.
+        util = 15 if pin_count > 500 else 20
+        sizing = f"export CORE_UTILIZATION = {util}"
+        size_cat = f"pin_heavy_{pin_count}"
+
+    # Memory policy: default ORFS SYNTH_MEMORY_MAX_BITS=4096 is too tight
+    # for register files / FIFOs. Lift to 128 Kbit whenever RTL infers >1 Kbit.
+    mem_line = ""
+    if max_mem_bits > 1024:
+        mem_line = "\nexport SYNTH_MEMORY_MAX_BITS = 131072"
+
+    # Include-dir policy: if any `include target isn't a sibling .v file, expose
+    # the rtl dir as a search path so ORFS can find headers sitting alongside.
+    include_line = ""
+    if unresolved:
+        include_line = f"\nexport VERILOG_INCLUDE_DIRS = {project_dir / 'rtl'}"
+
+    content = f"""export DESIGN_NAME = {design_name}
+export PLATFORM    = {platform}
+
+export VERILOG_FILES = {verilog_files}
+export SDC_FILE      = {sdc_path}
+
+{sizing}
+export PLACE_DENSITY_LB_ADDON = {place_density}
+
+export ABC_AREA = 1{mem_line}{include_line}
+"""
+    config_path = project_dir / "constraints" / "config.mk"
+    config_path.write_text(content, encoding="utf-8")
+    return config_path, complexity, size_cat
+
+
+def generate_sdc(project_dir, design_name, clock_port, clock_period=10.0):
+    """Generate constraint.sdc.
+
+    If clock_port is None (combinational design), use a virtual clock.
+    """
+    sdc_path = project_dir / "constraints" / "constraint.sdc"
+
+    if clock_port:
+        content = f"""current_design {design_name}
+
+set clk_name  core_clock
+set clk_port_name {clock_port}
+set clk_period {clock_period}
+set clk_io_pct 0.2
+
+set clk_port [get_ports $clk_port_name]
+create_clock -name $clk_name -period $clk_period $clk_port
+
+set non_clock_inputs [all_inputs -no_clocks]
+set_input_delay  [expr $clk_period * $clk_io_pct] -clock $clk_name $non_clock_inputs
+set_output_delay [expr $clk_period * $clk_io_pct] -clock $clk_name [all_outputs]
+"""
+    else:
+        # Combinational design: use a virtual clock for timing constraints
+        content = f"""current_design {design_name}
+
+set clk_name  virtual_clock
+set clk_period {clock_period}
+set clk_io_pct 0.2
+
+create_clock -name $clk_name -period $clk_period
+
+set_input_delay  [expr $clk_period * $clk_io_pct] -clock $clk_name [all_inputs]
+set_output_delay [expr $clk_period * $clk_io_pct] -clock $clk_name [all_outputs]
+"""
+
+    sdc_path.write_text(content, encoding="utf-8")
+    return sdc_path
+
+
+def setup_one_design(design_name, force=False):
+    """Set up a single design from rtl_designs/ into design_cases/."""
+    src_dir = RTL_DESIGNS_DIR / design_name
+    meta_path = src_dir / "design_meta.json"
+
+    if not meta_path.exists():
+        return {"design": design_name, "status": "skip", "reason": "no design_meta.json"}
+
+    with open(meta_path) as f:
+        meta = json.load(f)
+
+    top_module = meta.get("top", design_name)
+    platform = meta.get("platform", "nangate45")
+
+    project_dir = DESIGN_CASES_DIR / design_name
+
+    # Skip if already set up (unless --force)
+    if (project_dir / "constraints" / "config.mk").exists() and not force:
+        return {"design": design_name, "status": "skip", "reason": "already exists"}
+
+    # Create directory structure
+    project_dir.mkdir(parents=True, exist_ok=True)
+    for d in TEMPLATE_DIRS:
+        (project_dir / d).mkdir(parents=True, exist_ok=True)
+
+    # Copy RTL files
+    src_rtl_dir = src_dir / "rtl"
+    dst_rtl_dir = project_dir / "rtl"
+    rtl_files = []
+
+    if src_rtl_dir.exists():
+        for vf in sorted(src_rtl_dir.glob("*.v")):
+            dst = dst_rtl_dir / vf.name
+            shutil.copy2(vf, dst)
+            rtl_files.append(dst.resolve())
+        # Also copy .sv files if present
+        for vf in sorted(src_rtl_dir.glob("*.sv")):
+            dst = dst_rtl_dir / vf.name
+            shutil.copy2(vf, dst)
+            rtl_files.append(dst.resolve())
+
+    if not rtl_files:
+        return {"design": design_name, "status": "error", "reason": "no RTL files found"}
+
+    # Detect clock port
+    clock_port = detect_clock_port(rtl_files, top_module)
+
+    # Generate SDC
+    sdc_path = generate_sdc(project_dir, top_module, clock_port)
+
+    # Generate config.mk
+    _, complexity, size_cat = generate_config_mk(
+        project_dir, top_module, platform, rtl_files,
+        str(sdc_path.resolve()),
+        place_density=0.20,
+        top_module=top_module,
+    )
+
+    # Write metadata
+    setup_meta = {
+        "design_name": design_name,
+        "top_module": top_module,
+        "platform": platform,
+        "clock_port": clock_port,
+        "clock_type": "real" if clock_port else "virtual",
+        "rtl_file_count": len(rtl_files),
+        "rtl_complexity": complexity,
+        "size_category": size_cat,
+        "status": "setup_complete",
+        "source": str(src_dir)
+    }
+    (project_dir / "metadata.json").write_text(
+        json.dumps(setup_meta, indent=2), encoding="utf-8"
+    )
+
+    return {
+        "design": design_name,
+        "status": "ok",
+        "top": top_module,
+        "clock_port": clock_port or "virtual",
+        "rtl_files": len(rtl_files),
+        "size_cat": size_cat,
+        "complexity": complexity
+    }
+
+
+def main():
+    force = "--force" in sys.argv
+    selected = None
+
+    for arg in sys.argv[1:]:
+        if arg.startswith("--designs="):
+            selected = arg.split("=", 1)[1].split(",")
+        elif arg == "--force":
+            pass
+        elif not arg.startswith("--"):
+            selected = arg.split(",")
+
+    DESIGN_CASES_DIR.mkdir(parents=True, exist_ok=True)
+
+    # Enumerate designs
+    if selected:
+        designs = selected
+    else:
+        designs = sorted([
+            d.name for d in RTL_DESIGNS_DIR.iterdir()
+            if d.is_dir() and (d / "design_meta.json").exists()
+        ])
+
+    print(f"Setting up {len(designs)} designs (force={force})...")
+
+    results = {"ok": 0, "skip": 0, "error": 0}
+    errors = []
+    clock_stats = {"real": 0, "virtual": 0}
+    size_stats = {"tiny": 0, "small": 0, "medium": 0, "large": 0}
+
+    for i, name in enumerate(designs):
+        r = setup_one_design(name, force=force)
+        results[r["status"]] += 1
+
+        if r["status"] == "ok":
+            clk_type = "virtual" if r["clock_port"] == "virtual" else "real"
+            clock_stats[clk_type] += 1
+            size_stats[r["size_cat"]] += 1
+            if (i + 1) % 50 == 0 or i == 0:
+                print(f"  [{i+1}/{len(designs)}] {name}: top={r['top']}, "
+                      f"clock={r['clock_port']}, size={r['size_cat']}({r['complexity']})")
+        elif r["status"] == "error":
+            errors.append(r)
+            print(f"  [{i+1}/{len(designs)}] ERROR {name}: {r['reason']}")
+
+    print(f"\nDone: {results['ok']} set up, {results['skip']} skipped, "
+          f"{results['error']} errors")
+    print(f"Clock types: {clock_stats['real']} real, {clock_stats['virtual']} virtual")
+    print(f"Size categories: tiny={size_stats['tiny']}, small={size_stats['small']}, "
+          f"medium={size_stats['medium']}, large={size_stats['large']}")
+
+    if errors:
+        print(f"\nErrors ({len(errors)}):")
+        for e in errors:
+            print(f"  {e['design']}: {e['reason']}")
+
+    # Write summary
+    summary_path = DESIGN_CASES_DIR / "_setup_summary.json"
+    summary_path.write_text(json.dumps({
+        "total": len(designs),
+        "results": results,
+        "clock_stats": clock_stats,
+        "size_stats": size_stats,
+        "errors": errors
+    }, indent=2), encoding="utf-8")
+    print(f"\nSummary written to {summary_path}")
+
+
+if __name__ == "__main__":
+    main()

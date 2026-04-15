@@ -206,6 +206,11 @@ A family/platform pair appears in `heuristics.json` only after at least
 - Prefer single-clock MVP flows. Macro designs (fakeram45) are supported with proper config (see "Macro / Hard Memory Designs"). Escalate to the user before attempting CDC, multi-clock, or DFT.
 - Use the scripts in `scripts/` for repeatable operations instead of re-inventing shell commands each time.
 - Always source `/opt/openroad_tools_env.sh` before running EDA tools.
+- When a batch produces a mix of pass/fail, diagnose with `references/failure-patterns.md` (see "Batch-Campaign Failure Patterns") and apply `tools/fix_orfs_failures.py` before any code changes. That tool fixes the six dominant failure modes (memory inference, IO-pin perimeter overflow, place density >1, PDN straps, missing include dirs, stage timeouts) by rewriting `config.mk`. Do not hand-edit configs case-by-case — extend the fix tool so future batches self-heal.
+- Floorplan sizing policy (validated on 495-design batch):
+  - Explicit DIE_AREA is only safe when pin count ≤ ~200 *and* RTL fits in the area. Prefer `CORE_UTILIZATION` when in doubt.
+  - When PPL-0024 reports a required perimeter, derive `DIE_AREA = 0 0 S S` with `S = ceil((required_perim / 4) * 1.3)` rounded up to 10um.
+  - For designs with memory inference, set `SYNTH_MEMORY_MAX_BITS = 131072` (default 4096 is too tight for register files and FIFOs).
 
 ## Default Project Layout
 

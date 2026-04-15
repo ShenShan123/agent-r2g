@@ -28,7 +28,7 @@ done
 
 echo
 echo "[orfs]"
-ORFS_ROOT="${ORFS_ROOT:-/opt/EDA4AI/OpenROAD-flow-scripts}"
+ORFS_ROOT="${ORFS_ROOT:-/proj/workarea/user5/OpenROAD-flow-scripts}"
 if [[ -d "$ORFS_ROOT/flow" ]]; then
   printf 'ok  ORFS -> %s\n' "$ORFS_ROOT"
 else

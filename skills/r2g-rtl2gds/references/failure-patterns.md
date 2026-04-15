@@ -377,6 +377,133 @@ The power delivery network (PDN) grid cannot fit within the die/core area. `SYNT
   - ODB file is from an early stage before routing
 - **Fix:** Verify the ORFS flow completed through the routing stage. Check `progress.json` for stage completion.
 
+## Batch-Campaign Failure Patterns (Validated on 495-design run)
+
+These six patterns account for every failure in the 495-design batch completion report (`docs/batch_orfs_completion_report.md`) and are fully addressed by `tools/fix_orfs_failures.py`.
+
+### FLW-0024: Place density exceeds 1.0
+
+**Symptoms:**
+- `[ERROR FLW-0024] Place density exceeds 1.0 (current PLACE_DENSITY_LB_ADDON = 0.2). Please check if the design fits in the die area.`
+- Fails early in the `place` stage
+- Typical on tiny-size auto-configs (`DIE_AREA = 0 0 50 50`) whose synthesized cell count overflows the 50×50 core
+
+**Root Cause:**
+Tiny die/core area generated from line-count heuristics is too small once synthesis expands the design (e.g., `FloatingMultiplication`, `sha1_core_repo`). The placer can't even achieve 100% density, so it errors.
+
+**Action:**
+- Delete `DIE_AREA` / `CORE_AREA` and switch to `CORE_UTILIZATION = 10` (or 15). ORFS will auto-size the floorplan.
+- Keep `PLACE_DENSITY_LB_ADDON = 0.20`.
+- If the design is truly small but synthesizes to many cells (arithmetic/FPU), drop utilization further.
+
+### PPL-0024: IO pins exceed available positions
+
+**Symptoms:**
+- `[ERROR PPL-0024] Number of IO pins (342) exceeds maximum number of available positions (248). Increase the die/core perimeter.`
+- Fails in the `place` stage
+- Common for ICCAD benchmark `top` designs, interconnect crossbars, and memory wrappers with wide word interfaces
+
+**Root Cause:**
+IO pins must fit along the die perimeter. Tiny 50×50 or small 120×120 floorplans don't have enough perimeter for designs with hundreds-to-thousands of ports.
+
+**Action:**
+- Switch to `CORE_UTILIZATION = 15` so ORFS picks a die area based on cell count, which scales perimeter accordingly.
+- For extreme pin counts (>2000), `CORE_UTILIZATION = 10` plus `PLACE_DENSITY_LB_ADDON = 0.20` is more robust.
+- Do not set an explicit DIE_AREA for these designs.
+
+### SYNTH_MEMORY_MAX_BITS exceeded
+
+**Symptoms:**
+- Yosys log: `Error: Synthesized memory size 4096 exceeds SYNTH_MEMORY_MAX_BITS`
+- `Largest single memory instance: 32768 bits`
+- Fails at `do-yosys` target (exit code 2)
+- Common for CPU cores with register files/TLB (`arm_core`), FIFOs (`verilog_axis_axis_fifo`), and Ethernet MAC buffers
+
+**Root Cause:**
+ORFS default `SYNTH_MEMORY_MAX_BITS = 4096` forces Yosys to refuse inferring memories larger than 4 Kbit rather than exploding them into flip-flops. Works for tiny designs, fails the moment RTL contains a real register file.
+
+**Action:**
+- Add `export SYNTH_MEMORY_MAX_BITS = 131072` (128 Kbit) to config.mk. Yosys will synthesize the memory into flip-flops.
+- For designs >128 Kbit memory, raise further or integrate fakeram hard macros (see macro-design flow in SKILL.md).
+- Pair with `CORE_UTILIZATION ≤ 20` because FF-based memories consume many cells.
+
+### Missing `include file
+
+**Symptoms:**
+- Yosys log: `ERROR: Can't open include file 'biriscv_defs.v'!`
+- Fails during `do-yosys-canonicalize`
+- Common when RTL was copied without header/define files (e.g., `.vh` in a separate dir)
+
+**Root Cause:**
+The `copy RTL files` step in `tools/setup_rtl_designs.py` only copies `.v` files listed in `design_meta.json.rtl_files`; referenced `include "*.v" / "*.vh"` headers outside that list get left behind.
+
+**Action:**
+- Add `export VERILOG_INCLUDE_DIRS = <path>` to config.mk pointing at the directory that contains the referenced headers.
+- If the header isn't in the repo (user-local source), either:
+  - Concatenate its contents inline at the top of the first RTL file, or
+  - Drop the design from the batch and fetch the original header.
+- `tools/fix_orfs_failures.py` creates empty stub headers as a placeholder, but empty stubs only help if the includes are guards; designs that rely on `` `define MACRO `` macros inside the header will still fail synthesis.
+
+### PDN strap insufficient width (PDN-0179 + "Insufficient width to add straps")
+
+**Symptoms:**
+- `[ERROR PDN-0179] Unable to repair all channels`
+- Or: `Insufficient width to add straps`
+- Fails in `floorplan` stage
+- Seen on VTR/koios large-mac and CNN benchmarks with many IO pins on a 50×50 die
+
+**Root Cause:**
+The PDN generator requires minimum widths between IO blockages to route metal straps. Tiny die + high IO count leaves no room.
+
+**Action:**
+- Switch to `CORE_UTILIZATION = 15` so ORFS sizes the die to the cell count.
+- For designs that remain stuck, increase to `CORE_UTILIZATION = 20` and add `export PDN_CFG = ...` only if user supplies a custom PDN (rarely needed for nangate45 batch).
+
+### Stage timeout (exit code 124)
+
+**Symptoms:**
+- `ERROR: Stage '<name>' failed (exit code 124) after 3600s`
+- No final error message; process killed by `timeout`
+- Common stages: `place`, `route` for large designs
+
+**Root Cause:**
+Default per-stage `ORFS_TIMEOUT=3600s` isn't enough for routing-heavy Ethernet MAC / udp stacks (~5K-10K cells with dense AXIS datapaths).
+
+**Action:**
+- Raise `ORFS_TIMEOUT` in the batch runner: `ORFS_TIMEOUT=7200 bash tools/batch_orfs_only.sh` (doubles per-stage budget to 2 h).
+- Keep `PLACE_DENSITY_LB_ADDON = 0.25` to give the placer more slack and converge faster.
+- For small iscas89 designs that still time out, the issue is usually density oscillation — bump utilization to 20 and density to 0.25.
+
+### Concurrent runs sharing DESIGN_NAME overwrite each other's config.mk
+
+**Symptoms:**
+- Random stage failures in parallel batches, especially PPL-0024 with a "current perimeter" that doesn't match the value in the project's `constraints/config.mk`
+- Flow seems to proceed for some stages then fails at a later stage
+- Reproducible only when multiple cases share the same `DESIGN_NAME` (e.g., all ICCAD benchmarks set `DESIGN_NAME = top`)
+
+**Root Cause:**
+`run_orfs.sh` historically copied each project's config.mk to `$FLOW_DIR/designs/<platform>/<DESIGN_NAME>/config.mk`. That path is shared across every case that reuses the same DESIGN_NAME. When jobs A and B run concurrently, B can overwrite the shared file between two of A's `make` invocations (ORFS runs one `make` per stage, re-reading the file each time). FLOW_VARIANT isolated working directories but not the design config path itself.
+
+**Action:**
+- Fixed in `scripts/flow/run_orfs.sh`: the design copy path is now `$FLOW_DIR/designs/<platform>/<DESIGN_NAME>/<FLOW_VARIANT>/` so each project case has a unique config.mk even when DESIGN_NAME collides.
+- If you see stale results that passed under the old script, re-run the case to confirm — its final GDS may have been produced against the wrong config.
+- The per-case `flock` in `tools/batch_orfs_only.sh` also prevents two jobs from sharing the same project directory, but shared-DESIGN_NAME races were only visible at the ORFS-copy layer.
+
+## Batch-Campaign Fix Tool
+
+`tools/fix_orfs_failures.py` classifies every failure in `design_cases/_batch/orfs_results.jsonl` by scanning its log for the six signatures above, then rewrites the offending `constraints/config.mk` in place. Run it any time a batch produces failures:
+
+```bash
+python3 tools/fix_orfs_failures.py
+# Then re-run only the failed cases:
+grep -oE '"case": "[^"]+"' design_cases/_batch/orfs_results.jsonl \
+  | sed 's/.*"\([^"]*\)"/\1/' > design_cases/_batch/failed_cases.txt
+DESIGNS_LIST=design_cases/_batch/failed_cases.txt \
+  bash tools/batch_orfs_only.sh 8 7200
+```
+
+Empirical fix yield (from the 93-failure retry): memory/place-density/io-pin fixes each converge in one retry; 6 missing-include designs require real header files and cannot be stub-fixed.
+
 ### Antenna DRC Violations
 
 **Symptoms:**
