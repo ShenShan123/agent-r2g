@@ -6,10 +6,17 @@ metadata:
     bins: [python3, yosys, iverilog, vvp, openroad]
     optional_bins: [verilator, klayout, magic, netgen-lvs, gtkwave, sta, opensta]
     env:
-      OPENROAD_EXE: /usr/bin/openroad
-      YOSYS_EXE: /opt/pdk_klayout_openroad/oss-cad-suite/bin/yosys
-      ORFS_ROOT: /opt/EDA4AI/OpenROAD-flow-scripts
-      PDK_ROOT: /opt/pdks
+      # All of these are autodetected by scripts/flow/_env.sh.
+      # Set any of them in your shell (or in references/env.local.sh, or in
+      # a file pointed to by $R2G_ENV_FILE) to override the autodetection.
+      ORFS_ROOT: "(autodetected) path to OpenROAD-flow-scripts checkout"
+      PDK_ROOT: "(autodetected) directory that contains sky130A etc."
+      OPENROAD_EXE: "(autodetected) openroad binary"
+      YOSYS_EXE: "(autodetected) yosys binary"
+      KLAYOUT_CMD: "(autodetected) klayout binary"
+      MAGIC_EXE: "(autodetected) magic binary"
+      NETGEN_EXE: "(autodetected) netgen or netgen-lvs binary"
+      STA_EXE: "(autodetected) opensta binary"
   warnings:
     - Core skill operations are file-based and safe
     - Backend runs invoke make inside ORFS and may take several minutes
@@ -24,17 +31,43 @@ Execute a staged, artifact-first open-source EDA flow from specification to GDSI
 
 ## Environment Setup
 
-Before running any flow, source the environment:
+Every flow script sources `scripts/flow/_env.sh` on entry, which autodetects
+ORFS + tool paths and lets the user override any single value. You do not
+need to source anything manually.
+
+### Resolution order (first hit wins, per value)
+
+1. **Variable already set in the caller's environment** — `ORFS_ROOT=... run_orfs.sh ...` wins unconditionally.
+2. **User env file** — path in `$R2G_ENV_FILE` (if set).
+3. **In-skill override file** — `references/env.local.sh` (copy from `references/env.local.sh.template`).
+4. **ORFS-provided env** — `$ORFS_ROOT/env.sh` (once `ORFS_ROOT` is known).
+5. **System-wide env** — `/opt/openroad_tools_env.sh` (if present).
+6. **Autodetect** — `command -v <tool>` on `$PATH`, then a list of well-known install paths (e.g. `$ORFS_ROOT/tools/install/OpenROAD/bin/openroad`, `$HOME/oss-cad-suite/bin/yosys`, `/usr/local/bin/klayout`).
+
+### Checking what the skill found
 
 ```bash
-source /opt/openroad_tools_env.sh
+bash scripts/flow/check_env.sh
 ```
 
-Key paths:
-- ORFS root: `/opt/EDA4AI/OpenROAD-flow-scripts`
-- ORFS flow directory: `/opt/EDA4AI/OpenROAD-flow-scripts/flow`
-- Available platforms: `nangate45`, `sky130hd`, `sky130hs`, `asap7`, `gf180`, `ihp-sg13g2`
-- Default platform: `nangate45`
+Prints the resolved `ORFS_ROOT`, every tool binary it picked, and the
+platforms it can see. Exits non-zero if a required tool is missing.
+
+### Overriding just a few values
+
+```bash
+# One-off override for a single run
+ORFS_ROOT=/opt/ORFS OPENROAD_EXE=/opt/openroad/bin/openroad \
+  bash scripts/flow/run_orfs.sh design_cases/my_design nangate45
+
+# Or persist overrides in a file
+cp references/env.local.sh.template references/env.local.sh
+# ...then edit the exports you care about; every subsequent flow picks them up.
+```
+
+### Available platforms
+
+`nangate45`, `sky130hd`, `sky130hs`, `asap7`, `gf180`, `ihp-sg13g2` (default: `nangate45`).
 
 ## Workflow
 

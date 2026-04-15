@@ -16,8 +16,14 @@ elif [[ -n "$PROJECT_DIR" && -d "$PROJECT_DIR" ]]; then
 else
   FLOW_VARIANT="base"
 fi
-ORFS_ROOT="${ORFS_ROOT:-/proj/workarea/user5/OpenROAD-flow-scripts}"
-FLOW_DIR="$ORFS_ROOT/flow"
+# Auto-detect ORFS + tools (honors ORFS_ROOT / *_EXE env overrides)
+# shellcheck source=/dev/null
+source "$(dirname "${BASH_SOURCE[0]}")/_env.sh"
+
+if [[ -z "${ORFS_ROOT:-}" || ! -d "$FLOW_DIR" ]]; then
+  echo "ERROR: ORFS not found. Set ORFS_ROOT to your OpenROAD-flow-scripts checkout." >&2
+  exit 1
+fi
 
 if [[ -z "$PROJECT_DIR" ]]; then
   echo "usage: run_rcx.sh <project-dir> [platform]" >&2
@@ -30,13 +36,6 @@ CONFIG_MK="$PROJECT_DIR/constraints/config.mk"
 if [[ ! -f "$CONFIG_MK" ]]; then
   echo "ERROR: config.mk not found at $CONFIG_MK" >&2
   exit 1
-fi
-
-# Source environment
-if [[ -f "$ORFS_ROOT/env.sh" ]]; then
-  source "$ORFS_ROOT/env.sh"
-elif [[ -f /opt/openroad_tools_env.sh ]]; then
-  source /opt/openroad_tools_env.sh
 fi
 
 DESIGN_NAME=$(grep 'DESIGN_NAME' "$CONFIG_MK" | head -1 | sed 's/.*=\s*//' | tr -d ' ')

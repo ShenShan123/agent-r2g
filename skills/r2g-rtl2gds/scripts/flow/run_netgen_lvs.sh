@@ -18,9 +18,14 @@ elif [[ -n "$PROJECT_DIR" && -d "$PROJECT_DIR" ]]; then
 else
   FLOW_VARIANT="base"
 fi
-ORFS_ROOT="${ORFS_ROOT:-/proj/workarea/user5/OpenROAD-flow-scripts}"
-FLOW_DIR="$ORFS_ROOT/flow"
-PDK_ROOT="${PDK_ROOT:-/opt/pdks}"
+# Auto-detect ORFS + tools (honors ORFS_ROOT / PDK_ROOT / *_EXE env overrides)
+# shellcheck source=/dev/null
+source "$(dirname "${BASH_SOURCE[0]}")/_env.sh"
+
+if [[ -z "${ORFS_ROOT:-}" || ! -d "$FLOW_DIR" ]]; then
+  echo "ERROR: ORFS not found. Set ORFS_ROOT to your OpenROAD-flow-scripts checkout." >&2
+  exit 1
+fi
 
 if [[ -z "$PROJECT_DIR" ]]; then
   echo "usage: run_netgen_lvs.sh <project-dir> [platform]" >&2
@@ -35,28 +40,24 @@ if [[ ! -f "$CONFIG_MK" ]]; then
   exit 1
 fi
 
-# Source environment
-if [[ -f "$ORFS_ROOT/env.sh" ]]; then
-  source "$ORFS_ROOT/env.sh"
-elif [[ -f /opt/openroad_tools_env.sh ]]; then
-  source /opt/openroad_tools_env.sh
-fi
-
-# Verify tools are installed
-if ! command -v magic &>/dev/null; then
-  echo "ERROR: magic not found in PATH. Install with: sudo apt install magic" >&2
+# Verify tools are installed (honor MAGIC_EXE / NETGEN_EXE overrides)
+if [[ -z "${MAGIC_EXE:-}" ]] && ! command -v magic &>/dev/null; then
+  echo "ERROR: magic not found. Set MAGIC_EXE or install magic." >&2
   exit 1
 fi
+: "${MAGIC_EXE:=$(command -v magic)}"
 
-NETGEN_CMD=""
-if command -v netgen &>/dev/null; then
-  NETGEN_CMD="netgen"
-elif command -v netgen-lvs &>/dev/null; then
-  NETGEN_CMD="netgen-lvs"
-else
-  echo "ERROR: netgen/netgen-lvs not found in PATH. Install with: sudo apt install netgen-lvs" >&2
-  exit 1
+if [[ -z "${NETGEN_EXE:-}" ]]; then
+  if command -v netgen &>/dev/null; then
+    NETGEN_EXE="$(command -v netgen)"
+  elif command -v netgen-lvs &>/dev/null; then
+    NETGEN_EXE="$(command -v netgen-lvs)"
+  else
+    echo "ERROR: netgen/netgen-lvs not found. Set NETGEN_EXE or install netgen." >&2
+    exit 1
+  fi
 fi
+NETGEN_CMD="$NETGEN_EXE"
 
 DESIGN_NAME=$(grep 'DESIGN_NAME' "$CONFIG_MK" | head -1 | sed 's/.*=\s*//' | tr -d ' ')
 

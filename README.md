@@ -53,16 +53,29 @@ The skill is validated against these tools on Linux (tested on RHEL 8.10). All a
 
 See the skill's `scripts/flow/check_env.sh` for an auto-detect pass.
 
-### Default paths the skill expects
+### Tool discovery
 
-The skill defaults to these locations (override via env var in parentheses):
+The skill autodetects every tool on first use — no manual `source` required. For each value it checks, in order: existing env var → `$R2G_ENV_FILE` snippet → `skills/r2g-rtl2gds/references/env.local.sh` → `$ORFS_ROOT/env.sh` → `/opt/openroad_tools_env.sh` → `command -v <tool>` → well-known install locations.
 
-- ORFS root: `/opt/EDA4AI/OpenROAD-flow-scripts` (`ORFS_ROOT`)
-- Environment script: `/opt/openroad_tools_env.sh` (auto-sourced if present)
-- sky130A PDK: `/opt/pdks/sky130A/`
-- OpenROAD binary: `/usr/bin/openroad`
-- Yosys binary: resolved from `$ORFS_ROOT/tools/install/yosys/bin/yosys` (or from your PATH)
-- Platform configs: `$ORFS_ROOT/flow/platforms/{nangate45,sky130hd,sky130hs,asap7,gf180,ihp-sg13g2}`
+Inspect what it found:
+
+```bash
+bash skills/r2g-rtl2gds/scripts/flow/check_env.sh
+```
+
+Override any single value:
+
+```bash
+# One-off
+ORFS_ROOT=/opt/ORFS OPENROAD_EXE=/opt/or/bin/openroad \
+  bash skills/r2g-rtl2gds/scripts/flow/run_orfs.sh design_cases/mydesign
+
+# Persisted
+cp skills/r2g-rtl2gds/references/env.local.sh{.template,}
+# ...then edit the exports you care about
+```
+
+Supported env vars: `ORFS_ROOT`, `PDK_ROOT`, `OPENROAD_EXE`, `YOSYS_EXE`, `KLAYOUT_CMD`, `MAGIC_EXE`, `NETGEN_EXE`, `STA_EXE`, `IVERILOG_EXE`, `VVP_EXE`, `VERILATOR_EXE`, `R2G_ENV_FILE` (path to a shell snippet sourced before anything else).
 
 ---
 

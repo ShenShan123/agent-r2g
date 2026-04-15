@@ -22,8 +22,15 @@ else
   FLOW_VARIANT="base"
 fi
 FROM_STAGE="${FROM_STAGE:-}"
-ORFS_ROOT="${ORFS_ROOT:-/proj/workarea/user5/OpenROAD-flow-scripts}"
-FLOW_DIR="$ORFS_ROOT/flow"
+
+# Auto-detect ORFS + tools (honors ORFS_ROOT / *_EXE env overrides)
+# shellcheck source=/dev/null
+source "$(dirname "${BASH_SOURCE[0]}")/_env.sh"
+
+if [[ -z "${ORFS_ROOT:-}" || ! -d "$FLOW_DIR" ]]; then
+  echo "ERROR: ORFS not found. Set ORFS_ROOT to your OpenROAD-flow-scripts checkout." >&2
+  exit 1
+fi
 
 if [[ -z "$PROJECT_DIR" ]]; then
   echo "usage: run_orfs.sh <project-dir> [platform]" >&2
@@ -42,13 +49,6 @@ fi
 if [[ ! -f "$SDC_FILE" ]]; then
   echo "ERROR: constraint.sdc not found at $SDC_FILE" >&2
   exit 1
-fi
-
-# Source environment
-if [[ -f "$ORFS_ROOT/env.sh" ]]; then
-  source "$ORFS_ROOT/env.sh"
-elif [[ -f /opt/openroad_tools_env.sh ]]; then
-  source /opt/openroad_tools_env.sh
 fi
 
 # Create a design directory inside ORFS for this project.

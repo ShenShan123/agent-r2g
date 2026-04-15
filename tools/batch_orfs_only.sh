@@ -18,13 +18,10 @@ RESULTS_FILE="${RESULTS_FILE:-$BATCH_DIR/orfs_results.jsonl}"
 LOG_DIR="$BATCH_DIR/logs"
 mkdir -p "$LOG_DIR"
 
-# Source EDA environment
-ORFS_ROOT="${ORFS_ROOT:-/proj/workarea/user5/OpenROAD-flow-scripts}"
-if [[ -f "$ORFS_ROOT/env.sh" ]]; then
-  source "$ORFS_ROOT/env.sh"
-elif [[ -f /opt/openroad_tools_env.sh ]]; then
-  source /opt/openroad_tools_env.sh
-fi
+# Autodetect ORFS + tool paths (shared helper used by every flow script).
+# User can override via ORFS_ROOT / *_EXE env vars or references/env.local.sh.
+# shellcheck source=/dev/null
+source "$SKILL_DIR/scripts/flow/_env.sh"
 
 # Don't clear results — allows resume and multi-group append
 touch "$RESULTS_FILE"
