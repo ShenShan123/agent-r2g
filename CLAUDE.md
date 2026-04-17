@@ -261,6 +261,8 @@ set_output_delay [expr $clk_period * 0.2] -clock core_clock [all_outputs]
 - **Zombie processes after timeout**: Use `setsid timeout` to kill entire process group, preventing orphaned klayout/openroad processes
 - **RCX Tcl script**: `run_rcx.sh` generates `rcx/run_rcx.tcl` with `define_process_corner`, `extract_parasitics`, `write_spef`
 - **Severe WNS/TNS not caught**: Always run `check_timing.py` after `extract_ppa.py` and before signoff. It checks both WNS and TNS — a design with small WNS but large TNS (many violating paths) is equally problematic. Minor violations (WNS >= -2.0 AND TNS >= -10.0) are auto-fixed. Moderate/severe stop the flow with numbered options for the user.
+- **Wrong top module (HLS/multi-module)**: `design_meta.json` may pick a tiny leaf module for HLS-generated or VTR benchmark files. `tools/setup_rtl_designs.py` now auto-detects the correct top via `validate_top_module()`. `tools/fix_orfs_failures.py` also detects this when PDN/density failures occur on multi-module RTL. Known cases: `koios_lenet` (→`myproject`, clock `ap_clk`), `large_mac1` (→`mac1`), `large_mac2` (→`mac2`).
+- **Zero-logic designs**: Pure combinational designs like `assign out = in` synthesize to near-zero cells and cannot go through P&R. Mark as "trivial/skip" — do not retry.
 
 ## Config Tuning Quick Reference
 

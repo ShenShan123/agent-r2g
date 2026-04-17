@@ -210,6 +210,66 @@ def scan_memory_bits(rtl_files):
     return largest
 
 
+def validate_top_module(rtl_files, top_module):
+    """Check if top_module is likely the correct top for multi-module RTL files.
+
+    Returns (validated_top, clock_hint) where validated_top may differ from
+    top_module if a better candidate is found. clock_hint is non-None when the
+    validated top uses a non-standard clock (e.g., ap_clk for HLS designs).
+
+    Heuristic: if the file has many modules and the selected top is a small
+    leaf (few ports, few lines), pick the module that is last in the file,
+    has the most ports, or matches the filename stem.
+    """
+    module_re = re.compile(r'^module\s+(\w+)', re.MULTILINE)
+    all_modules = []
+
+    for f in rtl_files:
+        try:
+            txt = Path(f).read_text(errors='replace')
+        except Exception:
+            continue
+        file_stem = Path(f).stem
+        for m in module_re.finditer(txt):
+            name = m.group(1)
+            start = m.start()
+            end_m = re.search(r'\bendmodule\b', txt[start:])
+            length = end_m.start() if end_m else 0
+            port_m = re.search(r'\(([^)]*)\)', txt[start:start + min(2000, len(txt) - start)])
+            port_count = len(port_m.group(1).split(',')) if port_m else 0
+            all_modules.append({
+                'name': name,
+                'length': length,
+                'ports': port_count,
+                'file': f,
+                'file_stem': file_stem,
+                'offset': start,
+            })
+
+    if len(all_modules) <= 1:
+        return top_module, None
+
+    selected = next((m for m in all_modules if m['name'] == top_module), None)
+    if not selected:
+        return top_module, None
+
+    largest = max(all_modules, key=lambda m: m['length'])
+    most_ports = max(all_modules, key=lambda m: m['ports'])
+    last_module = max(all_modules, key=lambda m: m['offset'])
+    stem_match = next((m for m in all_modules if m['name'] == m['file_stem']), None)
+
+    if len(all_modules) >= 5 and selected['length'] < largest['length'] * 0.1:
+        candidates = [stem_match, most_ports, last_module, largest]
+        for c in candidates:
+            if c and c['name'] != top_module and c['length'] > selected['length'] * 3:
+                clock_hint = None
+                if c['name'] == 'myproject':
+                    clock_hint = 'ap_clk'
+                return c['name'], clock_hint
+
+    return top_module, None
+
+
 def scan_unresolved_includes(rtl_files):
     """Return set of `include targets not present in the RTL directories."""
     referenced = set()
@@ -382,8 +442,14 @@ def setup_one_design(design_name, force=False):
     if not rtl_files:
         return {"design": design_name, "status": "error", "reason": "no RTL files found"}
 
+    # Validate top module for multi-module files (HLS, VTR benchmarks)
+    validated_top, clock_hint = validate_top_module(rtl_files, top_module)
+    if validated_top != top_module:
+        print(f"  WARNING: {design_name}: top module changed from '{top_module}' to '{validated_top}' (auto-detected)")
+        top_module = validated_top
+
     # Detect clock port
-    clock_port = detect_clock_port(rtl_files, top_module)
+    clock_port = clock_hint or detect_clock_port(rtl_files, top_module)
 
     # Generate SDC
     sdc_path = generate_sdc(project_dir, top_module, clock_port)

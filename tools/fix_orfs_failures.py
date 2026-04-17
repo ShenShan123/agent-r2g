@@ -253,11 +253,96 @@ def apply_include_fix(case: str) -> dict:
     }
 
 
+def apply_wrong_top_fix(case: str) -> dict:
+    """Detect and fix wrong top module selection for multi-module RTL files.
+
+    Uses the same validate_top_module logic from setup_rtl_designs.py.
+    """
+    rtl_dir = CASES / case / 'rtl'
+    cfg_path = CASES / case / 'constraints' / 'config.mk'
+    sdc_path = CASES / case / 'constraints' / 'constraint.sdc'
+    cfg = read_cfg(cfg_path)
+    if not cfg:
+        return {'case': case, 'fix': 'wrong_top', 'status': 'no_config'}
+
+    current_top = None
+    m = re.search(r'export\s+DESIGN_NAME\s*=\s*(\S+)', cfg)
+    if m:
+        current_top = m.group(1)
+
+    rtl_files = sorted(rtl_dir.glob('*.v')) + sorted(rtl_dir.glob('*.sv'))
+    if not rtl_files:
+        return {'case': case, 'fix': 'wrong_top', 'status': 'no_rtl'}
+
+    module_re = re.compile(r'^module\s+(\w+)', re.MULTILINE)
+    all_modules = []
+    for f in rtl_files:
+        try:
+            txt = f.read_text(errors='replace')
+        except Exception:
+            continue
+        for mod in module_re.finditer(txt):
+            name = mod.group(1)
+            start = mod.start()
+            end_m = re.search(r'\bendmodule\b', txt[start:])
+            length = end_m.start() if end_m else 0
+            port_m = re.search(r'\(([^)]*)\)', txt[start:start + min(2000, len(txt) - start)])
+            port_count = len(port_m.group(1).split(',')) if port_m else 0
+            all_modules.append({'name': name, 'length': length, 'ports': port_count,
+                                'file_stem': f.stem, 'offset': start})
+
+    if len(all_modules) < 5:
+        return {'case': case, 'fix': 'wrong_top', 'status': 'too_few_modules'}
+
+    selected = next((m for m in all_modules if m['name'] == current_top), None)
+    if not selected:
+        return {'case': case, 'fix': 'wrong_top', 'status': 'top_not_found'}
+
+    largest = max(all_modules, key=lambda m: m['length'])
+    most_ports = max(all_modules, key=lambda m: m['ports'])
+    last_module = max(all_modules, key=lambda m: m['offset'])
+    stem_match = next((m for m in all_modules if m['name'] == m['file_stem']), None)
+
+    if selected['length'] >= largest['length'] * 0.1:
+        return {'case': case, 'fix': 'wrong_top', 'status': 'top_looks_ok'}
+
+    new_top = None
+    for c in [stem_match, most_ports, last_module, largest]:
+        if c and c['name'] != current_top and c['length'] > selected['length'] * 3:
+            new_top = c['name']
+            break
+
+    if not new_top:
+        return {'case': case, 'fix': 'wrong_top', 'status': 'no_better_candidate'}
+
+    clock_hint = 'ap_clk' if new_top == 'myproject' else None
+
+    cfg = ensure_line(cfg, 'DESIGN_NAME', new_top)
+    write_cfg(cfg_path, cfg)
+
+    sdc = read_cfg(sdc_path)
+    if sdc and current_top:
+        sdc = sdc.replace(f'current_design {current_top}', f'current_design {new_top}')
+        if clock_hint:
+            sdc = re.sub(r'set clk_port_name \S+', f'set clk_port_name {clock_hint}', sdc)
+        write_cfg(sdc_path, sdc)
+
+    return {
+        'case': case,
+        'fix': 'wrong_top',
+        'status': 'applied',
+        'old_top': current_top,
+        'new_top': new_top,
+        'clock_hint': clock_hint,
+    }
+
+
 CATEGORY_HANDLERS = {
     'memory_inference': apply_memory_fix,
     'pdn_strap': apply_pdn_fix,
     'timeout': apply_timeout_fix,
     'missing_include': apply_include_fix,
+    'wrong_top': apply_wrong_top_fix,
 }
 
 
@@ -267,7 +352,15 @@ def apply_other(entry) -> dict:
     if 'PPL-0024' in detail:
         return apply_io_fix(case)
     if 'FLW-0024' in detail:
+        result = apply_wrong_top_fix(case)
+        if result.get('status') == 'applied':
+            return result
         return apply_density_fix(case)
+    if 'PDN-0179' in detail:
+        result = apply_wrong_top_fix(case)
+        if result.get('status') == 'applied':
+            return result
+        return apply_pdn_fix(case)
     if 'exit code 124' in detail:
         return apply_timeout_fix(case)
     return {'case': case, 'fix': 'unknown', 'status': 'manual'}
