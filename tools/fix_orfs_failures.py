@@ -18,12 +18,14 @@ from __future__ import annotations
 import json
 import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 
 BASE = Path('/proj/workarea/user5/agent-r2g')
 CASES = BASE / 'design_cases'
 RTL_DIR = BASE / 'rtl_designs'
+TOOLS = BASE / 'tools'
 
 MEM_BITS = 131072   # 128 Kbit — enough for arm_core 32Kbit memories, verilog_ethernet FIFOs
 IO_FIX_UTIL = 15    # CORE_UTILIZATION for io-pin-overflow cases
@@ -337,13 +339,320 @@ def apply_wrong_top_fix(case: str) -> dict:
     }
 
 
+# ---------------------------------------------------------------------------
+# RTL-error detector (LLM-in-the-loop)
+#
+# This handler does NOT patch RTL mechanically. Its job is to:
+#   1. Identify which stage failed (lint / synth / elab / floorplan ...).
+#   2. Extract ~60 lines of log context surrounding the first fatal error.
+#   3. Cross-reference the error against RTL files in the case (via file:line
+#      hints in the log), so the human/LLM operator can see exactly where to
+#      look without trawling the whole log.
+#   4. Record a structural baseline (via check_structural_preservation.py) so
+#      any subsequent RTL edits can be verified for preservation.
+#
+# The dispatcher (apply_other) hands off to this when the failure signature
+# looks RTL-level rather than config-level.
+# ---------------------------------------------------------------------------
+
+RTL_STAGE_HINTS = (
+    ('lint',       ('lint.log', 'verilator', 'iverilog')),
+    ('synth',      ('synth.log', 'yosys', '1_1_yosys', 'Executing AST')),
+    ('elab',       ('elaborat', 'read_verilog', 'Parsing Verilog')),
+    ('floorplan',  ('floorplan', '2_floorplan')),
+    ('place',      ('3_place',)),
+    ('cts',        ('4_cts',)),
+    ('route',      ('5_route', 'detailed route')),
+)
+
+RTL_ERROR_SIGS = (
+    # Yosys
+    re.compile(r'ERROR:\s*(?P<msg>.+)', re.IGNORECASE),
+    re.compile(r'^\s*syntax error', re.MULTILINE | re.IGNORECASE),
+    # Classic synthesis gotchas
+    re.compile(r'(?P<msg>[Ll]atch\s+inferred)'),
+    re.compile(r'(?P<msg>[Mm]ultiple drivers? (?:on|for))'),
+    re.compile(r'(?P<msg>[Cc]ombinational loop)'),
+    # Generic compile errors with a file:line prefix
+    re.compile(r'(?P<msg>\S+\.(?:v|sv|vh|svh):\d+:\s*(?:error|ERROR))'),
+    # Verilator
+    re.compile(r'%Error[^:]*:\s*(?P<msg>.+)'),
+    # iverilog
+    re.compile(r'(?P<msg>\S+\.(?:v|sv):\d+:\s*error)'),
+)
+
+FILE_LINE_RE = re.compile(r'(\S+?\.(?:v|sv|vh|svh)):(\d+)')
+
+
+def _find_log(case_dir: Path) -> Path | None:
+    """Locate the most informative log file for the case.
+
+    Preference order:
+      1. batch_logs/orfs.log (written by batch_run.sh when backend is the
+         failing stage — covers most non-lint/non-sim failures)
+      2. lint/lint.log (lint stage)
+      3. sim/sim.log (simulation stage)
+      4. synth/synth.log (standalone synth runner)
+      5. The newest .log anywhere under batch_logs/
+      6. ORFS internal logs/<platform>/<design>/base/*.log (last resort)
+    """
+    candidates = [
+        case_dir / 'batch_logs' / 'orfs.log',
+        case_dir / 'lint' / 'lint.log',
+        case_dir / 'sim' / 'sim.log',
+        case_dir / 'synth' / 'synth.log',
+    ]
+    for c in candidates:
+        if c.exists() and c.stat().st_size > 0:
+            return c
+    blogs = case_dir / 'batch_logs'
+    if blogs.is_dir():
+        logs = sorted(blogs.rglob('*.log'), key=lambda p: p.stat().st_mtime, reverse=True)
+        if logs:
+            return logs[0]
+    # ORFS flow.log lives under backend/RUN_*/flow.log
+    for flow_log in sorted((case_dir / 'backend').rglob('flow.log'),
+                           key=lambda p: p.stat().st_mtime, reverse=True):
+        return flow_log
+    return None
+
+
+def _detect_stage(log_path: Path, log_tail: str) -> str:
+    name = log_path.name.lower()
+    for stage, hints in RTL_STAGE_HINTS:
+        if any(h in name for h in hints):
+            return stage
+    # Fall back to scanning the tail
+    for stage, hints in RTL_STAGE_HINTS:
+        for h in hints:
+            if h in log_tail:
+                return stage
+    return 'unknown'
+
+
+def _extract_error_window(log_text: str, window: int = 60) -> tuple[str, list[tuple[str, str]]]:
+    """Return (context_excerpt, list_of_detected_errors).
+
+    `list_of_detected_errors` is a de-duplicated sequence of (signature_name,
+    matched_text). `context_excerpt` is `window` lines surrounding the first
+    match (or the tail of the log if no match is found — useful for timeouts).
+    """
+    lines = log_text.splitlines()
+    matches: list[tuple[int, str, str]] = []
+    for i, line in enumerate(lines):
+        for sig in RTL_ERROR_SIGS:
+            m = sig.search(line)
+            if m:
+                msg = (m.groupdict().get('msg') or m.group(0)).strip()
+                matches.append((i, sig.pattern[:40], msg))
+                break
+    if not matches:
+        tail_start = max(0, len(lines) - window)
+        return '\n'.join(lines[tail_start:]), []
+
+    first_i = matches[0][0]
+    lo = max(0, first_i - 10)
+    hi = min(len(lines), first_i + window - 10)
+    excerpt = '\n'.join(lines[lo:hi])
+
+    seen: set[str] = set()
+    deduped: list[tuple[str, str]] = []
+    for _, sig_name, msg in matches[:20]:
+        key = msg[:200]
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append((sig_name, msg))
+    return excerpt, deduped
+
+
+def _extract_file_refs(log_text: str, rtl_dir: Path) -> list[dict]:
+    """Find file:line references in the log and resolve them against the case's rtl/."""
+    refs: list[dict] = []
+    seen: set[tuple[str, int]] = set()
+    for m in FILE_LINE_RE.finditer(log_text):
+        fname, lineno = m.group(1), int(m.group(2))
+        basename = Path(fname).name
+        key = (basename, lineno)
+        if key in seen:
+            continue
+        seen.add(key)
+        # Try to locate the file in the case rtl dir
+        candidates = list(rtl_dir.rglob(basename)) if rtl_dir.exists() else []
+        resolved = str(candidates[0]) if candidates else None
+        refs.append({
+            'file_hint':  fname,
+            'resolved':   resolved,
+            'line':       lineno,
+            'exists':     bool(candidates),
+        })
+    return refs[:20]
+
+
+def _read_snippet(file_path: str, line: int, radius: int = 5) -> str:
+    try:
+        lines = Path(file_path).read_text(errors='replace').splitlines()
+    except Exception:
+        return ''
+    lo = max(0, line - 1 - radius)
+    hi = min(len(lines), line - 1 + radius + 1)
+    buf = []
+    for i in range(lo, hi):
+        marker = '>>>' if (i + 1) == line else '   '
+        buf.append(f'{marker} {i + 1:5d}  {lines[i]}')
+    return '\n'.join(buf)
+
+
+def _snapshot_baseline(case_dir: Path, top_module: str) -> dict:
+    """Record structural baseline via check_structural_preservation.py.
+
+    Returns a {status, path} dict. Failure is non-fatal — the detector is
+    still useful without a baseline, just can't enforce the B-thresholds on
+    subsequent edits.
+    """
+    snap_out = case_dir / '_batch' / 'rtl_baseline.json'
+    snap_out.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        r = subprocess.run(
+            ['python3', str(TOOLS / 'check_structural_preservation.py'), 'snapshot',
+             '--rtl-dir', str(case_dir / 'rtl'),
+             '--top-module', top_module,
+             '--out', str(snap_out)],
+            capture_output=True, text=True, timeout=60,
+        )
+        if r.returncode == 0:
+            return {'status': 'ok', 'path': str(snap_out)}
+        return {'status': 'failed', 'stderr': r.stderr.strip()[:500]}
+    except Exception as e:
+        return {'status': 'error', 'error': str(e)}
+
+
+def apply_rtl_error_fix(case: str) -> dict:
+    """Detect-and-dump handler for RTL-level failures.
+
+    Writes <case>/_batch/rtl_error_context.json with everything needed for an
+    LLM operator to reason about the fix without re-reading raw logs.
+
+    Append-safe: if a prior rtl_error_context.json exists, it is archived to
+    rtl_error_context.<UTC-stamp>.json before the new one is written, and a
+    `history` field accumulates every context dump in rtl_error_history.jsonl.
+    """
+    import datetime
+    case_dir = CASES / case
+    if not case_dir.exists():
+        return {'case': case, 'fix': 'rtl_error', 'status': 'no_case_dir'}
+
+    cfg_path = case_dir / 'constraints' / 'config.mk'
+    top_module = ''
+    if cfg_path.exists():
+        m = re.search(r'export\s+DESIGN_NAME\s*=\s*(\S+)', cfg_path.read_text())
+        if m:
+            top_module = m.group(1)
+
+    log_path = _find_log(case_dir)
+    if log_path is None:
+        return {'case': case, 'fix': 'rtl_error', 'status': 'no_log'}
+
+    log_text = log_path.read_text(errors='replace')
+    # Keep only the last 50K chars for error analysis — plenty for tail context
+    if len(log_text) > 50_000:
+        log_text = log_text[-50_000:]
+
+    stage = _detect_stage(log_path, log_text[-4000:])
+    excerpt, detected = _extract_error_window(log_text)
+    file_refs = _extract_file_refs(log_text, case_dir / 'rtl')
+
+    # Pull a tight source snippet for the first resolvable file:line
+    focus_snippet = ''
+    focus_ref = next((r for r in file_refs if r['resolved']), None)
+    if focus_ref:
+        focus_snippet = _read_snippet(focus_ref['resolved'], focus_ref['line'])
+
+    baseline = _snapshot_baseline(case_dir, top_module) if top_module else {'status': 'no_top'}
+
+    stamp = datetime.datetime.utcnow().strftime('%Y%m%dT%H%M%SZ')
+    context = {
+        'case':              case,
+        'captured_at_utc':   stamp,
+        'top_module':        top_module,
+        'log_path':          str(log_path),
+        'failing_stage':     stage,
+        'detected_errors':   [{'sig': s, 'msg': m} for s, m in detected],
+        'log_excerpt':       excerpt,
+        'file_refs':         file_refs,
+        'focus_file':        focus_ref['resolved'] if focus_ref else None,
+        'focus_line':        focus_ref['line']     if focus_ref else None,
+        'focus_snippet':     focus_snippet,
+        'structural_baseline': baseline,
+    }
+
+    out_dir = case_dir / '_batch'
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / 'rtl_error_context.json'
+    archived_as = None
+    if out_path.exists():
+        # Never overwrite a prior capture — archive with its stamp.
+        archived_as = out_dir / f'rtl_error_context.{stamp}.json'
+        # If that exact stamp collides (shouldn't in practice), add a -N suffix.
+        n = 1
+        while archived_as.exists():
+            archived_as = out_dir / f'rtl_error_context.{stamp}-{n}.json'
+            n += 1
+        out_path.rename(archived_as)
+
+    out_path.write_text(json.dumps(context, indent=2))
+
+    # Also append to an always-growing JSONL so the full history is one grep away.
+    history_path = out_dir / 'rtl_error_history.jsonl'
+    with history_path.open('a') as fh:
+        fh.write(json.dumps({
+            'captured_at_utc': stamp,
+            'case':            case,
+            'failing_stage':   stage,
+            'n_errors':        len(detected),
+            'log_path':        str(log_path),
+            'archived_as':     str(archived_as) if archived_as else None,
+            'context_path':    str(out_path),
+        }) + '\n')
+
+    return {
+        'case':           case,
+        'fix':            'rtl_error',
+        'status':         'context_dumped',
+        'stage':          stage,
+        'n_errors':       len(detected),
+        'n_file_refs':    len(file_refs),
+        'context_path':   str(out_path),
+        'archived_as':    str(archived_as) if archived_as else None,
+        'history_path':   str(history_path),
+        'baseline_status': baseline.get('status'),
+    }
+
+
 CATEGORY_HANDLERS = {
     'memory_inference': apply_memory_fix,
     'pdn_strap': apply_pdn_fix,
     'timeout': apply_timeout_fix,
     'missing_include': apply_include_fix,
     'wrong_top': apply_wrong_top_fix,
+    'rtl_error': apply_rtl_error_fix,
 }
+
+
+RTL_ERROR_DETAIL_SIGS = (
+    'syntax error', 'Yosys ERROR', 'yosys error',
+    'latch inferred', 'multiple drivers', 'combinational loop',
+    'read_verilog', 'Verilog parser', 'elaboration', 'elaborat',
+    '%Error',                          # Verilator
+    '.v:', '.sv:',                     # file:line error prefixes
+    'Cannot resolve module', 'Module reference',
+    'ERROR: Re-definition',
+)
+
+
+def _looks_like_rtl_error(detail: str) -> bool:
+    low = detail.lower()
+    return any(s.lower() in low for s in RTL_ERROR_DETAIL_SIGS)
 
 
 def apply_other(entry) -> dict:
@@ -363,10 +672,21 @@ def apply_other(entry) -> dict:
         return apply_pdn_fix(case)
     if 'exit code 124' in detail:
         return apply_timeout_fix(case)
+    if _looks_like_rtl_error(detail):
+        return apply_rtl_error_fix(case)
     return {'case': case, 'fix': 'unknown', 'status': 'manual'}
 
 
 def main():
+    # Direct-dispatch escape hatch for LLM-in-the-loop RTL error workflows:
+    #   python3 fix_orfs_failures.py --rtl-error <case>
+    # Skips the /tmp/fail_categories.json expectation and just runs the
+    # detector on a single case.
+    if len(sys.argv) >= 3 and sys.argv[1] == '--rtl-error':
+        result = apply_rtl_error_fix(sys.argv[2])
+        print(json.dumps(result, indent=2))
+        return 0 if result.get('status') == 'context_dumped' else 1
+
     with open('/tmp/fail_categories.json') as f:
         cats = json.load(f)
 
