@@ -715,15 +715,18 @@ Insufficient power delivery network (PDN) for the design's power density. Common
 **Symptoms:**
 - `run_drc.sh` times out at 3600s even for small designs (~13K cells)
 - KLayout log shows "or" operations in FreePDK45.lydrc still processing at timeout
+- Or hangs specifically at `FEOL checks` / `"or" in: FreePDK45.lydrc:91`
 - No `6_drc.lyrdb` or `6_drc_count.rpt` produced
+- For large ethernet/AXIS designs (arp-class, ~243K nets), even `DRC_TIMEOUT=7200` (2h) is not enough — the `FEOL checks` step alone runs for >2h at ~90% CPU.
 
 **Root Cause:**
-The FreePDK45.lydrc DRC rule deck involves expensive polygon boolean operations that scale with layout complexity and metal density, not just cell count. The default `DRC_TIMEOUT=3600` is insufficient for this rule deck on any design.
+The FreePDK45.lydrc DRC rule deck involves expensive polygon boolean operations that scale with layout complexity and metal density, not just cell count. The default `DRC_TIMEOUT=3600` is insufficient for this rule deck on any design, and the FEOL (front-end-of-line) boolean on large layouts doesn't parallelize.
 
 **Action:**
-- Set `DRC_TIMEOUT=7200` or higher for nangate45
+- Set `DRC_TIMEOUT=14400` (4h) or higher for nangate45 ethernet-scale designs
 - DRC is the least critical signoff check — LVS and RCX are more important for correctness
 - If DRC is not needed, skip it and rely on LVS+RCX for signoff
+- **nangate45 LVS rule file (`FreePDK45.lylvs`) is NOT shipped with this ORFS checkout.** `run_lvs.sh` gracefully emits `lvs_result.json` with `status=skipped` in this case. If you need LVS on nangate45, obtain the adapted FreePDK45.lylvs from the reference library manually.
 
 ## Missing Hard-Memory Wrapper Stubs (BSG Macro Designs)
 
