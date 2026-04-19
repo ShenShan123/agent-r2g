@@ -69,7 +69,7 @@ Four-bucket retry runner with pipe-separated arg parsing, parallel 3-way executi
 |------|--------|---------|-------|
 | verilog_ethernet_axis_baser_rx_64 | PASS | 572s | Full flow clean |
 | verilog_ethernet_eth_mac_10g | PASS | 972s | Full flow clean |
-| verilog_ethernet_axis_baser_tx_64 | FAIL(2) | 5464s (killed early) | Yosys lfsr AST derivation taking >90 min; killed at ~91 min yosys time. Needs 14400s recovery budget. |
+| verilog_ethernet_axis_baser_tx_64 | FAIL(2) → PASS (recover) | 5464s (killed) → 1037s (recovered) | Pass 4 first run got stuck in Yosys AST derivation for lfsr (killed at 91 min). Recover run with `SYNTH_MEMORY_MAX_BITS=32768` added to config.mk completed the full flow in 17 min. The memory budget addition prevents Yosys's memory-lowering hotpath from exploding the AST, which also unblocks the canonicalize step. Synth 390s, place 475s, route 125s. |
 | verilog_ethernet_arp | PASS | 10026s | Dense routing design; place alone took 52 min, route 92 min |
 | verilog_ethernet_ip_complete | RUNNING | 2h+ | In detailed route |
 | verilog_ethernet_ip_complete_64 | RUNNING | ~80 min | In cts after 65 min place |
