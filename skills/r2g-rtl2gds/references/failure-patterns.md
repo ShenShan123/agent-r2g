@@ -518,6 +518,24 @@ Default per-stage `ORFS_TIMEOUT=3600s` isn't enough for:
 
 **Known cases:** `koios_lenet` (correct top: `myproject`, clock: `ap_clk`), `large_mac1` (correct top: `mac1`), `large_mac2` (correct top: `mac2`).
 
+### LFSR / CRC parametric function expansion in Yosys AST frontend
+
+**Symptoms:**
+- Yosys sits in `AST frontend in derive mode using pre-parsed AST for module '\lfsr'` (or similar parametric module) for 20+ minutes with no other output
+- `1_synth.log` shows repeated `Executing AST frontend in derive mode` lines for the same module under different parameter sets
+- Per-stage timer in `stage_log.jsonl` is empty (synth still running) while `flow.log` last line is an AST derivation
+- Common in Alex Forencich `verilog-ethernet` designs that instantiate `lfsr.v` with varied `DATA_WIDTH` inside `generate for` blocks (e.g. `axis_baser_tx_64` uses 8 widths from 8 to 64 inside a genvar loop)
+
+**Root Cause:**
+`lfsr.v` computes its mask matrix with a pure-Verilog `function` that contains nested loops `O(LFSR_WIDTH × DATA_WIDTH × DATA_WIDTH)` (~2-8K iterations per instance). Each parameterized instantiation forces Yosys to re-derive the AST and fully unroll the function at elaboration time, since the mask is evaluated at constant-folding time. Per-instance derivation is already slow; a genvar loop with N distinct DATA_WIDTHs multiplies the cost linearly.
+
+**Action:**
+- Raise `ORFS_TIMEOUT` to 14400s (4h) for any `verilog_ethernet_axis_baser_*` or `verilog_ethernet_*_fcs` design using the genvar-parameterized lfsr pattern.
+- If repeated across many widths in a genvar loop, rewrite the loop as N explicit instantiations — slightly more verbose but lets Yosys cache the derivation per-parameter set (only marginal improvement on recent Yosys).
+- Do not downgrade `ABC_AREA` or `SYNTH_MEMORY_MAX_BITS` — they do not affect this front-end hotspot.
+
+**Known cases:** `verilog_ethernet_axis_baser_tx_64` (~8 lfsr widths × genvar loop).
+
 ### HLS megadesign (100K+ line RTL, 100+ modules)
 
 **Symptoms:**
