@@ -536,6 +536,66 @@ Default per-stage `ORFS_TIMEOUT=3600s` isn't enough for:
 
 **Known cases:** `verilog_ethernet_axis_baser_tx_64` (~8 lfsr widths × genvar loop).
 
+### Synth timeout triage: AST pathology vs scale timeout (radar split)
+
+`exit code 124` during synth covers **two very different failure modes** that
+must be handled differently. The radar in `tools/fix_orfs_failures.py`
+(`_classify_synth_timeout`, added 2026-04-19) splits them automatically —
+agents should read `hang_class` in `rtl_error_context.json` and branch
+before doing anything else.
+
+| Field in `rtl_error_context.json` | `ast_pathology` | `scale_timeout` |
+|---|---|---|
+| `hang_class` | `"ast_pathology"` | `"scale_timeout"` |
+| `n_post_ast_progress` | **0** (or 1–2 stragglers) | **≥ 3**, typically 50–300 |
+| `last_progress_marker` | `null` | e.g. `"12.13. Executing OPT_DFF pass…"` |
+| `focus_file` / `focus_line` | set (last AST-derive module) | **`null` — intentionally suppressed** |
+| `recovery_hint` | `null` (use the focused module) | populated (config-level recipe) |
+
+**Detection rule**: after the last `Executing AST frontend in derive mode …
+for module '\X'` line, count Yosys per-step progress markers (`OPT`,
+`TECHMAP`, `ABC`, `SYNTH`, `PROC`, `FLATTEN`, `FSM`, `MEMORY`, `ALUMACC`,
+`SHARE`, `DFFLIBMAP`, etc.). Three or more → `scale_timeout`. Fewer →
+`ast_pathology`. Zero AST-derive lines at all → `unknown`.
+
+**Why we need the split**: naming "the last AST-derive module" as the
+suspect is correct for `ast_pathology` (Yosys really did freeze there)
+but actively harmful for `scale_timeout` — the last AST-derive module is
+usually a small, innocent leaf (typically hierarchically or
+alphabetically last) that the agent will then try to rewrite, wasting
+cycles and risking regressions in otherwise-correct code. For
+`scale_timeout` the real hang point is tens of thousands of gates and
+dozens of passes later, in a flattened netlist where no single RTL
+module is the suspect.
+
+**Action for `ast_pathology`**: fix the focused RTL module (see the LFSR
+section above and the HLS megadesign section below for the two dominant
+sub-cases).
+
+**Action for `scale_timeout`** (use the `recovery_hint` as a checklist):
+1. Raise `ORFS_TIMEOUT` to 14400 s (4 h) or 28800 s (8 h) for megadesigns.
+2. Enable `SYNTH_HIERARCHICAL=1` with `ABC_AREA=0` to keep repeated
+   sub-units (systolic PEs, MAC arrays) from flattening into an N-way
+   pairwise OPT target.
+3. If still too slow, factor the top — synthesize compute
+   (`matmul_*_systolic`, `gemm_*_core`) separately from AXI/bus wrappers
+   and tie them together at top level.
+4. **Do not** edit `last_ast_module` as if it were the suspect. Do not
+   lower `SYNTH_MEMORY_MAX_BITS` (only hides memories). Do not disable
+   ABC (ABC already completed cleanly by the time `OPT_DFF` times out).
+
+**Known `scale_timeout` cases**:
+- `koios_gemm_layer` — 400-PE BF16 systolic array, hand-written
+  (non-HLS). Terminates at `12.13 OPT_DFF` after ~90 successful sub-steps
+  and ~210 post-AST progress markers. Pre-fix radar falsely pointed at
+  `FPMult_PrepModule` (68-line pure-combinational leaf). Recovery:
+  `ORFS_TIMEOUT=14400` + `SYNTH_HIERARCHICAL=1`.
+- `arm_core`, `verilog_axis_axis_ram_switch` — legitimately large; same
+  recipe.
+- `koios_lenet` and other HLS megadesigns — see the HLS section below
+  for the variant that prefers `SYNTH_HIERARCHICAL=0 ABC_AREA=0` because
+  HLS output lacks exploitable hierarchical repetition.
+
 ### HLS megadesign (100K+ line RTL, 100+ modules)
 
 **Symptoms:**

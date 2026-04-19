@@ -494,6 +494,19 @@ _AST_DERIVE_RE = re.compile(
     r'Executing AST frontend in derive mode .*? for module `\\([A-Za-z_]\w*)\'',
 )
 
+# Yosys per-step progress markers that are *not* AST-derive. If these appear
+# after the last AST-derive line, the run is making real progress — the
+# timeout is a scale/budget issue, not an AST pathology. Keep this list
+# coarse-grained: we only need to know "is there any post-AST progress".
+_POST_AST_PROGRESS_RE = re.compile(
+    r'^\s*\d+(?:\.\d+)*\.\s*Executing\s+('
+    r'OPT(_[A-Z]+)?|OPT pass|PROC(_[A-Z]+)?|FLATTEN|TECHMAP|ABC|SYNTH|FSM(_[A-Z]+)?|'
+    r'MEMORY(_[A-Z]+)?|ALUMACC|SHARE|WREDUCE|PEEPOPT|DFFLIBMAP|DFFLEGALIZE|'
+    r'EXTRACT_FA|CHECK|HIERARCHY|SETUNDEF|SPLITNETS|HILOMAP|INSBUF|BMUXMAP|DEMUXMAP'
+    r')\b',
+    re.MULTILINE,
+)
+
 
 def _trim_to_latest_run(log_text: str) -> str:
     """Return only the slice covering the most recent ORFS invocation.
@@ -506,6 +519,90 @@ def _trim_to_latest_run(log_text: str) -> str:
     return log_text[starts[-1]:]
 
 
+def _classify_synth_timeout(log_text: str) -> dict:
+    """Distinguish AST-pathology hangs from scale/CPU-bound timeouts.
+
+    Two very different failure modes show up as `exit code 124`:
+
+    * **ast_pathology** (lfsr-class) — Yosys freezes inside AST derive /
+      constant-function folding. The log stops emitting within one or two
+      lines of an `Executing AST frontend in derive mode ... module '\X'`
+      marker, and no subsequent Yosys pass ever starts. Root cause is in
+      the RTL (pathological parametric functions, recursive generate,
+      etc.). Recovery: rewrite that specific module.
+
+    * **scale_timeout** (gemm_layer-class) — the AST derives complete in
+      seconds, and Yosys makes real progress through dozens of later
+      passes (FLATTEN / OPT / TECHMAP / ABC / DFFLIBMAP / …) before the
+      per-stage timeout fires. Root cause is budget, not RTL. Recovery
+      is config-level: raise `ORFS_TIMEOUT`, enable `SYNTH_HIERARCHICAL=1`,
+      or factor the design.
+
+    Pointing the scale-timeout case at "the last named module in the
+    AST-derive list" is actively harmful: it blames an innocent leaf
+    module (typically alphabetically/hierarchically last) that the agent
+    will then try to rewrite, wasting cycles and risking regressions in
+    otherwise-correct code.
+
+    Returns a dict with:
+      - `hang_class`          : "ast_pathology" | "scale_timeout" | "unknown"
+      - `last_ast_module`     : str | None — last module named in AST-derive
+      - `n_post_ast_progress` : int — count of post-AST Yosys progress lines
+      - `last_progress_marker`: str | None — tail progress line (for triage)
+    """
+    ast_matches = list(_AST_DERIVE_RE.finditer(log_text))
+    last_ast_module = ast_matches[-1].group(1) if ast_matches else None
+    last_ast_end = ast_matches[-1].end() if ast_matches else 0
+
+    # Count progress markers that occur *after* the last AST-derive line.
+    post_ast_slice = log_text[last_ast_end:]
+    post_ast_progress = list(_POST_AST_PROGRESS_RE.finditer(post_ast_slice))
+
+    # Also capture the very last progress marker (for the context dump) so
+    # a human reviewer can see where Yosys was when SIGTERM hit.
+    last_progress_marker: str | None = None
+    if post_ast_progress:
+        last_match = post_ast_progress[-1]
+        # Grab the whole line so step numbering survives.
+        start = post_ast_slice.rfind('\n', 0, last_match.start()) + 1
+        end = post_ast_slice.find('\n', last_match.start())
+        if end == -1:
+            end = len(post_ast_slice)
+        last_progress_marker = post_ast_slice[start:end].strip()
+
+    # Classification threshold: require ≥3 post-AST progress markers to call
+    # it scale_timeout. One or two stragglers could be emitted by Yosys before
+    # an AST derive truly blocks — we want a clear signal that later passes
+    # really ran.
+    if len(post_ast_progress) >= 3:
+        hang_class = 'scale_timeout'
+    elif ast_matches:
+        hang_class = 'ast_pathology'
+    else:
+        hang_class = 'unknown'
+
+    return {
+        'hang_class':           hang_class,
+        'last_ast_module':      last_ast_module,
+        'n_post_ast_progress':  len(post_ast_progress),
+        'last_progress_marker': last_progress_marker,
+    }
+
+
+SCALE_TIMEOUT_RECOVERY_HINT = (
+    "Scale/CPU-bound timeout (exit 124). AST derive completed cleanly; "
+    "Yosys made real progress through later passes (see "
+    "last_progress_marker) but ran out of the per-stage ORFS_TIMEOUT "
+    "budget. This is NOT an RTL bug — do not edit the last AST-derive "
+    "module as a 'suspect'. Recovery is config-level: "
+    "(1) raise ORFS_TIMEOUT to 14400s or 28800s for megadesigns; "
+    "(2) consider SYNTH_HIERARCHICAL=1 with ABC_AREA=0 to avoid "
+    "flattening identical sub-units; "
+    "(3) for very large designs, factor the top-level and synthesize "
+    "sub-modules separately."
+)
+
+
 def _synth_hang_focus(log_text: str, rtl_dir: Path) -> dict | None:
     """Focus fallback for synth hangs / timeouts (exit 124).
 
@@ -514,6 +611,10 @@ def _synth_hang_focus(log_text: str, rtl_dir: Path) -> dict | None:
     the LAST `AST frontend in derive mode ... module '\name'` line names
     the module Yosys was deriving when it froze. Resolve that module to
     a file in the case's rtl/ tree.
+
+    ONLY call this when `_classify_synth_timeout` says `ast_pathology`;
+    for `scale_timeout` the last AST-derive module is NOT the suspect
+    (see the gemm_layer false-positive post-mortem, 2026-04-19).
 
     Returns a file_refs-style dict or None if no match / unresolvable.
     """
@@ -703,17 +804,37 @@ def apply_rtl_error_fix(case: str) -> dict:
 
     # Fallback heuristic for synth hangs (exit 124): no ERROR produces a
     # file:line, so without this the focus points at whatever benign warning
-    # happened to name a file. The *last* AST-derive line names the module
-    # Yosys was folding when it froze — that's our real suspect.
+    # happened to name a file. But we must distinguish two very different
+    # failure modes that both show up as "exit 124":
+    #   (a) ast_pathology (lfsr-class): Yosys freezes inside an AST derive.
+    #       Focus = last AST-derive module, which really IS the suspect.
+    #   (b) scale_timeout (gemm_layer-class): AST derives all complete, and
+    #       Yosys makes real progress through later passes (FLATTEN / OPT /
+    #       TECHMAP / ABC / DFFLIBMAP / …) until the per-stage ORFS_TIMEOUT
+    #       fires. Naming "the last AST-derive module" here is a FALSE
+    #       POSITIVE — that module is alphabetically last in the hierarchy,
+    #       not the one Yosys is stuck on. Suppress the focus entirely and
+    #       hand the caller a config-level recovery hint instead.
     is_synth_hang = stage == 'synth' and any(
         'exit code 124' in m or 'timed out' in m.lower() or 'after 3600s' in m
         for _, m in detected
     )
+    hang_classification: dict = {}
+    recovery_hint: str | None = None
     if is_synth_hang:
-        hang_ref = _synth_hang_focus(log_text, case_dir / 'rtl')
-        if hang_ref:
-            file_refs.insert(0, hang_ref)
-            focus_ref = hang_ref
+        hang_classification = _classify_synth_timeout(log_text)
+        if hang_classification['hang_class'] == 'ast_pathology':
+            hang_ref = _synth_hang_focus(log_text, case_dir / 'rtl')
+            if hang_ref:
+                file_refs.insert(0, hang_ref)
+                focus_ref = hang_ref
+        elif hang_classification['hang_class'] == 'scale_timeout':
+            # Explicit suppression: no focus_file, no focus_snippet. The
+            # existing file_refs (from benign Warning lines) are left in
+            # place but are NOT promoted to focus — the caller must not
+            # treat them as suspects.
+            focus_ref = None
+            recovery_hint = SCALE_TIMEOUT_RECOVERY_HINT
 
     if focus_ref:
         focus_snippet = _read_snippet(focus_ref['resolved'], focus_ref['line'])
@@ -735,6 +856,15 @@ def apply_rtl_error_fix(case: str) -> dict:
         'focus_line':        focus_ref['line']     if focus_ref else None,
         'focus_snippet':     focus_snippet,
         'structural_baseline': baseline,
+        # Synth-hang classification (present only for exit=124 in synth).
+        # hang_class = "ast_pathology" | "scale_timeout" | "unknown". When
+        # scale_timeout, focus_file is intentionally None — see comments
+        # above for why.
+        'hang_class':            hang_classification.get('hang_class'),
+        'last_ast_module':       hang_classification.get('last_ast_module'),
+        'n_post_ast_progress':   hang_classification.get('n_post_ast_progress'),
+        'last_progress_marker':  hang_classification.get('last_progress_marker'),
+        'recovery_hint':         recovery_hint,
     }
 
     out_dir = case_dir / '_batch'
@@ -777,6 +907,8 @@ def apply_rtl_error_fix(case: str) -> dict:
         'archived_as':    str(archived_as) if archived_as else None,
         'history_path':   str(history_path),
         'baseline_status': baseline.get('status'),
+        'hang_class':     hang_classification.get('hang_class'),
+        'recovery_hint':  recovery_hint,
     }
 
 
