@@ -63,9 +63,20 @@ Added three cautionary bullets:
 
 Four-bucket retry runner with pipe-separated arg parsing, parallel 3-way execution, and per-design JSONL logging.
 
-## Results
+## Results (in progress)
 
-(Filled in as the batch completes. First completion: `verilog_ethernet_axis_baser_rx_64` → pass in 572s, confirming the theory that bucket A only needed a full re-run.)
+| Case | Result | Elapsed | Notes |
+|------|--------|---------|-------|
+| verilog_ethernet_axis_baser_rx_64 | PASS | 572s | Full flow clean |
+| verilog_ethernet_eth_mac_10g | PASS | 972s | Full flow clean |
+| verilog_ethernet_axis_baser_tx_64 | FAIL(2) | 5464s (killed early) | Yosys lfsr AST derivation taking >90 min; killed at ~91 min yosys time. Needs 14400s recovery budget. |
+| verilog_ethernet_arp | PASS | 10026s | Dense routing design; place alone took 52 min, route 92 min |
+| verilog_ethernet_ip_complete | RUNNING | 2h+ | In detailed route |
+| verilog_ethernet_ip_complete_64 | RUNNING | ~80 min | In cts after 65 min place |
+| verilog_ethernet_udp_complete | RUNNING | just started | |
+| (12 others) | NOT_STARTED | | Queued |
+
+Key confirmation from Bucket A results so far: the theory that these designs just needed a full-flow re-run (not config changes) was correct for 3/4 completed. The outlier is `axis_baser_tx_64` — its genvar-parameterized lfsr pattern needs more than 2h of Yosys front-end budget and will be handled by `pass4_recover_timeouts.sh` with 14400s.
 
 ## Overall Progress
 

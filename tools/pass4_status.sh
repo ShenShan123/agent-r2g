@@ -8,7 +8,7 @@
 # Pass a shorter or newer prefix if you re-launch later.
 
 set -u
-PREFIX="${1:-RUN_2026-04-19_01}"
+PREFIX="${1:-RUN_2026-04-19}"
 BASE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/design_cases"
 
 BUCKETS=(
