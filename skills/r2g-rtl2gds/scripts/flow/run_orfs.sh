@@ -112,6 +112,25 @@ echo "Timeout: ${ORFS_TIMEOUT}s"
 # Stage-by-stage execution support
 ORFS_STAGES_LIST="${ORFS_STAGES:-synth floorplan place cts route finish}"
 
+# Guard: if FROM_STAGE is set but doesn't match any known stage, abort loudly.
+# Without this, the stage loop silently skips every stage and exits 0, which has
+# caused ghost "passes" in batch runners that accidentally passed a timeout value
+# (e.g. "14400") to FROM_STAGE.
+if [[ -n "$FROM_STAGE" ]]; then
+  stage_known=false
+  for _s in $ORFS_STAGES_LIST; do
+    if [[ "$_s" == "$FROM_STAGE" ]]; then
+      stage_known=true
+      break
+    fi
+  done
+  if [[ "$stage_known" != "true" ]]; then
+    echo "ERROR: FROM_STAGE='$FROM_STAGE' does not match any stage in ORFS_STAGES_LIST='$ORFS_STAGES_LIST'" >&2
+    echo "       Valid stages: $ORFS_STAGES_LIST" >&2
+    exit 2
+  fi
+fi
+
 run_stage() {
   local stage="$1"
   echo ""

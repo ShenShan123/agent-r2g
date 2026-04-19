@@ -161,21 +161,73 @@ def apply_pdn_fix(case: str) -> dict:
     return {'case': case, 'fix': 'pdn_strap', 'status': 'applied'}
 
 
+def _last_timed_out_stage(case: str) -> str | None:
+    """Return the stage name that last timed out (status 124) for this case.
+    Reads backend/RUN_*/stage_log.jsonl from the most recent run, if present.
+    """
+    run_root = CASES / case / 'backend'
+    if not run_root.is_dir():
+        return None
+    runs = sorted((p for p in run_root.iterdir() if p.is_dir() and p.name.startswith('RUN_')),
+                  key=lambda p: p.name, reverse=True)
+    for run in runs:
+        log = run / 'stage_log.jsonl'
+        if not log.exists():
+            continue
+        last = None
+        for ln in log.read_text(errors='ignore').splitlines():
+            try:
+                last = json.loads(ln)
+            except Exception:
+                continue
+        if last and last.get('status') == 124:
+            return last.get('stage')
+        # This run didn't end in timeout — don't scan older runs
+        return None
+    return None
+
+
 def apply_timeout_fix(case: str) -> dict:
     """Tag the config so the batch runner uses a longer timeout.
-    Small iscas designs that time out actually hit infinite loops in detailed routing;
-    for these, lower density often helps more than longer timeout. Do both.
+
+    Stage-aware:
+      - synth/floorplan timeout -> caller must raise ORFS_TIMEOUT (e.g. 14400s).
+        Do NOT lower SYNTH_MEMORY_MAX_BITS — that may cause synth to reject
+        legitimately-inferred FIFO memories (4096x11 = 45K bits etc.) and
+        fail the flow earlier.
+      - place/cts timeout    -> lower density slightly; caller must raise ORFS_TIMEOUT.
+                                Cell count explosion from FF-based memories is
+                                better handled by FROM_STAGE=place with 14400s
+                                than by shrinking the memory budget.
+      - route timeout        -> drop density + suggest FROM_STAGE=route.
+      - unknown stage        -> conservative density drop.
+
+    In all cases: the timeout must be raised by the caller via ORFS_TIMEOUT env var;
+    this function only adjusts the config to reduce placement/routing difficulty.
     """
     cfg_path = CASES / case / 'constraints' / 'config.mk'
     cfg = read_cfg(cfg_path)
     if not cfg:
         return {'case': case, 'fix': 'timeout', 'status': 'no_config'}
-    # Lower utilization relaxes detailed routing
+
+    stage = _last_timed_out_stage(case)
+    details: list[str] = []
+
     if 'DIE_AREA' in cfg:
         cfg = switch_to_utilization(cfg, 20)
+        details.append('die_area->utilization=20')
     cfg = ensure_line(cfg, 'PLACE_DENSITY_LB_ADDON', '0.25')
+    details.append('density=0.25')
+
     write_cfg(cfg_path, cfg)
-    return {'case': case, 'fix': 'timeout', 'status': 'applied'}
+    return {
+        'case': case,
+        'fix': 'timeout',
+        'status': 'applied',
+        'stage': stage or 'unknown',
+        'changes': details,
+        'caller_must_raise_timeout_to': 14400,
+    }
 
 
 def find_include_in_rtl(case: str, include_name: str) -> Path | None:
@@ -387,17 +439,25 @@ FILE_LINE_RE = re.compile(r'(\S+?\.(?:v|sv|vh|svh)):(\d+)')
 def _find_log(case_dir: Path) -> Path | None:
     """Locate the most informative log file for the case.
 
-    Preference order:
-      1. batch_logs/orfs.log (written by batch_run.sh when backend is the
-         failing stage — covers most non-lint/non-sim failures)
-      2. lint/lint.log (lint stage)
-      3. sim/sim.log (simulation stage)
-      4. synth/synth.log (standalone synth runner)
-      5. The newest .log anywhere under batch_logs/
-      6. ORFS internal logs/<platform>/<design>/base/*.log (last resort)
+    Preference order (first existing + non-empty hit wins):
+      1. case_dir/batch_logs/orfs.log — per-case log from batch_run.sh /
+         run_two_designs.sh wrappers.
+      2. design_cases/_batch/logs/<case>.log — *authoritative sweep log* from
+         batch_orfs_only.sh / run_full_sweep.sh. This is preferred over any
+         RUN_*/flow.log because an ORFS RUN directory may have been overwritten
+         by a later successful retry (orphan or otherwise), which would make
+         the flow.log look like a pass and mask the real failure the sweep
+         recorded. The sweep log appends per run and is never truncated.
+      3. lint/lint.log (lint stage)
+      4. sim/sim.log (simulation stage)
+      5. synth/synth.log (standalone synth runner)
+      6. Newest .log anywhere under case_dir/batch_logs/
+      7. Newest backend/RUN_*/flow.log (last resort — may be a later success).
     """
+    sweep_log = case_dir.parent / '_batch' / 'logs' / f'{case_dir.name}.log'
     candidates = [
         case_dir / 'batch_logs' / 'orfs.log',
+        sweep_log,
         case_dir / 'lint' / 'lint.log',
         case_dir / 'sim' / 'sim.log',
         case_dir / 'synth' / 'synth.log',
@@ -415,6 +475,76 @@ def _find_log(case_dir: Path) -> Path | None:
                            key=lambda p: p.stat().st_mtime, reverse=True):
         return flow_log
     return None
+
+
+# Run-separator markers emitted by batch_orfs_only.sh / batch_run.sh /
+# run_two_designs.sh at the top of every ORFS invocation. If the sweep log
+# spans several days of retries, we only want to diagnose the most recent
+# block — historical errors would otherwise dominate the first-match window.
+_RUN_SEPARATOR_RE = re.compile(
+    r'^(?:\[[0-9:]+\][^\n]*?ORFS starting\.\.\.|Starting ORFS run:\s*RUN_\S+)',
+    re.MULTILINE,
+)
+
+# Yosys AST-derive progress lines. A synth hang leaves the last one dangling
+# — whichever module it just started deriving is the one that blew up.
+#   e.g.  "10.6. Executing AST frontend in derive mode using pre-parsed AST
+#          for module `\lfsr'."
+_AST_DERIVE_RE = re.compile(
+    r'Executing AST frontend in derive mode .*? for module `\\([A-Za-z_]\w*)\'',
+)
+
+
+def _trim_to_latest_run(log_text: str) -> str:
+    """Return only the slice covering the most recent ORFS invocation.
+
+    If no run-separator is found (e.g. lint.log), the text is returned as-is.
+    """
+    starts = [m.start() for m in _RUN_SEPARATOR_RE.finditer(log_text)]
+    if not starts:
+        return log_text
+    return log_text[starts[-1]:]
+
+
+def _synth_hang_focus(log_text: str, rtl_dir: Path) -> dict | None:
+    """Focus fallback for synth hangs / timeouts (exit 124).
+
+    When Yosys hangs inside constant-function AST derive, there is no
+    error line to anchor on — the log simply stops mid-stream. Heuristic:
+    the LAST `AST frontend in derive mode ... module '\name'` line names
+    the module Yosys was deriving when it froze. Resolve that module to
+    a file in the case's rtl/ tree.
+
+    Returns a file_refs-style dict or None if no match / unresolvable.
+    """
+    matches = list(_AST_DERIVE_RE.finditer(log_text))
+    if not matches:
+        return None
+    mod_name = matches[-1].group(1)
+    if not rtl_dir.exists():
+        return None
+    # Prefer <module>.v, fall back to any .v containing "module <name>"
+    candidates = list(rtl_dir.rglob(f'{mod_name}.v'))
+    if not candidates:
+        for vfile in rtl_dir.rglob('*.v'):
+            try:
+                if re.search(rf'^\s*module\s+{re.escape(mod_name)}\b',
+                             vfile.read_text(errors='replace'), re.MULTILINE):
+                    candidates = [vfile]
+                    break
+            except Exception:
+                continue
+    if not candidates:
+        return None
+    # Line 1 is the best we can do without deeper parsing — the hang
+    # doesn't point at a specific line, only at the module.
+    return {
+        'file_hint': f'{mod_name}.v (from last AST-derive progress line)',
+        'resolved':  str(candidates[0]),
+        'line':      1,
+        'exists':    True,
+        'source':    'synth_hang_heuristic',
+    }
 
 
 def _detect_stage(log_path: Path, log_tail: str) -> str:
@@ -553,7 +683,12 @@ def apply_rtl_error_fix(case: str) -> dict:
     if log_path is None:
         return {'case': case, 'fix': 'rtl_error', 'status': 'no_log'}
 
-    log_text = log_path.read_text(errors='replace')
+    log_text_full = log_path.read_text(errors='replace')
+    # Cumulative sweep logs can concatenate every historical run of this case.
+    # Diagnose only the latest invocation so old ERRORs don't shadow the real
+    # current failure. Falls back to the whole file if no separator is found.
+    log_text = _trim_to_latest_run(log_text_full)
+    trimmed_from_full = len(log_text_full) != len(log_text)
     # Keep only the last 50K chars for error analysis — plenty for tail context
     if len(log_text) > 50_000:
         log_text = log_text[-50_000:]
@@ -565,6 +700,21 @@ def apply_rtl_error_fix(case: str) -> dict:
     # Pull a tight source snippet for the first resolvable file:line
     focus_snippet = ''
     focus_ref = next((r for r in file_refs if r['resolved']), None)
+
+    # Fallback heuristic for synth hangs (exit 124): no ERROR produces a
+    # file:line, so without this the focus points at whatever benign warning
+    # happened to name a file. The *last* AST-derive line names the module
+    # Yosys was folding when it froze — that's our real suspect.
+    is_synth_hang = stage == 'synth' and any(
+        'exit code 124' in m or 'timed out' in m.lower() or 'after 3600s' in m
+        for _, m in detected
+    )
+    if is_synth_hang:
+        hang_ref = _synth_hang_focus(log_text, case_dir / 'rtl')
+        if hang_ref:
+            file_refs.insert(0, hang_ref)
+            focus_ref = hang_ref
+
     if focus_ref:
         focus_snippet = _read_snippet(focus_ref['resolved'], focus_ref['line'])
 
@@ -576,6 +726,7 @@ def apply_rtl_error_fix(case: str) -> dict:
         'captured_at_utc':   stamp,
         'top_module':        top_module,
         'log_path':          str(log_path),
+        'log_trimmed_to_latest_run': trimmed_from_full,
         'failing_stage':     stage,
         'detected_errors':   [{'sig': s, 'msg': m} for s, m in detected],
         'log_excerpt':       excerpt,

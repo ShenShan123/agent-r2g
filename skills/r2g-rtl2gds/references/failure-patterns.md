@@ -464,15 +464,22 @@ The PDN generator requires minimum widths between IO blockages to route metal st
 **Symptoms:**
 - `ERROR: Stage '<name>' failed (exit code 124) after 3600s`
 - No final error message; process killed by `timeout`
-- Common stages: `place`, `route` for large designs
+- Common stages: `synth` for memory-heavy designs; `place` for FIFO/ethernet FIFO designs; `route` for routing-congested designs
 
 **Root Cause:**
-Default per-stage `ORFS_TIMEOUT=3600s` isn't enough for routing-heavy Ethernet MAC / udp stacks (~5K-10K cells with dense AXIS datapaths).
+Default per-stage `ORFS_TIMEOUT=3600s` isn't enough for:
+- Synthesis of designs with large memories (SYNTH_MEMORY_MAX_BITS=131072 expands 256×512b RAMs to 131K flops)
+- Placement of FIFO designs (eth_mac_1g_fifo, axis_ram_switch) where FF-based memories consume 50K+ cells
+- Routing of dense AXIS datapaths (~5K-10K cells)
 
 **Action:**
-- Raise `ORFS_TIMEOUT` in the batch runner: `ORFS_TIMEOUT=7200 bash tools/batch_orfs_only.sh` (doubles per-stage budget to 2 h).
+- Raise `ORFS_TIMEOUT` per bucket:
+  - Synth-timeout designs (arm_core, koios_gemm_layer): `ORFS_TIMEOUT=14400` (4h) and stay resume-ready
+  - Place-timeout FIFO designs (axis_ram_switch, eth_mac_*_fifo): `ORFS_TIMEOUT=14400` + drop `SYNTH_MEMORY_MAX_BITS` to `32768` to shrink cell count
+  - Route-timeout designs (axis_*fifo_adapter, zipcpu_wbdmac): use `FROM_STAGE=route ORFS_TIMEOUT=14400` to resume after CTS
 - Keep `PLACE_DENSITY_LB_ADDON = 0.25` to give the placer more slack and converge faster.
 - For small iscas89 designs that still time out, the issue is usually density oscillation — bump utilization to 20 and density to 0.25.
+- Per-stage elapsed in `backend/RUN_*/stage_log.jsonl` tells you which stage timed out; always read this before choosing a fix.
 
 ### Concurrent runs sharing DESIGN_NAME overwrite each other's config.mk
 
@@ -510,6 +517,25 @@ Default per-stage `ORFS_TIMEOUT=3600s` isn't enough for routing-heavy Ethernet M
 - Re-run with a full clean (remove old `backend/RUN_*/` directories).
 
 **Known cases:** `koios_lenet` (correct top: `myproject`, clock: `ap_clk`), `large_mac1` (correct top: `mac1`), `large_mac2` (correct top: `mac2`).
+
+### HLS megadesign (100K+ line RTL, 100+ modules)
+
+**Symptoms:**
+- RTL file is >100K lines with dozens of similarly-named auto-generated modules (e.g., `cast_ap_fixed_*`, `conv_2d_latency_*`)
+- Yosys synthesis still running after 2+ hours with no error
+- ABC technology mapping alone takes >1h
+- Even with `SYNTH_MEMORY_MAX_BITS=131072` synth timeouts at 14400s
+
+**Root Cause:**
+HLS tools (Vivado HLS, Bambu) generate flat, hierarchy-heavy Verilog with thousands of micro-modules and inlined memories. Yosys front-end scales poorly: module loading time is quadratic in module count, ABC mapping scales with pre-mapping cell count (millions post-unfolding).
+
+**Action:**
+- These designs need dedicated multi-hour synthesis runs, not bulk batch.
+- Preferred: feed a pre-synthesized gate-level netlist (Vivado HLS can output one) directly to ORFS floorplan.
+- If RTL-to-GDS is required, run with `ORFS_TIMEOUT=28800` (8h) on a dedicated host, `SYNTH_HIERARCHICAL=0`, and `ABC_AREA=0` (delay mode is faster on huge designs).
+- Mark as "megadesign/long-run" in batch tracking; do not count against a bulk batch pass rate.
+
+**Known cases:** `koios_lenet` (~227K-line LeNet from HLS, 117 modules), large Bambu-generated designs.
 
 ### Zero-logic design (wire-only / trivial combinational)
 
