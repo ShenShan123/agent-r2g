@@ -596,6 +596,31 @@ sub-cases).
   for the variant that prefers `SYNTH_HIERARCHICAL=0 ABC_AREA=0` because
   HLS output lacks exploitable hierarchical repetition.
 
+### Place-stage apparent-hang (not actually a hang): global_place timing-driven resizer
+
+**Symptoms:**
+- After Nesterov global placement converges (e.g., `Iter: 451, overflow: 0.635`), OpenROAD prints the header `Iteration | Area | Resized | Buffers | Nets repaired | Remaining` followed by one line `0 | +0.0% | 0 | 0 | 0 | <N>` where N is the total net count.
+- Then the log emits **nothing** for 2-5 hours while the OpenROAD process runs at 99%+ CPU with memory growing.
+- Eventually a `final | ...` line appears with the completion numbers, and a similar header+iter-0 line for the next pass starts.
+- Looks like a hang; is actually CPU-bound work inside `global_place.tcl`'s timing-driven repair_design.
+
+**Root Cause:**
+The resizer scans all N nets, builds RC parasitic estimates, and evaluates timing paths before making its first printable edit. For 1M+ instance designs on nangate45 this scan is ~3-4 hours per pass on a machine that can give the process ~4 cores of steady CPU.
+
+**Action:**
+- Do **not** cancel in under 2 hours for >500K-instance designs.
+- Place-stage budget scales with cell count:
+  - ≤ 200 K instances: `ORFS_TIMEOUT=14400` (4h) is usually enough.
+  - 200 K – 1.1 M: use `ORFS_TIMEOUT=28800` (8h).
+  - 1.1 M – 1.5 M: use `ORFS_TIMEOUT=57600` (16h).
+  - Beyond 1.5 M: split the top into separately-synthesized sub-blocks; do not rely on budget alone.
+- `SKIP_LAST_GASP=1 SKIP_INCREMENTAL_REPAIR=1` help slightly by dropping post-placement optional repair passes, but they do NOT shorten the primary per-pass scan.
+- `SYNTH_HIERARCHICAL=1 + ABC_AREA=0` are still important (for synth of repeated-PE designs); they are orthogonal to this place-stage bottleneck.
+
+**Known cases:**
+- `koios_gemm_layer` (1.12 M instances): place took 19,695 s (5h28m), 6 final markers = 3 sub-passes × 2 timing-driven iterations. Passed with `ORFS_TIMEOUT=28800`.
+- `arm_core` (1.25 M instances): place could not complete iter 1 within 28,800 s; requires 57,600 s (16h) budget, demonstrated in v2 retry.
+
 ### HLS megadesign (100K+ line RTL, 100+ modules)
 
 **Symptoms:**

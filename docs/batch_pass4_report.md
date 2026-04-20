@@ -67,17 +67,29 @@ Recovery uses the appropriate stage resume and longer budget:
 | verilog_ethernet_eth_mac_mii_fifo | `FROM_STAGE=route ORFS_TIMEOUT=28800 ROUTING_LAYER_ADJUSTMENT=0.10` | PASS | 12743s |
 | verilog_axis_axis_ram_switch | `FROM_STAGE=route ORFS_TIMEOUT=28800 ROUTING_LAYER_ADJUSTMENT=0.10` | PASS | 26708s |
 | arm_core | `FROM_STAGE=place ORFS_TIMEOUT=28800 SKIP_LAST_GASP=1 SKIP_INCREMENTAL_REPAIR=1` | fail(124) | 28808s |
-| koios_gemm_layer | `FROM_STAGE=place ORFS_TIMEOUT=28800 SKIP_LAST_GASP=1 SKIP_INCREMENTAL_REPAIR=1` | RUNNING | |
+| koios_gemm_layer | `FROM_STAGE=place ORFS_TIMEOUT=28800 SKIP_LAST_GASP=1 SKIP_INCREMENTAL_REPAIR=1` | PASS | 27861s |
+| arm_core (v2) | same config, `ORFS_TIMEOUT=57600` (16h) | RUNNING | |
 
-Effective pass rate after all route-stage recoveries: **15/17** (all route-timeout cases recovered via `ROUTING_LAYER_ADJUSTMENT=0.10` + 28800s; all synth-timeout cases except koios_gemm_layer/arm_core recovered).
+### Key insight — the "stuck at iter 0" was not a hang
 
-The 2 unresolved (arm_core, koios_gemm_layer) exhibit an OpenROAD-internal hang in `global_place.tcl`'s timing-driven repair_design phase — not addressable by the current `SYNTH_HIERARCHICAL + ABC_AREA=0 + SKIP_LAST_GASP + SKIP_INCREMENTAL_REPAIR` recipe. Documented as an open issue requiring upstream investigation (possibly nondeterministic on a specific design topology, or infinite loop in the timing-driven resizer's inner iteration when the net count exceeds ~1M).
+koios_gemm_layer passed with the exact same config the failed arm_core run used; it just needed the 8h budget. What looked like a hang for hours in both designs — a single repair_design iteration-0 header line with no subsequent progress — was actually legitimate CPU-bound work inside OpenROAD's timing-driven resizer. For 1.12 M items it took 3–4 h per pass; with two full timing-driven iterations plus an optimization phase the whole place stage ran 19,695 s.
+
+**arm_core's 1.25 M items is slightly larger, so even 8 h didn't cover the first pass**. The v2 retry has a 16 h per-stage budget to let it finish all internal passes.
 
 Final campaign projection:
-- If koios_gemm_layer recovers: **492/495 (99.4%)**
+- If arm_core v2 recovers: **492/495 (99.4%)**
 - If not: **491/495 (99.2%)**
 - Permanent gaps: koios_lenet (HLS megadesign), clog2_test (zero-logic)
-- Tooling gaps: arm_core, koios_gemm_layer (if koios doesn't recover)
+
+### Lessons for the skill
+
+1. **Don't mistake "no progress markers" for "hang."** OpenROAD's global_place.tcl runs a resizer phase with per-iteration-0 headers but per-final-line bodies — you only see a result when an internal pass completes. Wait-and-check is the right first response; never cancel in under 2 hours for >500 K-instance designs.
+
+2. **SYNTH_HIERARCHICAL=1 + ABC_AREA=0** is necessary for synth of repeated-PE designs (koios_gemm_layer, arm_core-class) but does *not* help place. Place-stage cost scales independently and needs its own budget.
+
+3. **SKIP_LAST_GASP / SKIP_INCREMENTAL_REPAIR** don't visibly change the main-pass duration for these designs; they only skip optional post-placement repair passes. They help somewhat but the bottleneck is the primary resizer loop inside global_place.tcl.
+
+4. **Place-stage budget scales with cell count**: 14400s sufficient up to ~200 K, 28800s up to ~1.1 M, **57600s needed for ~1.25 M+**. Beyond that, splitting the top into separately-synthesized blocks would be more effective than raising budget further.
 
 ### arm_core / koios_gemm_layer — stuck in global_place timing-driven repair
 
