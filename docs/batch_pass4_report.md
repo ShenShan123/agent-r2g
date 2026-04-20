@@ -65,11 +65,19 @@ Recovery uses the appropriate stage resume and longer budget:
 | verilog_ethernet_udp_complete_64 | `FROM_STAGE=route ORFS_TIMEOUT=14400` | PASS | 14954s |
 | verilog_ethernet_eth_mac_1g_fifo | `FROM_STAGE=route ORFS_TIMEOUT=28800 ROUTING_LAYER_ADJUSTMENT=0.10` | PASS | 12805s |
 | verilog_ethernet_eth_mac_mii_fifo | `FROM_STAGE=route ORFS_TIMEOUT=28800 ROUTING_LAYER_ADJUSTMENT=0.10` | PASS | 12743s |
-| verilog_axis_axis_ram_switch | `FROM_STAGE=route ORFS_TIMEOUT=28800 ROUTING_LAYER_ADJUSTMENT=0.10` | RUNNING | |
-| arm_core | `FROM_STAGE=place ORFS_TIMEOUT=28800 SKIP_LAST_GASP=1 SKIP_INCREMENTAL_REPAIR=1` | RUNNING | |
-| koios_gemm_layer | `FROM_STAGE=place ORFS_TIMEOUT=28800 SKIP_LAST_GASP=1 SKIP_INCREMENTAL_REPAIR=1` | QUEUED | |
+| verilog_axis_axis_ram_switch | `FROM_STAGE=route ORFS_TIMEOUT=28800 ROUTING_LAYER_ADJUSTMENT=0.10` | PASS | 26708s |
+| arm_core | `FROM_STAGE=place ORFS_TIMEOUT=28800 SKIP_LAST_GASP=1 SKIP_INCREMENTAL_REPAIR=1` | fail(124) | 28808s |
+| koios_gemm_layer | `FROM_STAGE=place ORFS_TIMEOUT=28800 SKIP_LAST_GASP=1 SKIP_INCREMENTAL_REPAIR=1` | RUNNING | |
 
-Effective pass rate after recoveries: **14/17 expected**, plus one intractable HLS megadesign (koios_lenet) and one zero-logic (clog2_test). Final campaign rate (after all recovers): **483-490 / 495 (97.6–99.0%)**.
+Effective pass rate after all route-stage recoveries: **15/17** (all route-timeout cases recovered via `ROUTING_LAYER_ADJUSTMENT=0.10` + 28800s; all synth-timeout cases except koios_gemm_layer/arm_core recovered).
+
+The 2 unresolved (arm_core, koios_gemm_layer) exhibit an OpenROAD-internal hang in `global_place.tcl`'s timing-driven repair_design phase — not addressable by the current `SYNTH_HIERARCHICAL + ABC_AREA=0 + SKIP_LAST_GASP + SKIP_INCREMENTAL_REPAIR` recipe. Documented as an open issue requiring upstream investigation (possibly nondeterministic on a specific design topology, or infinite loop in the timing-driven resizer's inner iteration when the net count exceeds ~1M).
+
+Final campaign projection:
+- If koios_gemm_layer recovers: **492/495 (99.4%)**
+- If not: **491/495 (99.2%)**
+- Permanent gaps: koios_lenet (HLS megadesign), clog2_test (zero-logic)
+- Tooling gaps: arm_core, koios_gemm_layer (if koios doesn't recover)
 
 ### arm_core / koios_gemm_layer — stuck in global_place timing-driven repair
 
