@@ -76,10 +76,11 @@ koios_gemm_layer passed with the exact same config the failed arm_core run used;
 
 **arm_core's 1.25 M items is slightly larger, so even 8 h didn't cover the first pass**. The v2 retry has a 16 h per-stage budget to let it finish all internal passes.
 
-Final campaign projection:
-- If arm_core v2 recovers: **492/495 (99.4%)**
-- If not: **491/495 (99.2%)**
+Final campaign result:
+- arm_core v2 also failed at 57,606 s (16 h); first `repair_design` pass in `global_place.tcl`'s timing-driven resizer never produced a `final` marker. Confirmed intractable on this platform with the current skill recipe up to 16 h place budget.
+- **Campaign final: 492/495 (99.4 %)**
 - Permanent gaps: koios_lenet (HLS megadesign), clog2_test (zero-logic)
+- Tooling gap: arm_core (1.25 M instances, resizer scan doesn't converge in any budget ≤16 h on this host)
 
 ### Lessons for the skill
 
