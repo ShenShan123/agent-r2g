@@ -82,6 +82,37 @@ Final campaign result:
 - Permanent gaps: koios_lenet (HLS megadesign), clog2_test (zero-logic)
 - Tooling gap: arm_core (1.25 M instances, resizer scan doesn't converge in any budget ≤16 h on this host)
 
+## Signoff Results for the 16 Pass 4 Passes
+
+All 16 Pass 4 passing designs have had the full `run_drc.sh` / `run_lvs.sh` / `run_rcx.sh` signoff pipeline applied. Aggregated in `design_cases/_batch/signoff_passed.jsonl`:
+
+| Design | DRC | LVS | RCX | Time |
+|---|---|---|---|---|
+| verilog_ethernet_arp | TO | SKIP | PASS | 7314s |
+| verilog_ethernet_axis_baser_rx_64 | PASS | SKIP | PASS | 1651s |
+| verilog_ethernet_eth_mac_10g | TO | SKIP | PASS | 7204s |
+| verilog_ethernet_ip_complete | TO | SKIP | PASS | 7324s |
+| verilog_ethernet_ip_complete_64 | TO | SKIP | PASS | 7385s |
+| verilog_ethernet_axis_baser_tx_64 | TO | SKIP | PASS | 7205s |
+| verilog_ethernet_udp_complete | TO | SKIP | PASS | 14601s |
+| verilog_ethernet_udp_complete_64 | TO | SKIP | PASS | 14603s |
+| verilog_ethernet_eth_mac_1g_fifo | TO | SKIP | PASS | 14642s |
+| verilog_ethernet_eth_mac_mii_fifo | TO | SKIP | PASS | 14645s |
+| verilog_axis_axis_ram_switch | TO | SKIP | PASS | 14882s |
+| iscas89_s1196 | PASS | SKIP | PASS | 38s |
+| iscas89_s820 | PASS | SKIP | PASS | 22s |
+| iscas89_s832 | E2 | SKIP | PASS | 1s |
+| iscas89_s953 | E2 | SKIP | PASS | 2s |
+| koios_gemm_layer | TO | SKIP | PASS | 14946s |
+
+Signoff-result legend:
+- **PASS**: run_* script exited 0.
+- **TO (124)**: KLayout DRC timed out on the FEOL checks step. Documented pattern: FreePDK45.lydrc needs >14400 s on ethernet-scale layouts on this host.
+- **SKIP**: LVS auto-skipped — FreePDK45.lylvs is not present in this ORFS checkout, so run_lvs.sh emits `lvs_result.json` with `status=skipped`.
+- **E2**: DRC make target failed on iscas89_s832/s953 because the ORFS DRC target rebuilds yosys, which references an `iscas89_*_dff_helper.v` path that isn't in the project's rtl dir. Minor infra issue for iscas89 specifically — the actual ORFS run used a combined rewritten.v and does not need the helper. Fix would be to either put the dff module in a helper file, or use a DRC target that reads the existing 6_final.gds without re-synthesizing.
+
+**Key observation**: RCX passes on every design regardless of size. DRC is the bottleneck on the FreePDK45.lydrc FEOL step. LVS is uniformly unavailable on nangate45 until a `FreePDK45.lylvs` file is obtained and installed.
+
 ### Lessons for the skill
 
 1. **Don't mistake "no progress markers" for "hang."** OpenROAD's global_place.tcl runs a resizer phase with per-iteration-0 headers but per-final-line bodies — you only see a result when an internal pass completes. Wait-and-check is the right first response; never cancel in under 2 hours for >500 K-instance designs.
