@@ -245,3 +245,7 @@ skills/r2g-rtl2gds/knowledge/failure_candidates.json
 
 # External RTL benchmark dataset (fetched separately)
 rtl_designs/
+
+# batch2rtl source archive + extracted RTL (28MB tar, multi-vendor)
+batch2rtl.tar.gz
+batch2rtl/

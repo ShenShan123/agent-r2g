@@ -94,9 +94,17 @@ echo "Platform: $PLATFORM"
 echo "GDS: $GDS_FILE"
 echo "LVS rules: $KLAYOUT_LVS_RESOLVED"
 
-# Run LVS via ORFS Makefile
-ORFS_DESIGN_DIR="$FLOW_DIR/designs/$PLATFORM/$DESIGN_NAME"
+# Run LVS via ORFS Makefile.
+# Match run_orfs.sh: configs are placed at designs/<plat>/<design>/<variant>/config.mk
+# so that two FLOW_VARIANT runs of the same DESIGN_NAME don't collide.
+# Fall back to the legacy designs/<plat>/<design>/config.mk path for projects
+# whose backend was driven by hand or by an older run_orfs.sh.
+ORFS_DESIGN_DIR="$FLOW_DIR/designs/$PLATFORM/$DESIGN_NAME/$FLOW_VARIANT"
 ORFS_CONFIG="$ORFS_DESIGN_DIR/config.mk"
+if [[ ! -f "$ORFS_CONFIG" ]]; then
+  ORFS_DESIGN_DIR="$FLOW_DIR/designs/$PLATFORM/$DESIGN_NAME"
+  ORFS_CONFIG="$ORFS_DESIGN_DIR/config.mk"
+fi
 
 if [[ ! -f "$ORFS_CONFIG" ]]; then
   echo "ERROR: ORFS config not found at $ORFS_CONFIG" >&2

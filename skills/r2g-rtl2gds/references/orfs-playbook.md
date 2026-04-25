@@ -47,9 +47,21 @@ export PLATFORM    = nangate45
 export VERILOG_FILES = /absolute/path/to/design.v
 export SDC_FILE      = /absolute/path/to/constraint.sdc
 
+# Optional: directories searched for ``include`` files. Required when the
+# RTL uses `` `include "header.vh" `` and the headers live in a different
+# directory than the source (e.g., Faraday DMA's `DMA_DEFINE.vh`).
+export VERILOG_INCLUDE_DIRS = /absolute/path/to/rtl
+
 export CORE_UTILIZATION = 30
 export PLACE_DENSITY_LB_ADDON = 0.20
 ```
+
+ORFS reads Verilog with `read_verilog -defer -sv`, which enables SystemVerilog mode.
+That means RTL using SV-reserved words (`int`, `bit`, `logic`, `byte`, ...) as port or
+wire names will fail at the canonicalize step with `syntax error, unexpected TOK_INT`
+(or similar). Run `scripts/project/validate_config.py <project-dir>` first — it
+detects reserved-keyword identifiers in both port and `wire`/`reg`/`logic` declarations
+so you can rename them before kicking off the flow.
 
 ## constraint.sdc Template
 

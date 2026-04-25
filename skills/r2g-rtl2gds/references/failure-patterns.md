@@ -125,12 +125,15 @@ OpenROAD bug in timing repair, typically triggered by complex clock trees in lar
 Verilog-2005 and SystemVerilog reserve keywords like `int`, `bit`, `logic`, `byte`, `shortint`, `longint`, `shortreal`, `string`, `type`. Legacy RTL (e.g., OpenCores IP) sometimes uses these as port or signal names. Yosys 0.50+ enforces Verilog-2005 keyword rules.
 
 **Action:**
-- Search for reserved keywords used as identifiers: `grep -wn 'int\|bit\|logic\|byte\|shortint' *.v`
+- Run `scripts/project/validate_config.py <project-dir>` first — it scans `wire`/`reg`/`logic`/port declarations for reserved keywords (port-only, prior-version users: the check now covers internal nets too)
+- Or grep manually: `grep -wn 'int\|bit\|logic\|byte\|shortint' *.v`
 - Rename the identifier everywhere: port list, port declaration, assign statements, and all instantiation sites
-- Common rename pattern: `int` → `int_o`, `bit` → `bit_o`
+- Common rename pattern: `int` → `int_o` (or `int_w` for an internal wire), `bit` → `bit_o`
 - Check both the module definition file AND all files that instantiate the module
 
-**Example:** `wb_dma_ch_rf.v` uses `int` as an output port → rename to `int_o` in the module and all `.int(...)` connections in `wb_dma_rf.v`.
+**Examples:**
+- `wb_dma_ch_rf.v` uses `int` as an output port → rename to `int_o` in the module and all `.int(...)` connections in `wb_dma_rf.v`.
+- Faraday `dma_ctlrf.v` uses `int` as an internal wire (`wire [`DMA_MAX_CHNO-1:0] int;`) — only 4 occurrences, all local to one file. Rename to `int_w`. The validator now catches `wire`/`reg` declarations, not just port declarations, so this is detected at intake before synth.
 
 ## Missing Floorplan Initialization
 
@@ -230,6 +233,17 @@ Yosys crash, typically caused by very large designs or specific RTL constructs t
   - Insufficient spacing → increase `DIE_AREA`/`CORE_AREA`
   - Metal width violations → may indicate congestion, try lower utilization
 - **Tool:** `scripts/flow/run_drc.sh` → `scripts/extract/extract_drc.py` for detailed category breakdown
+
+### KLayout DRC Stuck on `or` (FreePDK45.lydrc, nangate45)
+
+- **Symptom:** `run_drc.sh` runs for hours with no progress. `6_drc.log` last line is `"or" in: FreePDK45.lydrc:121` (or another boolean-op line) and the file mtime stops advancing. CPU stays at 100% on a single klayout process; RSS plateaus around 500MB-3.5GB.
+- **Root cause:** KLayout DRC's combination of `poly.not(active).separation(active, ...)` followed by an `or` builds large intermediate polygon sets. On dense designs (>~1.5K cells / >~1MB GDS) the rule scales poorly. Validated on this environment: `iscas89_s27` (86 cells), `ansiportlist` (231), `binops` (231), `CRC33_D264` (1434) all complete; `faraday_dma` (14k cells, 14.8MB GDS) hung indefinitely on rule 121.
+- **Action:**
+  - Don't extend `DRC_TIMEOUT` blindly — observed zombies ran 3-4 days at 100% CPU without finishing on the same rule.
+  - Document in `<project>/drc/drc_result.json` with `"status": "stuck"` and the `stuck_at_rule` so the dashboard can show a yellow badge instead of red.
+  - Use `setsid timeout` (already enforced in `run_drc.sh`) so terminating the parent kills the klayout child cleanly.
+  - For the design itself, the rest of the flow (ORFS → RCX) is independent and can still produce GDS+SPEF.
+- **Pre-existing zombies:** If the system has klayout DRC processes running >1 hour at 100% CPU on the same `lydrc` line and no log progress, they're stuck in this pattern. Kill with `kill -9 <pid>`. Six such zombies were observed in this session, accumulating ~20k+ minutes of wasted CPU before cleanup.
 
 ### LVS Mismatch
 - **Symptom:** `ERROR : Netlists don't match` in LVS log; mismatches in `6_lvs.lvsdb`

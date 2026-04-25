@@ -75,24 +75,51 @@ def check_module_match(verilog_files, design_name):
 
 
 def check_reserved_keywords(verilog_files):
-    """Scan RTL files for reserved keywords used as port or signal names."""
+    """Scan RTL files for reserved keywords used as port or signal names.
+
+    ORFS reads Verilog with `read_verilog -defer -sv`, which enables
+    SystemVerilog mode. Designs that legally use SV-reserved words as
+    port/wire/reg names (e.g., Faraday DMA's `wire [...] int;`) hit
+    `syntax error, unexpected TOK_INT` during 1_1_yosys_canonicalize.
+
+    We flag declarations of any kind — port (input/output/inout), net
+    (wire/tri/supply*), variable (reg/integer/logic) — that name a
+    reserved keyword. Matches both single declarations and the first
+    identifier in a comma list (`wire a, int, b;` → `int` flagged).
+    """
     warnings = []
-    # Patterns: port declarations and signal declarations using reserved keywords
-    port_pattern = re.compile(
-        r"\b(?:input|output|inout)\s+(?:\[[^\]]*\]\s+)?(" + "|".join(RESERVED_KEYWORDS) + r")\s*[;,]"
+    kw_alt = "|".join(RESERVED_KEYWORDS)
+    # Declaration heads we recognize. Order matters only for readability.
+    decl_head = (
+        r"\b(?:input|output|inout|wire|reg|logic|integer|tri|wand|wor|trireg|"
+        r"supply0|supply1|bit|byte|shortint|longint|int|logic)\b"
     )
+    # Optional signedness, optional packed-range, then the identifier.
+    decl_pattern = re.compile(
+        decl_head
+        + r"\s+(?:signed\s+|unsigned\s+)?(?:\[[^\]]*\]\s+)?(?:signed\s+|unsigned\s+)?"
+        + r"(" + kw_alt + r")\s*[;,=]"
+    )
+    # Catch `wire a, int, b;` — keyword in the middle of a comma list.
+    list_pattern = re.compile(r",\s*(" + kw_alt + r")\s*[;,=]")
     for vf in verilog_files:
         if not os.path.isfile(vf):
             continue
         try:
             with open(vf, "r") as f:
                 for lineno, line in enumerate(f, 1):
-                    m = port_pattern.search(line)
-                    if m:
-                        warnings.append(
-                            f"{os.path.basename(vf)}:{lineno}: reserved keyword '{m.group(1)}' "
-                            f"used as port/signal name"
-                        )
+                    stripped = line.split("//", 1)[0]
+                    seen = set()
+                    for pat in (decl_pattern, list_pattern):
+                        for m in pat.finditer(stripped):
+                            kw = m.group(1)
+                            if kw in seen:
+                                continue
+                            seen.add(kw)
+                            warnings.append(
+                                f"{os.path.basename(vf)}:{lineno}: reserved keyword "
+                                f"'{kw}' used as port/signal name"
+                            )
         except (OSError, UnicodeDecodeError):
             continue
     return warnings
