@@ -407,6 +407,37 @@ Some designs instantiate hard memory macros (fakeram45 on nangate45, SRAM on sky
 
 6. **Safety flags** — Large macro designs need `SKIP_CTS_REPAIR_TIMING=1` and `SKIP_LAST_GASP=1` to avoid OpenROAD crashes.
 
+### Behavioral SRAM Stubs (Alternative to Macro Mapping)
+
+When the design's SRAM macros are *undefined* in the RTL set (e.g., Chipyard
+BOOM's `freepdk45_sram_*`, generic foundry stubs without LEF/LIB) AND the
+total memory bits are modest (<~256K bits), substitute **behavioral
+flop-array implementations** instead of mapping to fakeram45.
+
+Use `tools/gen_openram_behavioral_stubs.py <wrapper.v> <stubs.v>` to
+auto-generate behavioral Verilog for every `freepdk45_sram_<ports>_<rows>x<cols>[_<gran>]`
+referenced. The generator handles both `1rw0r` (single-port) and `1w1r`
+(write-port + read-port, independent clocks) styles, with optional
+write-mask granularity.
+
+Why behavioral instead of fakeram45:
+- fakeram45 is single-port only — cannot represent BOOM's `1w1r` macros.
+- fakeram45 widths (32/39/64/etc.) don't match arbitrary BOOM widths
+  (40, 44, 52, 56, 124) without padding waste.
+- Behavioral stubs let Yosys infer memories cleanly; ORFS handles them
+  as plain logic with no macro placement needed.
+
+When NOT to use behavioral stubs:
+- Total memory bits > ~512K — synth + place become impractical (each bit
+  is a flop after Yosys's `memory_collect` pass).
+- Designs that need real silicon (taping out) — use real macros.
+- The skill currently caps `SYNTH_MEMORY_MAX_BITS` per memory at 65536.
+  Single memories larger than that should use real macros.
+
+**Validated:** BOOM SmallSEBoom (17 SRAM types, 168K total memory bits)
+synthesizes through this path. See `docs/faraday_viability.md` for why
+Faraday DSP/RISC don't fit (their UMC SRAMs are 256K-2M bits per macro).
+
 ## ORFS Backend Details
 
 ### config.mk Format
