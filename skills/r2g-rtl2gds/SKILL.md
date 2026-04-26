@@ -428,15 +428,30 @@ Why behavioral instead of fakeram45:
   as plain logic with no macro placement needed.
 
 When NOT to use behavioral stubs:
-- Total memory bits > ~512K — synth + place become impractical (each bit
-  is a flop after Yosys's `memory_collect` pass).
+- **Total memory bits > ~50K** — Yosys's `memory_map` pass turns each
+  read port into a wide mux tree. At BOOM SmallSEBoom's 168K total bits,
+  the post-mapping cell count exceeds ~1M gates and ABC's `speed`
+  script grinds beyond the 4 h `ORFS_TIMEOUT`. The earlier guidance
+  (512K) was too optimistic; lowered after a 2h28m ABC failure.
 - Designs that need real silicon (taping out) — use real macros.
 - The skill currently caps `SYNTH_MEMORY_MAX_BITS` per memory at 65536.
   Single memories larger than that should use real macros.
 
-**Validated:** BOOM SmallSEBoom (17 SRAM types, 168K total memory bits)
-synthesizes through this path. See `docs/faraday_viability.md` for why
-Faraday DSP/RISC don't fit (their UMC SRAMs are 256K-2M bits per macro).
+When behavioral stubs hit the ABC ceiling but you still want to avoid
+real macros, try **`SYNTH_HIERARCHICAL=1`** before switching to fakeram45.
+With hierarchical synth, ABC is invoked separately per Yosys module —
+each `freepdk45_sram_*` stub becomes its own small ABC run (≤32K gates
+per memory) instead of one giant 1M-gate ABC pass.
+
+**Validated:**
+- DMA-class designs (Faraday DMA, ff_ram flop array): pass behavioral.
+- AES / ibex / CRC / iscas89 (no SRAM macros, total memory ≤ ~10K bits): pass.
+- BOOM SmallSEBoom (17 SRAM types, 168K total memory bits, ~360K-line top):
+  parses cleanly, OPT/MEMORY_MAP/TECHMAP all complete in ~42 min, but
+  ABC step 14 grinds beyond 4h. Documented in
+  `design_cases/boom_smallseboom/reports/synth-result.md`.
+- See `docs/faraday_viability.md` for why Faraday DSP/RISC don't fit
+  even with this approach (their UMC SRAMs are 256K-2M bits per macro).
 
 ## ORFS Backend Details
 
