@@ -99,12 +99,25 @@ mkdir -p "$BACKEND_DIR"
 ORFS_TIMEOUT="${ORFS_TIMEOUT:-7200}"
 MAKE_CMD="make DESIGN_CONFIG=\"$ORFS_DESIGN_DIR/config.mk\" FLOW_VARIANT=\"$FLOW_VARIANT\""
 
+# Allow config.mk to opt into PLACE_FAST / ROUTE_FAST without requiring the
+# caller to set the env var. A line like `export ROUTE_FAST = 1` in
+# config.mk gets respected here. Env var still wins if already set.
+for _knob in PLACE_FAST ROUTE_FAST ROUTE_FAST_SKIP_DRT ROUTE_FAST_DRT_ITERS; do
+  if [[ -z "${!_knob:-}" ]]; then
+    _val=$(grep -E "^[[:space:]]*export[[:space:]]+${_knob}[[:space:]]*=" "$CONFIG_MK" 2>/dev/null | head -1 | sed -E "s/^[[:space:]]*export[[:space:]]+${_knob}[[:space:]]*=[[:space:]]*//" | tr -d ' "')
+    if [[ -n "$_val" ]]; then
+      export "$_knob=$_val"
+      echo "config.mk supplied $_knob=$_val"
+    fi
+  fi
+done
+unset _knob _val
+
 # PLACE_FAST escape hatch: disable timing-driven + routability-driven global
 # placement. Required for very-large netlists (>1M nets) where the timing
 # repair loop in `gpl` would otherwise spin for hours after the placement
 # overflow target is already met. Applies to BOOM-class CPUs and similar.
-# Set PLACE_FAST=1 in the env to enable, or set it inside config.mk via
-# the same env vars.
+# Set PLACE_FAST=1 in the env OR add `export PLACE_FAST = 1` to config.mk.
 if [[ "${PLACE_FAST:-0}" == "1" ]]; then
   MAKE_CMD="$MAKE_CMD GPL_TIMING_DRIVEN=0 GPL_ROUTABILITY_DRIVEN=0"
   echo "PLACE_FAST=1 → disabling GPL_TIMING_DRIVEN and GPL_ROUTABILITY_DRIVEN"
@@ -248,6 +261,19 @@ if [[ $MAKE_STATUS -ne 0 ]]; then
     echo "HINT: Routing congestion detected. Try re-running with:" | tee -a "$BACKEND_DIR/flow.log"
     echo "  1. Add to config.mk: export ROUTING_LAYER_ADJUSTMENT = 0.10" | tee -a "$BACKEND_DIR/flow.log"
     echo "  2. Resume: FROM_STAGE=route scripts/flow/run_orfs.sh $PROJECT_DIR $PLATFORM" | tee -a "$BACKEND_DIR/flow.log"
+    # Auto-suggest ROUTE_FAST when failure is on a ChipTop/BOOM-scale design
+    # (large 4_cts.odb is the cheapest signal; no need to walk the netlist).
+    CTS_ODB="$FLOW_DIR/results/$PLATFORM/$DESIGN_NAME/$FLOW_VARIANT/4_cts.odb"
+    CTS_SIZE=0
+    if [[ -f "$CTS_ODB" ]]; then
+      CTS_SIZE=$(stat -c%s "$CTS_ODB" 2>/dev/null || echo 0)
+    fi
+    # >1 GB CTS database ≈ ChipTop/BOOM scale. Recommend ROUTE_FAST.
+    if (( CTS_SIZE > 1073741824 )); then
+      echo "  3. ChipTop-scale CTS ODB detected (${CTS_SIZE} bytes). Add ROUTE_FAST=1:" | tee -a "$BACKEND_DIR/flow.log"
+      echo "       ROUTE_FAST=1 FROM_STAGE=route scripts/flow/run_orfs.sh $PROJECT_DIR $PLATFORM" | tee -a "$BACKEND_DIR/flow.log"
+      echo "       (skips post-GRT incremental repair + antenna; caps DRT to 10 iters)" | tee -a "$BACKEND_DIR/flow.log"
+    fi
   elif [[ "$FAILED_STAGE" == "floorplan" ]]; then
     if grep -q "PDN-0179\|Insufficient width to add straps\|Unable to repair all channels" "$BACKEND_DIR/flow.log" 2>/dev/null; then
       echo "" | tee -a "$BACKEND_DIR/flow.log"
