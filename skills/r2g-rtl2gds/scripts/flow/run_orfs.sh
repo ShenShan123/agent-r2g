@@ -102,6 +102,10 @@ MAKE_CMD="make DESIGN_CONFIG=\"$ORFS_DESIGN_DIR/config.mk\" FLOW_VARIANT=\"$FLOW
 # Allow config.mk to opt into PLACE_FAST / ROUTE_FAST without requiring the
 # caller to set the env var. A line like `export ROUTE_FAST = 1` in
 # config.mk gets respected here. Env var still wins if already set.
+# IMPORTANT: temporarily disable -e/pipefail around the grep|head|sed pipeline
+# because a missing knob (most common case) makes grep exit 1, which would
+# otherwise abort the entire script under `set -eo pipefail`.
+set +e +o pipefail
 for _knob in PLACE_FAST ROUTE_FAST ROUTE_FAST_SKIP_DRT ROUTE_FAST_DRT_ITERS; do
   if [[ -z "${!_knob:-}" ]]; then
     _val=$(grep -E "^[[:space:]]*export[[:space:]]+${_knob}[[:space:]]*=" "$CONFIG_MK" 2>/dev/null | head -1 | sed -E "s/^[[:space:]]*export[[:space:]]+${_knob}[[:space:]]*=[[:space:]]*//" | tr -d ' "')
@@ -111,7 +115,8 @@ for _knob in PLACE_FAST ROUTE_FAST ROUTE_FAST_SKIP_DRT ROUTE_FAST_DRT_ITERS; do
     fi
   fi
 done
-unset _knob _val
+set -e -o pipefail
+unset _knob _val 2>/dev/null || true
 
 # PLACE_FAST escape hatch: disable timing-driven + routability-driven global
 # placement. Required for very-large netlists (>1M nets) where the timing
