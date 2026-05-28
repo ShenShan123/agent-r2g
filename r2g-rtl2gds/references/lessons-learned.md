@@ -144,3 +144,42 @@ Ran 70 failure design cases through ORFS → LVS → RCX. Validated 7 design fam
 | vga_enh_top | 10 | 100% | 100% | 100% | Timeout fix resolved all |
 | bp_multi_top | 10 | 100%* | 0% | 100% | *cfg2-4 failed with old stubs; LVS >60 min timeout |
 | swerv | 10 | 100% | 0% | 100% | LVS >60 min timeout |
+
+## Full-Corpus Validation (70 designs → 7 families) — 2026-04-03
+
+Re-ran the 70-design batch after the bp_multi_top fixes landed (DIE_AREA up to 2000x2000 for SYNTH_HIERARCHICAL+ABC_AREA configs, LVS auto-timeout scaling, FROM_STAGE resume).
+
+| Family | Configs | ORFS | LVS | RCX | All-Pass | Notes |
+|--------|---------|------|-----|-----|----------|-------|
+| aes_xcrypt (aes128_core) | 10 | 10/10 | 10/10 | 10/10 | **10/10** | Medium design, ~35 min/config |
+| ibex (ibex_core) | 10 | 10/10 | 10/10 | 10/10 | **10/10** | Large design, ~20 min/config |
+| riscv32i (riscv_top) | 10 | 10/10 | 10/10 | 10/10 | **10/10** | Macro design (fakeram45_256x32), CDL fix |
+| tinyRocket (RocketTile) | 10 | 10/10 | 10/10 | 10/10 | **10/10** | Macro design, CDL fix |
+| vga_enh_top | 10 | 10/10 | 10/10 | 10/10 | **10/10** | Memory inference, ~60 min/config |
+| swerv (swerv_wrapper) | 10 | 10/10 | 10/10 | 10/10 | **10/10** | ~145K cells, LVS auto-scaled 4200s |
+| bp_multi_top (black_parrot) | 10 | 10/10 | 10/10 | 10/10 | **10/10** | ~200K cells, LVS auto-scaled 7200s |
+
+**Result:** 70/70 designs through ORFS+LVS+RCX. Never run two configs with the same DESIGN_NAME and FLOW_VARIANT concurrently. Never run multiple LVS jobs concurrently for >100K-cell designs (3-5GB RAM each, 2-3x wall-time inflation under memory pressure).
+
+## Full-Corpus Validation (682 designs) — 2026-05-27
+
+The 682-design corpus state after the May 2026 sweeps. Establishes baseline expectations for nangate45 on this OpenROAD/ORFS install.
+
+| Signoff      | Count        | Notes                                                   |
+|--------------|--------------|---------------------------------------------------------|
+| ppa.json     | 682 / 682    | every design with a backend run has PPA                 |
+| DRC clean    | 381 (55.9%)  |                                                         |
+| DRC stuck    | 232 (34.0%)  | known FreePDK45.lydrc polygon-op deadloop; GDS still valid |
+| DRC fail     | 29           | actual violation counts in `reports/drc.json`           |
+| LVS clean    | 582 (85.3%)  | after FreePDK45.lylvs deployment (commit c5770d5)       |
+| LVS unknown  | 72 (10.6%)   | large designs whose deep-mode netlist phase didn't finish under the 1h cap |
+| LVS fail     | 16 (2.3%)    | real netlist mismatches                                 |
+| RCX complete | 681 / 682    | all but boom_smallseboom (intractable at route)         |
+
+**Key lessons from this campaign:**
+- Upstream ORFS doesn't ship a nangate45 LVS rule; the skill now bundles one at `r2g-rtl2gds/assets/platforms/nangate45/lvs/FreePDK45.lylvs`. Install with `tools/install_nangate45_lvs.sh`.
+- `extract_lvs.py` used to prefer the `lvs/lvs_result.json` skip-marker over real logs, masking 529 successful LVS runs as "skipped". Now the marker is ignored when a real `6_lvs.log`/`lvs_run.log` is present (commit c5770d5).
+- `_restage_for_signoff.sh` makes DRC/LVS idempotent from preserved `backend/RUN_*/`. Without it, the `find … -name 6_final.gds` fallback silently picked up unrelated designs' GDS when DESIGN_NAME collided (59 of 454 use `DESIGN_NAME=top`).
+- DRC stuck classification must trust `stuck_at_rule` regardless of exit code — observed 124 (timeout), 137 (SIGKILL), 2 (make-target failed) for the same polygon-op pattern depending on how klayout was killed.
+- `3_4_place_resized`'s `repair_design` is a DIFFERENT hang from `3_3_place_gp`'s timing-driven iteration. PLACE_FAST=1 only fixes the latter. No ORFS knob currently skips `repair_design` at place stage; arm_core hit this 2026-05-26 and is intractable here.
+- boom_mediumboom and boom_mediumseboom recovered to GDS via `FROM_STAGE=route ROUTE_FAST=1 ROUTE_FAST_DRT_ITERS=1` resuming from preserved 5_2_route.odb / 6_1_fill.odb. Always check preserved scratch before declaring a route-stuck ChipTop intractable.
