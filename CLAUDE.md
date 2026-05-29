@@ -16,6 +16,7 @@ r2g-rtl2gds/                  # The skill (everything to run a flow lives here)
   scripts/flow/                 # Stage runners: run_orfs.sh, run_drc.sh, run_lvs.sh, run_rcx.sh, …
   scripts/extract/              # Parse tool output → JSON: extract_ppa, extract_drc, extract_lvs, …
     labels/                       # Dataset label extractors (congestion, wirelength, timing, irdrop) + stats roller
+    features/                     # Dataset feature extractors (graph nodes/edges/metadata) + stats roller
   scripts/project/              # init_project, normalize_spec, validate_config
   scripts/reports/              # check_timing, build_diagnosis, build_run_history, …
   scripts/dashboard/            # render_gds_preview, generate/serve dashboard
@@ -27,6 +28,7 @@ tools/                          # Repo-level operator tooling + installers
 design_cases/                   # All design runs (gitignored)
   <design-name>/                  # One project per directory
     labels/                         # Per-cell/per-net dataset label CSVs (run_labels.sh) + reports/labels_stats.json
+    features/                       # Per-node/per-edge/metadata feature CSVs (run_features.sh) + reports/features_stats.json
   _batch/                         # Batch results, jsonl, per-design logs
   _dashboard/                     # Auto-generated HTML dashboard
 ```
@@ -91,6 +93,8 @@ The skill enforces this order. Don't skip a failed stage — diagnose first via
 | A specific failure / pitfall (DRC stuck, place_gp hang, CDL override, …) | `r2g-rtl2gds/references/failure-patterns.md` |
 | Historical debug narratives + corpus results | `r2g-rtl2gds/references/lessons-learned.md` |
 | How to read PPA / signoff JSON | `r2g-rtl2gds/references/ppa-report-guide.md` |
+| Dataset label extraction (Y: congestion/wirelength/timing/irdrop) | `r2g-rtl2gds/references/label-extraction.md` |
+| Dataset feature extraction (X: graph nodes/edges/metadata) | `r2g-rtl2gds/references/feature-extraction.md` |
 | Spec / config / SDC templates | `r2g-rtl2gds/references/spec-template.md`, `r2g-rtl2gds/assets/` |
 | Validated config tuning per design family | `r2g-rtl2gds/references/lessons-learned.md` (corpus tables) |
 | Platform extras (nangate45 LVS rule, etc.) | `r2g-rtl2gds/assets/platforms/<plat>/` |

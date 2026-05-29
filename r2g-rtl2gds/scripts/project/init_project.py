@@ -4,7 +4,7 @@ import json
 import sys
 
 TEMPLATE_DIRS = [
-    "input", "rtl", "tb", "constraints", "lint", "sim", "synth", "backend", "drc", "lvs", "rcx", "reports", "labels"
+    "input", "rtl", "tb", "constraints", "lint", "sim", "synth", "backend", "drc", "lvs", "rcx", "reports", "labels", "features"
 ]
 
 

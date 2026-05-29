@@ -291,6 +291,8 @@ design_cases/<design-name>/
 │   ├── 6_final.spef           # SPEF parasitic data
 │   ├── rcx.log                # OpenRCX extraction log
 │   └── run_rcx.tcl            # Generated Tcl extraction script
+├── labels/                    # Dataset labels (Y): congestion/wirelength/timing/irdrop CSVs (run_labels.sh)
+├── features/                  # Dataset features (X): nodes/edges/metadata CSVs (run_features.sh)
 ├── reports/
 │   ├── ppa.json               # PPA metrics + geometry
 │   ├── progress.json          # ORFS stage completion
@@ -312,6 +314,7 @@ design_cases/<design-name>/
 - Read `references/failure-patterns.md` when a run fails and you need a triage path.
 - Read `references/ppa-report-guide.md` when summarizing synthesis/backend reports.
 - Read `references/label-extraction.md` when building the physical-design dataset (per-cell/per-net labels + stats).
+- Read `references/feature-extraction.md` when building the graph-feature (X) side of the dataset (per-node/per-edge/metadata CSVs + stats).
 - Use scripts in `scripts/` for initialization, spec normalization, environment checks, lint, simulation, synthesis, ORFS backend, DRC, LVS, RCX extraction, result collection, GDS preview rendering, dashboard generation, and run summaries.
 - Use `assets/examples/simple-arbiter/` as the first smoke-test case.
 - Use `assets/config-template.mk` and `assets/constraint-template.sdc` as default backend configuration templates.
@@ -369,6 +372,18 @@ design_cases/<design-name>/
     - Platform-agnostic: liberty/lef/supply-voltage are resolved from the ORFS
       platform config. See `references/label-extraction.md`.
     - Batch backfill across completed designs: `tools/run_labels_batch.sh`.
+13c. Extract dataset features (optional, for dataset building — the X side of 13b's Y):
+    - `scripts/flow/run_features.sh <project-dir> [platform]`
+    - Emits graph-feature CSVs to `<project-dir>/features/`: `metadata.csv` (graph-level),
+      `nodes_{gate,net,iopin,pin}.csv`, `edges_{gate_pin,pin_net,iopin_net}.csv`, plus a
+      per-design `reports/features_stats.json`.
+    - Reads the same `6_final.def` (+ optional `6_final.spef`) as the labels, so feature
+      rows join the label rows on `graph_id`+`inst_name`/`net_name`. Fail-soft; SPEF
+      absence degrades cap columns to 0.
+    - Platform-agnostic: liberty/tech-lef are resolved from the ORFS platform config and
+      cell-type/routing-layer vocabularies adapt per platform. See
+      `references/feature-extraction.md`.
+    - Batch backfill across completed designs: `tools/run_features_batch.sh`.
 14. Diagnose issues: `scripts/reports/build_diagnosis.py <project-root> reports/diagnosis.json`
 15. Get config suggestions: `knowledge/suggest_config.py <project-dir>` (optional, useful for tuning)
 16. Collect artifacts with `scripts/reports/collect_reports.py` and summarize with `scripts/reports/summarize_run.py`.

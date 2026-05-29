@@ -131,6 +131,22 @@ scripts/extract/extract_progress.py <project-root> reports/progress.json
 scripts/reports/build_diagnosis.py <project-root> reports/diagnosis.json
 ```
 
+## Phase 7b: Dataset Extraction (labels + features, optional)
+
+For physical-design ML dataset building, after a completed backend extract per-design
+label (Y) and feature (X) tables. Both read the same collected `6_final.def`/`6_final.odb`
+so their rows join on `graph_id`+`inst_name`/`net_name`. Both are fail-soft and
+platform-agnostic; both are per-design only (no corpus aggregation here).
+
+```bash
+scripts/flow/run_labels.sh   <project-dir> [platform]   # -> labels/{congestion,wirelength,timing,irdrop}.csv
+scripts/flow/run_features.sh <project-dir> [platform]   # -> features/{metadata,nodes_*,edges_*}.csv
+# stats: reports/{labels_stats.json,features_stats.json}
+# batch backfill: tools/run_labels_batch.sh [N]   tools/run_features_batch.sh [N]
+```
+
+See `references/label-extraction.md` and `references/feature-extraction.md`.
+
 ## Phase 8: Summary & Dashboard
 
 Always produce the following:

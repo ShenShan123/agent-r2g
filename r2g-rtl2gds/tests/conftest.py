@@ -19,6 +19,11 @@ LABELS_DIR = SKILL_ROOT / "scripts" / "extract" / "labels"
 if str(LABELS_DIR) not in sys.path:
     sys.path.insert(0, str(LABELS_DIR))
 
+# Make scripts/extract/features/ importable as plain modules for feature-extractor tests.
+FEATURES_DIR = SKILL_ROOT / "scripts" / "extract" / "features"
+if str(FEATURES_DIR) not in sys.path:
+    sys.path.insert(0, str(FEATURES_DIR))
+
 
 @pytest.fixture
 def tmp_knowledge_dir(tmp_path: Path) -> Path:

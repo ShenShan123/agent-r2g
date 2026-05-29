@@ -1,0 +1,171 @@
+"""Unit tests for the platform-parameterized feature paths (off-nangate45 behavior)."""
+from __future__ import annotations
+
+import textwrap
+
+import cell_type_map
+import def_parse
+
+
+# --- cell-type map ---------------------------------------------------------
+
+def test_nangate45_uses_curated_map():
+    mp = cell_type_map.resolve_cell_type_map("nangate45", {"cells": {}})
+    assert mp["INV_X1"] == 0
+    assert mp["UNKNOWN"] == 95
+    # C9: fakeram keys are upper-cased so master.upper() lookups now match.
+    assert mp["FAKERAM45_512X64"] == 113
+    assert cell_type_map.cell_type_id("fakeram45_512x64", mp) == 113
+
+
+def test_other_platform_builds_deterministic_runtime_map():
+    lib_db = {"cells": {"SKY130_FD_SC_HD__NAND2_1": {}, "SKY130_FD_SC_HD__INV_1": {}}}
+    mp = cell_type_map.resolve_cell_type_map("sky130hd", lib_db)
+    # sorted cell names -> 0..N-1 (INV_1 < NAND2_1), UNKNOWN last; stable across calls.
+    assert mp == {"SKY130_FD_SC_HD__INV_1": 0, "SKY130_FD_SC_HD__NAND2_1": 1, "UNKNOWN": 2}
+    assert cell_type_map.cell_type_id("sky130_fd_sc_hd__inv_1", mp) == 0
+    assert cell_type_map.cell_type_id("not_a_cell", mp) == 2  # UNKNOWN
+
+
+def test_runtime_map_is_stable_across_designs_via_std_cell_filter():
+    # The cell-type id space must be the platform's std-cell vocabulary, NOT the
+    # per-design (std + macro) resolved set — else a macro lib reshuffles std-cell ids
+    # across designs of the same platform (review finding #8).
+    std = "/p/std.lib"
+    macro = "/p/macro.lib"
+    # "AMACRO_64X32" sorts before the std cells, so it WOULD shift their ids if included.
+    with_macro = {"cells": {
+        "INV_1": {"source_lib": std}, "NAND2_1": {"source_lib": std},
+        "AMACRO_64X32": {"source_lib": macro},
+    }}
+    no_macro = {"cells": {"INV_1": {"source_lib": std}, "NAND2_1": {"source_lib": std}}}
+    mp1 = cell_type_map.build_runtime_map(with_macro, [std])
+    mp2 = cell_type_map.build_runtime_map(no_macro, [std])
+    # std-cell ids identical whether or not a macro lib was loaded
+    assert mp1["INV_1"] == mp2["INV_1"] == 0
+    assert mp1["NAND2_1"] == mp2["NAND2_1"] == 1
+    # macro cell is excluded from the id space -> UNKNOWN
+    assert "AMACRO_64X32" not in mp1
+    assert cell_type_map.cell_type_id("amacro_64x32", mp1) == mp1["UNKNOWN"]
+    # without the std-cell filter, the macro WOULD shift std-cell ids (the bug #8 prevents)
+    unfiltered = cell_type_map.build_runtime_map(with_macro)
+    assert unfiltered["NAND2_1"] != mp1["NAND2_1"]  # AMACRO_64X32 sorts before, shifts +1
+
+
+# --- tech-LEF routing-layer matcher ----------------------------------------
+
+NANGATE_LEF = textwrap.dedent("""
+    LAYER metal1
+      TYPE ROUTING ;
+    END metal1
+    LAYER via1
+      TYPE CUT ;
+    END via1
+    LAYER metal10
+      TYPE ROUTING ;
+    END metal10
+""")
+
+SKY130_LEF = textwrap.dedent("""
+    LAYER li1
+      TYPE ROUTING ;
+    END li1
+    LAYER mcon
+      TYPE CUT ;
+    END mcon
+    LAYER met1
+      TYPE ROUTING ;
+    END met1
+""")
+
+
+def test_routing_layers_exclude_cut_layers(tmp_path):
+    p = tmp_path / "n.lef"
+    p.write_text(NANGATE_LEF)
+    assert def_parse.parse_routing_layers(str(p)) == ["metal1", "metal10"]
+    p2 = tmp_path / "s.lef"
+    p2.write_text(SKY130_LEF)
+    assert def_parse.parse_routing_layers(str(p2)) == ["li1", "met1"]
+
+
+def test_layer_regex_full_token_match(tmp_path):
+    p = tmp_path / "n.lef"
+    p.write_text(NANGATE_LEF)
+    rx, from_lef = def_parse.routing_layer_regex(str(p))
+    assert from_lef is True
+    # metal1 must not match inside metal10 (word boundary + longest-first).
+    assert rx.search("+ ROUTED metal10 ( 0 0 )").group(1) == "metal10"
+    assert rx.search("+ ROUTED metal1 ( 0 0 )").group(1) == "metal1"
+    assert rx.search("+ ROUTED via1 ( 0 0 )") is None
+
+
+def test_layer_regex_fallback_when_no_lef():
+    rx, from_lef = def_parse.routing_layer_regex("")
+    assert from_lef is False
+    assert rx.search("ROUTED metal7 ( 0 0 )").group(1) == "metal7"
+
+
+# --- shared DEF parsers ----------------------------------------------------
+
+TINY_DEF = textwrap.dedent("""
+    DESIGN tiny ;
+    UNITS DISTANCE MICRONS 1000 ;
+    COMPONENTS 2 ;
+    - i1 INV_X1 + PLACED ( 1000 2000 ) N ;
+    - i2 NAND2_X1 + FIXED ( 3000 4000 ) FS ;
+    END COMPONENTS
+    NETS 1 ;
+    - n1 ( i1 ZN ) ( i2 A1 ) ( PIN clk )
+      + ROUTED metal1 ( 0 0 ) ( 1000 0 )
+      + USE SIGNAL ;
+    END NETS
+    END DESIGN
+""")
+
+
+def test_parse_components_preserves_order_status_orient(tmp_path):
+    p = tmp_path / "t.def"
+    p.write_text(TINY_DEF)
+    comps = def_parse.parse_components(str(p))
+    assert list(comps.keys()) == ["i1", "i2"]  # DEF declaration order
+    assert comps["i1"] == {"master": "INV_X1", "status": "PLACED", "orient": "N", "x": 1000, "y": 2000}
+    assert comps["i2"]["status"] == "FIXED" and comps["i2"]["orient"] == "FS"
+
+
+def test_parse_nets_filters_coord_pairs_and_keeps_conns(tmp_path):
+    p = tmp_path / "t.def"
+    p.write_text(TINY_DEF)
+    nets = def_parse.parse_nets(str(p))
+    assert list(nets["n1"]["conns"]) == [("i1", "ZN"), ("i2", "A1"), ("PIN", "clk")]
+    assert nets["n1"]["use"] == "SIGNAL"
+    assert any("ROUTED metal1" in r for r in nets["n1"]["routes"])
+
+
+WRAP_DEF = textwrap.dedent("""
+    DESIGN tiny ;
+    UNITS DISTANCE MICRONS 1000 ;
+    COMPONENTS 0 ;
+    END COMPONENTS
+    NETS 1 ;
+    - n1 ( i1 Z )
+      ( u_ROUTED_pkt A ) ( i3 B )
+      + ROUTED metal1 ( 0 0 ) ( 100 0 )
+        NEW metal2 ( 100 0 ) ( 100 100 ) ;
+    END NETS
+    END DESIGN
+""")
+
+
+def test_parse_nets_does_not_drop_conn_lines_containing_substring_routed(tmp_path):
+    # A wrapped connection line whose instance name contains "ROUTED" must NOT be
+    # diverted to routes (review finding #1) — the routes branch keys on a leading
+    # keyword, not a substring.
+    p = tmp_path / "t.def"
+    p.write_text(WRAP_DEF)
+    nets = def_parse.parse_nets(str(p))
+    assert ("u_ROUTED_pkt", "A") in nets["n1"]["conns"]
+    assert nets["n1"]["conns"] == [("i1", "Z"), ("u_ROUTED_pkt", "A"), ("i3", "B")]
+    # routing layers still captured for num_layer
+    rx, _ = def_parse.routing_layer_regex("")
+    layers = {rx.search(r).group(1).lower() for r in nets["n1"]["routes"] if rx.search(r)}
+    assert layers == {"metal1", "metal2"}

@@ -1,0 +1,119 @@
+# Feature Extraction (dataset building)
+
+`scripts/flow/run_features.sh <project-dir> [platform]` runs after a completed ORFS
+backend and emits per-node / per-edge / graph-level **feature** tables (the ML **X** side)
+plus a per-design statistics JSON. It is the complement of the label stage
+([`label-extraction.md`](label-extraction.md), the **Y** side): both read the **same**
+`6_final.def`, so feature rows join label rows on `graph_id` + `inst_name`/`net_name`. It
+is fail-soft — each of the eight workers is independent, and a missing input or worker
+error records a per-feature status without aborting the others.
+
+## Outputs
+
+Written to `design_cases/<design>/features/` and `design_cases/<design>/reports/`:
+
+| File | Rows | Columns |
+|------|------|---------|
+| `features/metadata.csv` | per design (1 row) | `graph_id,num_cells,num_nets,num_ios,avg_fanout,die_width,die_height,core_area,dbu_unit,PLACE_DENSITY,CORE_UTILIZATION,ABC_AREA,C_total,tracks_per_layer,V_nom,freq_Hz` |
+| `features/nodes_gate.csv` | per placed instance | `graph_id,inst_name,master,cell_type_id,cell_area,cell_power,x_um,y_um,orientation,orientation_id,placement_status,placement_status_id` |
+| `features/nodes_net.csv` | per net | `graph_id,net_name,net_type_id,fanout,pin_count,num_drivers,num_sinks,connects_macro_flag,num_layer,hpwl_um` |
+| `features/nodes_iopin.csv` | per top-level I/O pin | `graph_id,iopin_name,net_name,pin_x_um,pin_y_um,pin_owner_master,pin_name,pin_layer_hint,nearest_tap_distance_um,pin_direction,pin_direction_id,net_use,net_type_id` |
+| `features/nodes_pin.csv` | per pin (I/O + instance) | `graph_id,inst_name,pin_name,pin_type_id,sum_pin_cap_fF,pin_x_std_um,pin_y_std_um` |
+| `features/edges_gate_pin.csv` | per (gate → pin) | `graph_id,inst_name,pin_name,cell_type_id,pin_type_id` |
+| `features/edges_pin_net.csv` | per (pin → net) | `graph_id,inst_name,pin_name,pin_type_id,net_name,net_type_id` |
+| `features/edges_iopin_net.csv` | per (I/O pin → net) | `graph_id,iopin_name,net_name,net_type_id,pin_direction_id` |
+| `reports/features_stats.json` | — | per-CSV row count + status + numeric summaries (min/mean/p50/p90/p95/p99/max) of key columns; `design`, `platform`, `spef_present` |
+
+`graph_id` (= the design name) joins to the label CSVs' `Design`; `inst_name` / `net_name`
+/ `iopin_name` join nodes↔edges and join to the labels' `Cell` / `Net`. Validated on
+`aes_core`: `nodes_gate` rows == DEF `COMPONENTS`, `nodes_net` == `NETS`, `nodes_iopin` ==
+`PINS`, and 100% of feature cells/nets join the label rows.
+
+`cell_type_id` and the `*_type_id` columns are **categorical**: their integer values are
+stable + distinct within a platform but are **not comparable across platforms** (the
+per-platform vocabulary differs — see below). Filter datasets by `platform`.
+
+## Inputs & resolution
+
+- **Design geometry:** the collected `backend/RUN_*/{final,results}/6_final.def` (newest
+  run), falling back to the live ORFS results dir. This is the same artifact the label
+  stage uses — *not* the route-stage `5_route.def` the original scratch scripts used
+  (which is not collected on disk). Override with `R2G_DEF` to feed an exported
+  `5_route.def` if route-stage geometry is required (the bare ORFS `DEF_FILE` variable is
+  intentionally **not** honored as an override — it is commonly exported in ORFS shells and
+  would silently pin every batch design to one DEF).
+- **Parasitics (optional):** `backend/RUN_*/rcx/6_final.spef` (fallbacks: `…/results/`,
+  `<project-dir>/rcx/`). SPEF feeds `C_total` (metadata) and the I/O contribution to
+  `sum_pin_cap_fF` (nodes_pin). When absent (no RCX), those degrade to 0 and the stats
+  JSON records `spef_present:false` — non-fatal.
+- **Platform liberty/tech-lef:** `resolve_platform_paths.sh` asks the ORFS Makefile to
+  expand `LIB_FILES`/`ADDITIONAL_LIBS`/`TECH_LEF` for the design's `config.mk` (so
+  asap7/gf180 corner-built variables resolve), with a platform-dir glob fallback. `.lib.gz`
+  liberty (asap7/gf180) is decompressed transparently by the parser.
+- **Clock ports:** parsed from `constraints/constraint.sdc` (`create_clock ... [get_ports]`,
+  resolving `$var`) to set `net_type_id`/`pin_type_id` clock classification.
+
+## Why pin/net typing reads liberty
+
+`cell_area`, `cell_power`, `sum_pin_cap_fF`, and the pin direction that drives
+`num_drivers`/`num_sinks`, `pin_type_id`, and `pin_direction_id` all come from the cell
+liberty models. Without liberty (`R2G_LIB_FILES` empty / unresolved) those fall to 0 and
+pin typing degrades — the loader emits an explicit `WARN: no liberty file found` rather
+than silently zeroing.
+
+## Platform handling (fully parameterized)
+
+- **cell_type_id** — `nangate45` uses a curated function-family + drive-strength map
+  (`cell_type_map.NANGATE45_CELL_TYPE_MAPPING`, IDs 0–128, `UNKNOWN`=95, incl. the known
+  `fakeram45_*` macros). Any other platform gets a deterministic map built from the
+  platform's **standard-cell** liberty only (`R2G_SC_LIB_FILES` = `LIB_FILES`, sorted →
+  0..N-1) so the ids are stable across every design of that platform; per-design macro
+  cells (`ADDITIONAL_LIBS`) resolve to `UNKNOWN` rather than reshuffling the std-cell ids.
+- **num_layer** — distinct routing layers a net traverses, derived from the tech LEF's
+  `TYPE ROUTING` layer names (nangate `metal1..10`, sky130 `li1`/`met1..5`, asap7 `M1..9`);
+  falls back to `metal\d+` if no tech LEF.
+- **tap detection** — `nearest_tap_distance_um` keys on a `"TAP"` substring (matches
+  Nangate/sky130/asap7 tap cells), plus per-platform extras for platforms whose well-tap
+  masters lack "TAP" (gf180 `__filltie`/`__endcap`); extend via `R2G_TAP_PATTERNS`. (ihp-sg13g2
+  places no tap cells, so the column is legitimately 0 there.)
+
+## Env knobs (override resolution)
+
+| Var | Effect |
+|-----|--------|
+| `R2G_DEF` | explicit input DEF (default: collected `6_final.def`; bare `DEF_FILE` is not honored) |
+| `R2G_LIB_FILES` | space-separated liberty paths incl. macros (overrides resolver; feeds area/power/cap) |
+| `R2G_SC_LIB_FILES` | standard-cell liberty only (defaults to `LIB_FILES`; builds the cell-type map) |
+| `R2G_TECH_LEF` | tech LEF for routing-layer naming |
+| `R2G_SPEF` | explicit SPEF (default: collected `6_final.spef`; empty = skip cap) |
+| `R2G_SDC` / `R2G_CONFIG` | explicit SDC / config.mk (default: `constraints/`) |
+| `R2G_PLATFORM` | platform name for cell-type-map selection |
+| `R2G_TAP_PATTERNS` | comma-separated extra tap-cell name substrings |
+| `FEATURE_TIMEOUT` | per-worker timeout seconds (default 2400) |
+
+Each worker is also independently runnable: `python3 <worker>.py <DEF> <out_csv> <graph_id>`
+with the `R2G_*` env above.
+
+## Batch backfill
+
+`tools/run_features_batch.sh [N] [design ...]` runs `run_features.sh` across many
+completed designs with a concurrency cap (`N`, default 4 — the workers are pure-Python,
+memory-light). With no design args it auto-discovers designs that have a collected
+`6_final.def`. Per-design logs and a `features_backfill.jsonl` roll-up land under
+`design_cases/_batch/logs_features_<tag>/`.
+
+## Scope notes
+
+- Per-design only — corpus-wide aggregation, knowledge-store ingest, and dashboard
+  surfacing are intentionally not wired here (matching the label stage).
+- Liberty follows the design's **configured ORFS corner** (`CORNER`, e.g. BC/fast on
+  asap7/gf180), matching the label stage's resolver. Area is corner-invariant; pin
+  capacitance differs ~2–5% by corner, so mixing fallback-resolved (TT) and make-eval (FF)
+  designs in one dataset introduces minor cap inconsistency — filter/normalize per corner
+  if it matters.
+- **Cell-origin approximation:** pin geometry is not parsed from the LEF, so all pins on an
+  instance inherit the instance origin. `hpwl_um` and `pin_x_std_um`/`pin_y_std_um` are
+  therefore cell-origin approximations, not true pin-location metrics.
+- Hand-rolled regex parsers tuned to ORFS `write_def`/`write_spef` output. The stats JSON
+  carries row counts; a quick sanity check is `nodes_gate` rows ≈ DEF `COMPONENTS`.
+- Designs that never reached `6_final` are skipped (status recorded), not errored.
