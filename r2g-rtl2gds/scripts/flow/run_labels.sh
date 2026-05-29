@@ -36,10 +36,12 @@ mkdir -p "$LABELS_DIR" "$REPORTS_DIR"
 
 DESIGN_NAME="$(basename "$PROJECT_DIR")"
 if [[ -f "$CONFIG_MK" ]]; then
-  _dn=$(grep -E '^\s*(export\s+)?DESIGN_NAME' "$CONFIG_MK" | head -1 | sed 's/.*=\s*//' | tr -d ' ')
+  # `|| true` on every grep substitution: a missing key must not abort under
+  # `set -euo pipefail` (grep exits 1 on no match -> pipefail -> set -e).
+  _dn=$(grep -E '^\s*(export\s+)?DESIGN_NAME' "$CONFIG_MK" | head -1 | sed 's/.*=\s*//' | tr -d ' ' || true)
   [[ -n "$_dn" ]] && DESIGN_NAME="$_dn"
   if [[ -z "$PLATFORM" ]]; then
-    _pl=$(grep -E '^\s*(export\s+)?PLATFORM\b' "$CONFIG_MK" | head -1 | sed 's/.*=\s*//' | tr -d ' ')
+    _pl=$(grep -E '^\s*(export\s+)?PLATFORM\b' "$CONFIG_MK" | head -1 | sed 's/.*=\s*//' | tr -d ' ' || true)
     PLATFORM="${_pl:-nangate45}"
   fi
 fi
@@ -88,9 +90,9 @@ SUPPLY_VOLTAGE="${SUPPLY_VOLTAGE:-1.1}"
 # --- Clock period / port from the design SDC -------------------------------
 CLOCK_PERIOD="10.0"; CLOCK_PORT=""
 if [[ -f "$SDC_FILE" ]]; then
-  _cp=$(grep -E '^\s*set\s+clk_period\b' "$SDC_FILE" | head -1 | sed -E 's/.*set\s+clk_period\s+//' | awk '{print $1}')
+  _cp=$(grep -E '^\s*set\s+clk_period\b' "$SDC_FILE" | head -1 | sed -E 's/.*set\s+clk_period\s+//' | awk '{print $1}' || true)
   [[ -n "$_cp" ]] && CLOCK_PERIOD="$_cp"
-  _pn=$(grep -E '^\s*set\s+clk_port_name\b' "$SDC_FILE" | head -1 | sed -E 's/.*set\s+clk_port_name\s+//' | awk '{print $1}' | tr -d '"')
+  _pn=$(grep -E '^\s*set\s+clk_port_name\b' "$SDC_FILE" | head -1 | sed -E 's/.*set\s+clk_port_name\s+//' | awk '{print $1}' | tr -d '"' || true)
   [[ -n "$_pn" ]] && CLOCK_PORT="$_pn"
 fi
 echo "clk_period=$CLOCK_PERIOD clk_port=${CLOCK_PORT:-<auto>} supply=$SUPPLY_VOLTAGE libs=$(echo $LIB_FILES | wc -w)"

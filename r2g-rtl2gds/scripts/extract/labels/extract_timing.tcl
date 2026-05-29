@@ -118,7 +118,10 @@ foreach inst [$block getInsts] {
 set clk_ports {}
 if {[info exists ::env(CLOCK_PORT)] && [string trim $::env(CLOCK_PORT)] ne ""} {
     set clk_ports [get_ports -quiet $::env(CLOCK_PORT)]
-} else {
+}
+# Fall back to a clk/clock name match if the explicit port matched nothing — a
+# mismatched SDC clk_port_name must not silently disable clock detection.
+if {[llength $clk_ports] == 0} {
     foreach p [get_ports -quiet *] {
         set pname [get_full_name $p]
         if {[regexp -nocase {(clk|clock)} $pname]} {

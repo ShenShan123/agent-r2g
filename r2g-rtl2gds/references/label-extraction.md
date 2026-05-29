@@ -72,3 +72,9 @@ roll-up land under `design_cases/_batch/logs_labels_<tag>/`.
 - Typical/primary corner only (no multi-corner labels). The corner follows the ORFS
   platform default (`CORNER`), e.g. BC for asap7/gf180.
 - Designs that never reached `6_final` are skipped (status recorded), not errored.
+- **Timing labels need a detectable clock.** The clock is re-created after
+  `read_db` from the SDC `clk_port_name`, falling back to a `clk`/`clock` port-name
+  match. Designs whose top-level clock port has a non-conventional name (and whose
+  SDC `clk_port_name` doesn't match an actual port) get all-`not_in_path` timing
+  rows (`label=0`) — honestly recorded, not an error. Purely combinational designs
+  also correctly produce zero in-path rows.
