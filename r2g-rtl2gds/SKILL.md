@@ -311,6 +311,7 @@ design_cases/<design-name>/
 - Read `references/orfs-playbook.md` before setting up or debugging the ORFS backend.
 - Read `references/failure-patterns.md` when a run fails and you need a triage path.
 - Read `references/ppa-report-guide.md` when summarizing synthesis/backend reports.
+- Read `references/label-extraction.md` when building the physical-design dataset (per-cell/per-net labels + stats).
 - Use scripts in `scripts/` for initialization, spec normalization, environment checks, lint, simulation, synthesis, ORFS backend, DRC, LVS, RCX extraction, result collection, GDS preview rendering, dashboard generation, and run summaries.
 - Use `assets/examples/simple-arbiter/` as the first smoke-test case.
 - Use `assets/config-template.mk` and `assets/constraint-template.sdc` as default backend configuration templates.
@@ -360,6 +361,14 @@ design_cases/<design-name>/
     - `scripts/extract/extract_drc.py <project-root> reports/drc.json`
     - `scripts/extract/extract_lvs.py <project-root> reports/lvs.json`
     - `scripts/extract/extract_rcx.py <project-root> reports/rcx.json`
+13b. Extract dataset labels (optional, for dataset building):
+    - `scripts/flow/run_labels.sh <project-dir> [platform]`
+    - Emits per-cell/per-net label CSVs to `<project-dir>/labels/` (congestion,
+      wirelength, timing, IR drop) and a per-design `reports/labels_stats.json`.
+    - Fail-soft: a missing input or per-label tool error is recorded, not fatal.
+    - Platform-agnostic: liberty/lef/supply-voltage are resolved from the ORFS
+      platform config. See `references/label-extraction.md`.
+    - Batch backfill across completed designs: `tools/run_labels_batch.sh`.
 14. Diagnose issues: `scripts/reports/build_diagnosis.py <project-root> reports/diagnosis.json`
 15. Get config suggestions: `knowledge/suggest_config.py <project-dir>` (optional, useful for tuning)
 16. Collect artifacts with `scripts/reports/collect_reports.py` and summarize with `scripts/reports/summarize_run.py`.

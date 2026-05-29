@@ -15,6 +15,7 @@ r2g-rtl2gds/                  # The skill (everything to run a flow lives here)
   SKILL.md                      # Workflow, hard rules, env knobs (PLACE_FAST, ROUTE_FAST, …)
   scripts/flow/                 # Stage runners: run_orfs.sh, run_drc.sh, run_lvs.sh, run_rcx.sh, …
   scripts/extract/              # Parse tool output → JSON: extract_ppa, extract_drc, extract_lvs, …
+    labels/                       # Dataset label extractors (congestion, wirelength, timing, irdrop) + stats roller
   scripts/project/              # init_project, normalize_spec, validate_config
   scripts/reports/              # check_timing, build_diagnosis, build_run_history, …
   scripts/dashboard/            # render_gds_preview, generate/serve dashboard
@@ -25,6 +26,7 @@ r2g-rtl2gds/                  # The skill (everything to run a flow lives here)
 tools/                          # Repo-level operator tooling + installers
 design_cases/                   # All design runs (gitignored)
   <design-name>/                  # One project per directory
+    labels/                         # Per-cell/per-net dataset label CSVs (run_labels.sh) + reports/labels_stats.json
   _batch/                         # Batch results, jsonl, per-design logs
   _dashboard/                     # Auto-generated HTML dashboard
 ```
