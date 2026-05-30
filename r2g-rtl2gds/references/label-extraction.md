@@ -27,12 +27,16 @@ by design.
 - **Design geometry:** the collected `backend/RUN_*/{final,results}/6_final.odb`
   (timing, IR drop) and `6_final.def` (congestion, wirelength). Falls back to the
   live ORFS results dir.
-- **Platform liberty/lef/voltage:** `resolve_platform_paths.sh` asks the ORFS
-  Makefile to expand `LIB_FILES`, `TECH_LEF`, `SC_LEF`, `ADDITIONAL_LIBS`,
-  `PWR_NETS_VOLTAGES` for the design's `config.mk` (so asap7/gf180 corner-built
-  variables resolve), with a platform-dir glob + per-platform voltage map as
-  fallback. Validated on all six ORFS platforms (nangate45, sky130hd/hs, asap7,
-  gf180, ihp-sg13g2). `.lib.gz` liberty (asap7/gf180) is read directly by OpenROAD.
+- **Platform liberty/lef/voltage:** `resolve_platform_paths.sh` (a thin shim over
+  `scripts/extract/techlib/resolve.py`) asks the ORFS Makefile to expand `LIB_FILES`,
+  `TECH_LEF`, `SC_LEF`, `ADDITIONAL_LIBS`, `PWR_NETS_VOLTAGES` for the design's
+  `config.mk` (so asap7/gf180 corner-built variables resolve), with a platform-dir
+  glob + per-platform voltage map as fallback. The per-platform voltage constants live
+  in `techlib.profile` (`TechProfile.supply_voltage_str`); the congestion worker also
+  consults `techlib.lef.routing_layer_info` for tech-LEF pitch/direction (with the
+  nangate45 `DEFAULT_LAYER_INFO` as the fallback). Validated on all six ORFS platforms
+  (nangate45, sky130hd/hs, asap7, gf180, ihp-sg13g2). `.lib.gz` liberty (asap7/gf180)
+  is read directly by OpenROAD.
 - **Clock period / port:** parsed from `constraints/constraint.sdc`
   (`set clk_period`, `set clk_port_name`); defaults to 10.0 / clock-name auto-detect.
   A wrong clock period biases `Path_Delay_ns` — keep the SDC accurate.

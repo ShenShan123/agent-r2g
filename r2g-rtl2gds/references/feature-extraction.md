@@ -41,15 +41,18 @@ per-platform vocabulary differs — see below). Filter datasets by `platform`.
   (which is not collected on disk). Override with `R2G_DEF` to feed an exported
   `5_route.def` if route-stage geometry is required (the bare ORFS `DEF_FILE` variable is
   intentionally **not** honored as an override — it is commonly exported in ORFS shells and
-  would silently pin every batch design to one DEF).
+  would silently pin every batch design to one DEF). DEF parsing is handled by
+  `scripts/extract/techlib/def_parse.py` (the single shared DEF/SDC parser).
 - **Parasitics (optional):** `backend/RUN_*/rcx/6_final.spef` (fallbacks: `…/results/`,
   `<project-dir>/rcx/`). SPEF feeds `C_total` (metadata) and the I/O contribution to
   `sum_pin_cap_fF` (nodes_pin). When absent (no RCX), those degrade to 0 and the stats
   JSON records `spef_present:false` — non-fatal.
-- **Platform liberty/tech-lef:** `resolve_platform_paths.sh` asks the ORFS Makefile to
-  expand `LIB_FILES`/`ADDITIONAL_LIBS`/`TECH_LEF` for the design's `config.mk` (so
-  asap7/gf180 corner-built variables resolve), with a platform-dir glob fallback. `.lib.gz`
-  liberty (asap7/gf180) is decompressed transparently by the parser.
+- **Platform liberty/tech-lef:** `resolve_platform_paths.sh` (a thin shim over
+  `scripts/extract/techlib/resolve.py`) asks the ORFS Makefile to expand
+  `LIB_FILES`/`ADDITIONAL_LIBS`/`TECH_LEF` for the design's `config.mk` (so asap7/gf180
+  corner-built variables resolve), with a platform-dir glob fallback. Liberty is parsed by
+  `techlib.liberty`; `.lib.gz` (asap7/gf180) is decompressed transparently. Routing-layer
+  names and the `\b(<layer>|...)\b` matcher are provided by `techlib.lef`.
 - **Clock ports:** parsed from `constraints/constraint.sdc` (`create_clock ... [get_ports]`,
   resolving `$var`) to set `net_type_id`/`pin_type_id` clock classification.
 
@@ -63,19 +66,28 @@ than silently zeroing.
 
 ## Platform handling (fully parameterized)
 
-- **cell_type_id** — `nangate45` uses a curated function-family + drive-strength map
-  (`cell_type_map.NANGATE45_CELL_TYPE_MAPPING`, IDs 0–128, `UNKNOWN`=95, incl. the known
-  `fakeram45_*` macros). Any other platform gets a deterministic map built from the
-  platform's **standard-cell** liberty only (`R2G_SC_LIB_FILES` = `LIB_FILES`, sorted →
-  0..N-1) so the ids are stable across every design of that platform; per-design macro
-  cells (`ADDITIONAL_LIBS`) resolve to `UNKNOWN` rather than reshuffling the std-cell ids.
+Per-platform constants (supply voltage, tap patterns, cell-type strategy, fallback routing
+layers) are stored in `scripts/extract/techlib/profile.py` as a `TechProfile` per ORFS
+platform, retrieved via `techlib.profile.get_profile(name)`. The workers import the
+consolidated `techlib.*` modules instead of maintaining per-extractor copies.
+
+- **cell_type_id** — provided by `techlib.cell_types`. `nangate45` uses a curated
+  function-family + drive-strength map (`techlib.cell_types.NANGATE45_CELL_TYPE_MAPPING`,
+  IDs 0–128, `UNKNOWN`=95, incl. the known `fakeram45_*` macros). Any other platform gets
+  a deterministic map built from the platform's **standard-cell** liberty only
+  (`R2G_SC_LIB_FILES` = `LIB_FILES`, sorted → 0..N-1) so the ids are stable across every
+  design of that platform; per-design macro cells (`ADDITIONAL_LIBS`) resolve to `UNKNOWN`
+  rather than reshuffling the std-cell ids. Which strategy applies is recorded in the
+  `TechProfile.cell_type_strategy` field (`"curated"` for nangate45, `"runtime"` for all
+  others).
 - **num_layer** — distinct routing layers a net traverses, derived from the tech LEF's
-  `TYPE ROUTING` layer names (nangate `metal1..10`, sky130 `li1`/`met1..5`, asap7 `M1..9`);
-  falls back to `metal\d+` if no tech LEF.
+  `TYPE ROUTING` layer names via `techlib.lef.routing_layers` / `routing_layer_regex`
+  (nangate `metal1..10`, sky130 `li1`/`met1..5`, asap7 `M1..9`); falls back to `metal\d+`
+  if no tech LEF.
 - **tap detection** — `nearest_tap_distance_um` keys on a `"TAP"` substring (matches
-  Nangate/sky130/asap7 tap cells), plus per-platform extras for platforms whose well-tap
-  masters lack "TAP" (gf180 `__filltie`/`__endcap`); extend via `R2G_TAP_PATTERNS`. (ihp-sg13g2
-  places no tap cells, so the column is legitimately 0 there.)
+  Nangate/sky130/asap7 tap cells), plus per-platform extras from `TechProfile.tap_patterns`
+  for platforms whose well-tap masters lack "TAP" (gf180 `FILLTIE`/`ENDCAP`); extend via
+  `R2G_TAP_PATTERNS`. (ihp-sg13g2 places no tap cells, so the column is legitimately 0 there.)
 
 ## Env knobs (override resolution)
 

@@ -315,6 +315,7 @@ design_cases/<design-name>/
 - Read `references/ppa-report-guide.md` when summarizing synthesis/backend reports.
 - Read `references/label-extraction.md` when building the physical-design dataset (per-cell/per-net labels + stats).
 - Read `references/feature-extraction.md` when building the graph-feature (X) side of the dataset (per-node/per-edge/metadata CSVs + stats).
+- Read `scripts/extract/techlib/` for the shared per-platform tech layer consumed by both stages: `profile.py` (supply voltage, tap patterns, cell-type strategy per ORFS platform), `resolve.py` (the Python backend for `resolve_platform_paths.sh` — same `KEY=VALUE` contract), `def_parse.py` (single DEF/SDC parser), `lef.py` (routing-layer names, pitch/direction, regex matcher), `liberty.py` (cell/pin/net classifiers), `cell_types.py` (`cell_type_id` map — curated for nangate45, runtime-built for all others).
 - Use scripts in `scripts/` for initialization, spec normalization, environment checks, lint, simulation, synthesis, ORFS backend, DRC, LVS, RCX extraction, result collection, GDS preview rendering, dashboard generation, and run summaries.
 - Use `assets/examples/simple-arbiter/` as the first smoke-test case.
 - Use `assets/config-template.mk` and `assets/constraint-template.sdc` as default backend configuration templates.

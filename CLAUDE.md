@@ -15,6 +15,7 @@ r2g-rtl2gds/                  # The skill (everything to run a flow lives here)
   SKILL.md                      # Workflow, hard rules, env knobs (PLACE_FAST, ROUTE_FAST, …)
   scripts/flow/                 # Stage runners: run_orfs.sh, run_drc.sh, run_lvs.sh, run_rcx.sh, …
   scripts/extract/              # Parse tool output → JSON: extract_ppa, extract_drc, extract_lvs, …
+    techlib/                      # Shared per-platform tech layer: profile, resolve, def_parse, lef, liberty, cell_types
     labels/                       # Dataset label extractors (congestion, wirelength, timing, irdrop) + stats roller
     features/                     # Dataset feature extractors (graph nodes/edges/metadata) + stats roller
   scripts/project/              # init_project, normalize_spec, validate_config
@@ -95,6 +96,7 @@ The skill enforces this order. Don't skip a failed stage — diagnose first via
 | How to read PPA / signoff JSON | `r2g-rtl2gds/references/ppa-report-guide.md` |
 | Dataset label extraction (Y: congestion/wirelength/timing/irdrop) | `r2g-rtl2gds/references/label-extraction.md` |
 | Dataset feature extraction (X: graph nodes/edges/metadata) | `r2g-rtl2gds/references/feature-extraction.md` |
+| Per-platform tech handling (voltage, tap cells, cell-type ids, routing layers, liberty) | `r2g-rtl2gds/scripts/extract/techlib/` |
 | Spec / config / SDC templates | `r2g-rtl2gds/references/spec-template.md`, `r2g-rtl2gds/assets/` |
 | Validated config tuning per design family | `r2g-rtl2gds/references/lessons-learned.md` (corpus tables) |
 | Platform extras (nangate45 LVS rule, etc.) | `r2g-rtl2gds/assets/platforms/<plat>/` |
