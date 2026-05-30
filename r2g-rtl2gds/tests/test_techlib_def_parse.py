@@ -86,6 +86,26 @@ def test_leading_star_chain_skipped():
     assert list(def_parse.route_segments("+ ROUTED met1 ( 100 * ) ( 500 600 )")) == []
 
 
+def test_mid_chain_bad_token_carries_previous_wirelength_semantics():
+    """A non-``*`` token that fails int() carries the previous coord forward.
+
+    Pins the chosen (wirelength) semantics on the ONE point where the two
+    originals diverge: wirelength does ``try: int(...) except ValueError: pass``
+    (carry previous, still emit a segment), whereas congestion's
+    extract_grid_demand ``continue``s (drops the point, advances). route_segments
+    follows wirelength. The bad x-token here keeps x=100; only y advances.
+    """
+    line = "+ ROUTED met1 ( 100 200 ) ( BOGUS 400 ) ( 700 400 )"
+    segs = list(def_parse.route_segments(line))
+    assert segs == [
+        (100, 200, 100, 400),   # x carried forward (BOGUS != '*' but int() fails)
+        (100, 400, 700, 400),
+    ]
+    # Sanity: had we followed congestion (drop the point), the first segment
+    # would instead jump straight to (100,200,700,400) on the next valid point.
+    assert segs[0] != (100, 200, 700, 400)
+
+
 def test_iter_route_segments_flattens():
     lines = [
         "+ ROUTED met1 ( 0 0 ) ( 0 100 )",
@@ -106,22 +126,11 @@ def _wirelength_via_route_segments(def_file):
 
     Mirrors parse_def_wirelength's NETS-section scan + dbu division so the result
     is directly comparable, but the per-line coordinate walk comes from the
-    consolidated iterator.
+    consolidated iterator and the dbu comes from the real techlib.parse_units.
     """
-    db_units = 2000.0
+    db_units = float(def_parse.parse_units(def_file))
     with open(def_file, "r") as f:
         lines = f.readlines()
-
-    for line in lines:
-        if line.startswith("UNITS DISTANCE MICRONS"):
-            parts = line.split()
-            if len(parts) >= 4:
-                try:
-                    db_units = float(parts[3])
-                except ValueError:
-                    pass
-        elif line.startswith("COMPONENTS"):
-            break
 
     net_start = re.compile(r"^\s*-\s+(\S+)")
     wl = {}

@@ -27,12 +27,6 @@ _PLACE_RE = re.compile(
 _PAIR_RE = re.compile(r"\(\s*([^\s()]+)\s+([^\s()]+)\s*\)")
 _INT_RE = re.compile(r"^-?\d+$")
 
-# Point extraction inside a DEF routing statement: the FIRST TWO tokens inside
-# each `( ... )`, ignoring any trailing via/layer token (e.g. `( x y via12 )`).
-# This is the regex congestion's extract_grid_demand uses; wirelength's
-# token-walk ("2 tokens after each `(`") yields the identical point sequence.
-_ROUTE_POINT_RE = re.compile(r"\(\s*([^\s\)]+)\s+([^\s\)]+)(?:\s+[^\)]*)?\s*\)")
-
 
 def parse_units(def_path):
     """Database units per micron from the DEF ``UNITS DISTANCE MICRONS`` line."""
@@ -271,29 +265,55 @@ def parse_sdc_clock_port_names(sdc_path):
 # --------------------------------------------------------------------------- #
 # route_segments — the single coordinate-chain walker (dedup target).         #
 # --------------------------------------------------------------------------- #
+# Point extraction inside a DEF routing statement: the FIRST TWO tokens inside
+# each `( ... )`, ignoring any trailing via/layer token (e.g. `( x y via12 )`).
+# This is the regex congestion's extract_grid_demand uses; wirelength's
+# token-walk ("2 tokens after each `(`") yields the identical point sequence.
+_ROUTE_POINT_RE = re.compile(r"\(\s*([^\s\)]+)\s+([^\s\)]+)(?:\s+[^\)]*)?\s*\)")
+
+
 def route_segments(route_line):
     """Yield consecutive integer ``(x1, y1, x2, y2)`` segments for one DEF route line.
 
-    Reproduces the ``*``-relative coordinate-chain semantics that both label
-    extractors currently re-implement independently:
+    Walks the ``*``-relative coordinate chain that both label extractors currently
+    re-implement independently, using the same regex point extraction both use
+    (first two tokens inside each ``( ... )``, any trailing via/layer token ignored):
 
-      * wirelength (``parse_def_wirelength``): walk the points, ``*`` means
-        "unchanged from previous"; the FIRST point must be explicit — if it is
-        non-integer (e.g. ``*``) the whole route line is skipped
-        (``try: curr_x=int(p0[0]) ... except ValueError: continue``).
-      * congestion (``extract_grid_demand``): same regex point extraction
-        (first two tokens inside each ``( ... )``, trailing via/layer ignored)
-        and the same ``*``-chain walk feeding ``add_route_segment``.
+      * wirelength (``parse_def_wirelength``): token-walk; ``*`` means "unchanged
+        from previous"; the FIRST point must be explicit — if it is non-integer
+        (e.g. ``*``) the whole route line is skipped
+        (``try: curr_x=int(p0[0]) ... except ValueError: continue``); a non-``*``
+        token that fails ``int()`` carries the previous value forward
+        (``try: next_x=int(...) except ValueError: pass``) and still emits a step.
+      * congestion (``extract_grid_demand``): same regex + same ``*``-chain walk
+        feeding ``add_route_segment``.
 
-    Behavior contract (matched exactly against both originals):
+    ``route_segments`` follows **wirelength's** ``*``/bad-token semantics exactly.
+    Congestion diverges in two spots, and this iterator does NOT reproduce those —
+    it intentionally normalizes onto wirelength's behavior:
+
+      * Leading non-integer point: wirelength skips the whole line; congestion
+        instead ``continue``s, retrying the next point as the chain start. We skip
+        the whole line.
+      * Mid-chain non-``*`` token that fails ``int()``: wirelength ``pass``es
+        (carries the previous coordinate forward, still emits a segment);
+        congestion ``continue``s (drops the point, advances). We carry forward.
+
+    This normalization is **output-neutral on real ORFS ``write_def`` output**: the
+    real-DEF correspondence tests (test_techlib_def_parse.py) prove 0 mismatches vs.
+    BOTH originals across 194k+ segments on aes_core (nangate45) + cordic (sky130hd),
+    because every coordinate token a router emits is either an explicit integer or a
+    bare ``*`` — the divergent (non-integer non-``*``) path never occurs. So
+    re-pointing congestion onto this iterator in a later task is output-neutral.
+
+    Behavior contract:
       * Points = first two tokens inside each ``( ... )`` (``_ROUTE_POINT_RE``);
         any trailing via/layer token is ignored.
       * Fewer than 2 points  -> yields nothing (single-point or point-less line).
       * First point non-integer (``*`` chain start, or garbage) -> yields nothing
-        for the whole line (matches wirelength's ``continue``).
-      * For each subsequent point, ``*`` carries the previous coordinate forward;
-        a non-integer non-``*`` token also carries the previous value forward
-        (matches wirelength's ``try: next_x=int(...) except ValueError: pass``).
+        for the whole line.
+      * For each subsequent point, ``*`` (or a non-``*`` token that fails ``int()``)
+        carries the previous coordinate forward.
       * Segments are emitted even when zero-length (x1==x2 and y1==y2); callers
         that care (congestion's ``add_route_segment``) already guard on
         ``x1!=x2`` / ``y1!=y2`` themselves, so emitting them is faithful to the
