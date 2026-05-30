@@ -8,8 +8,8 @@ import os
 import re
 
 from case_paths import resolve_case_paths
-from def_parse import parse_components, parse_design_name, parse_sdc_clock_port_names, parse_units
-from lib_db import direction_id, infer_net_type_id, is_tap_master
+from techlib.def_parse import parse_components, parse_design_name, parse_sdc_clock_port_names, parse_units
+from techlib.liberty import direction_id, infer_net_type_id, is_tap_master
 
 
 def parse_pins(def_path):

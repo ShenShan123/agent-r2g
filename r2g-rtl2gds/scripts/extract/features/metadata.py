@@ -11,8 +11,8 @@ import sys
 from collections import defaultdict
 
 from case_paths import resolve_case_paths
-from def_parse import parse_units
-from lib_db import load_liberty_db
+from techlib.def_parse import parse_units
+from techlib.liberty import load_liberty_db
 
 
 def _strip_inline_comment(s):

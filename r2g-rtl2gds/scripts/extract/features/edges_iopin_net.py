@@ -8,8 +8,8 @@ import os
 import re
 
 from case_paths import resolve_case_paths
-from def_parse import parse_sdc_clock_port_names
-from lib_db import direction_id, infer_net_type_id
+from techlib.def_parse import parse_sdc_clock_port_names
+from techlib.liberty import direction_id, infer_net_type_id
 
 
 def parse_pins(def_path):

@@ -7,8 +7,8 @@ import csv
 import os
 
 from case_paths import resolve_case_paths
-from def_parse import parse_components_master, parse_nets, parse_sdc_clock_port_names
-from lib_db import classify_pin_type, infer_net_type_id, load_liberty_db
+from techlib.def_parse import parse_components_master, parse_nets, parse_sdc_clock_port_names
+from techlib.liberty import classify_pin_type, infer_net_type_id, load_liberty_db
 
 
 def main():

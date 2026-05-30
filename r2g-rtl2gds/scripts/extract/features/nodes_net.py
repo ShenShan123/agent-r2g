@@ -9,14 +9,14 @@ import csv
 import os
 
 from case_paths import resolve_case_paths
-from def_parse import (
+from techlib.def_parse import (
     parse_components,
     parse_nets,
     parse_sdc_clock_port_names,
     parse_units,
-    routing_layer_regex,
 )
-from lib_db import get_pin_direction, infer_net_type_id, load_liberty_db
+from techlib.lef import routing_layer_regex
+from techlib.liberty import get_pin_direction, infer_net_type_id, load_liberty_db
 
 
 def parse_iopins(def_path):

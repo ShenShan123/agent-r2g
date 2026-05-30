@@ -6,9 +6,9 @@ cell_type_map (no exec()), shared component/net parsers, liberty from R2G_LIB_FI
 import csv
 
 from case_paths import resolve_case_paths
-from cell_type_map import cell_type_id, resolve_cell_type_map
-from def_parse import parse_components_master, parse_nets
-from lib_db import classify_pin_type, load_liberty_db
+from techlib.cell_types import cell_type_id, resolve_cell_type_map
+from techlib.def_parse import parse_components_master, parse_nets
+from techlib.liberty import classify_pin_type, load_liberty_db
 
 
 def main():

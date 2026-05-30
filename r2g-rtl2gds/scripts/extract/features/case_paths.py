@@ -21,6 +21,16 @@ every input is an explicit argument or env var.
 import os
 import sys
 
+# Runtime sys.path bootstrap: workers are launched by run_features.sh as
+# ``python3 <features>/<worker>.py ...``, so sys.path[0] is this features/ dir
+# and the consolidated ``techlib`` package (one level up, under scripts/extract/)
+# would not import. Every worker imports case_paths before techlib, so inserting
+# scripts/extract/ here makes ``import techlib.*`` resolve in production runs too
+# (pytest already adds it via conftest.py). Guarded against duplicate insert.
+_EXTRACT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _EXTRACT_DIR not in sys.path:
+    sys.path.insert(0, _EXTRACT_DIR)
+
 
 def _env(name, default=""):
     val = os.environ.get(name)

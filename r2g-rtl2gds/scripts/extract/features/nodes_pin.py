@@ -9,8 +9,8 @@ import os
 import re
 
 from case_paths import resolve_case_paths
-from def_parse import parse_components, parse_nets, parse_units
-from lib_db import (
+from techlib.def_parse import parse_components, parse_nets, parse_units
+from techlib.liberty import (
     build_net_pin_stats,
     classify_pin_type,
     get_pin_abs_pos_um,

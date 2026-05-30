@@ -7,9 +7,9 @@ liberty from R2G_LIB_FILES. One row per placed component, in DEF declaration ord
 import csv
 
 from case_paths import resolve_case_paths
-from cell_type_map import cell_type_id, resolve_cell_type_map
-from def_parse import parse_components, parse_units
-from lib_db import get_cell_area, get_cell_power, load_liberty_db
+from techlib.cell_types import cell_type_id, resolve_cell_type_map
+from techlib.def_parse import parse_components, parse_units
+from techlib.liberty import get_cell_area, get_cell_power, load_liberty_db
 
 
 def orient_id(s):
