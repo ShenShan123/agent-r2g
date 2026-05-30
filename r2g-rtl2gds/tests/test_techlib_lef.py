@@ -43,13 +43,16 @@ import extract_congestion
 def _platforms_dir():
     """Directory holding the ORFS platforms, or None if not resolvable.
 
-    Prefers $ORFS_ROOT/flow/platforms (the authoritative flow location); falls back
-    to the known checkout under the user workarea so the suite runs without env setup.
+    Prefers $ORFS_ROOT/flow/platforms (the authoritative flow location, set by the
+    autodetected ORFS env) FIRST; only then falls back to the known checkout. When
+    neither resolves, returns None so the equivalence tests SKIP (never fail) on a
+    machine without an ORFS checkout.
     """
     candidates = []
     orfs_root = os.environ.get("ORFS_ROOT")
     if orfs_root:
         candidates.append(os.path.join(orfs_root, "flow", "platforms"))
+    # Machine-local fallback for this dev box; absent elsewhere -> tests SKIP, not fail.
     candidates.append(
         "/proj/workarea/user5/OpenROAD-flow-scripts/flow/platforms"
     )
@@ -190,10 +193,13 @@ def test_family_ihp():
 # No-LEF / missing-LEF behavior (runs anywhere — no platform dependency).     #
 # --------------------------------------------------------------------------- #
 def test_no_lef_routing_layer_info_is_default():
-    """Missing LEF => DEFAULT_LAYER_INFO, equal to congestion's DEFAULT_LAYER_INFO."""
+    """Missing LEF => the module-level DEFAULT_LAYER_INFO fallback.
+
+    (Equality of DEFAULT_LAYER_INFO to congestion's constant is covered by
+    test_default_layer_info_matches_congestion_constant.)
+    """
     info = lef.routing_layer_info("/nonexistent/path/tech.lef")
     assert info == lef.DEFAULT_LAYER_INFO
-    assert info == extract_congestion.DEFAULT_LAYER_INFO
 
 
 def test_no_lef_routing_layers_empty():

@@ -72,6 +72,8 @@ def routing_layer_regex(tech_lef):
     Falls back to the platform-agnostic ``metal\\d+`` pattern when the LEF yields no
     routing layers (logged by the caller). Word boundaries make full-token matches exact
     (``metal1`` never matches inside ``metal10``); alternatives are sorted longest-first.
+    Note: the no-layer FALLBACK pattern ``(metal\\d+)`` intentionally OMITS the ``\\b``
+    word boundaries (it relies on ``\\d+`` greediness), faithfully matching the original.
 
     Returns ``(compiled_regex, from_lef_bool)``. Ported verbatim from
     ``scripts/extract/features/def_parse.py:routing_layer_regex`` (built on
@@ -100,6 +102,7 @@ def routing_layer_info(tech_lef, fallback=None):
     if fallback is None:
         fallback = DEFAULT_LAYER_INFO
 
+    # os.path.exists (not isfile) to match extract_congestion.parse_tech_lef verbatim
     if not tech_lef or not os.path.exists(tech_lef):
         print(f"WARNING: tech LEF not found ({tech_lef}); using nangate45 DEFAULT_LAYER_INFO")
         return fallback
