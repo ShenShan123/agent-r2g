@@ -100,8 +100,11 @@ for pin in "${PINS[@]}"; do
     echo "    NOTE: run_features.sh returned nonzero (fail-soft stages logged)"
 
   # --- Label stage (single-run auto-find resolves to the pinned artifacts) ----
+  # R2G_DEF is also set here for symmetry / future-proofing: run_labels.sh does
+  # not honor it today (the single-symlinked RUN is what actually pins it), but
+  # if it ever gains the override this keeps the pin correct.
   echo "  --- labels ---"
-  bash "$RUN_LABELS" "$stage" "$platform" 2>&1 | sed 's/^/    /' || \
+  R2G_DEF="$def" bash "$RUN_LABELS" "$stage" "$platform" 2>&1 | sed 's/^/    /' || \
     echo "    NOTE: run_labels.sh returned nonzero (fail-soft stages logged)"
 
   # --- Collect CSVs -----------------------------------------------------------
@@ -123,6 +126,20 @@ for pin in "${PINS[@]}"; do
   n_lab=$(find "$out_design/labels" -name '*.csv' -type f 2>/dev/null | wc -l)
   echo "  collected: $n_feat feature csv(s), $n_lab label csv(s) -> $out_design"
   echo "  md5sums:   $out_design/MD5SUMS"
+
+  # --- Fail hard on an empty/partial baseline ---------------------------------
+  # The fail-soft `... || echo NOTE` above swallows a nonzero extractor exit, so
+  # a broken run would otherwise quietly write a 0-CSV "baseline" that the gate
+  # test then treats as green. The feature stage has NO external-tool dependency
+  # (pure python over the DEF) and MUST always emit all 8 CSVs — anything less is
+  # a real failure, not an environment skip. (Label workers timing/irdrop need
+  # OpenROAD and may legitimately skip on a tool-less host, so we don't hard-gate
+  # on n_lab.)
+  if [[ "$n_feat" -lt 8 ]]; then
+    echo "  ERROR: $design produced only $n_feat/8 feature CSV(s) — extractor failed." >&2
+    echo "         Refusing to write a partial/empty baseline. See $stage/features/*.log" >&2
+    exit 2
+  fi
 done
 
 echo

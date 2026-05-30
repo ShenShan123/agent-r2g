@@ -124,6 +124,11 @@ def test_regenerated_matches_baseline(regenerated: Path, design: str):
     missing = sorted(set(base) - set(cur))
     assert not missing, f"{design}: regenerated set is missing CSV(s): {missing}"
 
+    # A refactor that renames or adds a CSV must also trip the gate, not slip
+    # through just because every *baseline* file still matches.
+    extra = sorted(set(cur) - set(base))
+    assert not extra, f"{design}: regenerated has unexpected new CSV(s): {extra}"
+
     mismatches = []
     for rel, base_path in base.items():
         cur_path = cur[rel]
