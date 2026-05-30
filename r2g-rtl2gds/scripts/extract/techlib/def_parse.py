@@ -182,44 +182,9 @@ def parse_nets(def_path):
     return nets
 
 
-def parse_routing_layers(tech_lef):
-    """Routing-layer names from a tech LEF (``LAYER <n> ... TYPE ROUTING ;`` blocks).
-
-    Used to count distinct routing layers a net traverses across any platform
-    (nangate ``metal1..metal10``, sky130 ``li1``/``met1..met5``, asap7 ``M1..M9``).
-    Returns a list in declaration order; empty if the LEF is missing/unparseable.
-    """
-    if not tech_lef or not os.path.isfile(tech_lef):
-        return []
-    layers = []
-    cur = None
-    with open(tech_lef, "r") as f:
-        for raw in f:
-            s = raw.strip()
-            m = re.match(r"LAYER\s+(\S+)", s)
-            if m:
-                cur = m.group(1)
-                continue
-            if cur is not None and re.search(r"\bTYPE\s+ROUTING\b", s):
-                if cur not in layers:
-                    layers.append(cur)
-            if s.startswith("END") and cur and s.split()[-1] == cur:
-                cur = None
-    return layers
-
-
-def routing_layer_regex(tech_lef):
-    """Compiled ``\\b(<layer>|...)\\b`` matcher from the tech LEF routing layers.
-
-    Falls back to the platform-agnostic ``metal\\d+`` pattern when the LEF yields no
-    routing layers (logged by the caller). Word boundaries make full-token matches exact
-    (``metal1`` never matches inside ``metal10``); alternatives are sorted longest-first.
-    """
-    layers = parse_routing_layers(tech_lef)
-    if not layers:
-        return re.compile(r"(metal\d+)", re.IGNORECASE), False
-    alt = "|".join(re.escape(n) for n in sorted(layers, key=len, reverse=True))
-    return re.compile(r"\b(" + alt + r")\b", re.IGNORECASE), True
+# Routing-layer parsing (routing_layers / routing_layer_regex / routing_layer_info) is the
+# canonical responsibility of techlib.lef — all consumers import it from there. The verbatim
+# copies once carried here during the migration were removed in Task 12 to finish the dedup.
 
 
 def _strip_inline_comment(s):
