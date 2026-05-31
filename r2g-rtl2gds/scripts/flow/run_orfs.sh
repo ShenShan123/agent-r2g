@@ -372,6 +372,17 @@ for f in $ODB_FILES; do
   cp "$f" "$BACKEND_DIR/final/" 2>/dev/null || true
 done
 
+# Also copy final artifacts to teaching_root for packaging & cross-commit dedup
+if [ -n "${TEACHING_ROOT:-}" ]; then
+  TEACHING_CASE_NAME="${TEACHING_CASE_NAME:-$DESIGN_NAME}"
+  STAGE2_ORFS_DIR="$TEACHING_ROOT/cases/$TEACHING_CASE_NAME/stage2_orfs"
+  mkdir -p "$STAGE2_ORFS_DIR"
+  for f in "$BACKEND_DIR/final/6_final.gds" "$BACKEND_DIR/final/6_final.def" "$BACKEND_DIR/final/6_final.odb"; do
+    [ -f "$f" ] && cp "$f" "$STAGE2_ORFS_DIR/" || true
+  done
+  echo "Copied final artifacts to $STAGE2_ORFS_DIR"
+fi
+
 # Write run metadata
 cat > "$BACKEND_DIR/run-meta.json" <<METAEOF
 {

@@ -142,6 +142,17 @@ if [[ -d "$BACKEND_DIR" ]]; then
   fi
 fi
 
+# Also copy SPEF to teaching_root for packaging & cross-commit dedup
+if [ -n "${TEACHING_ROOT:-}" ]; then
+  TEACHING_CASE_NAME="${TEACHING_CASE_NAME:-$DESIGN_NAME}"
+  STAGE3_RCX_DIR="$TEACHING_ROOT/cases/$TEACHING_CASE_NAME/stage3_drc_lvs_rcx"
+  mkdir -p "$STAGE3_RCX_DIR"
+  if [ -f "$SPEF_OUT" ]; then
+    cp "$SPEF_OUT" "$STAGE3_RCX_DIR/6_final.spef"
+    echo "Copied SPEF to $STAGE3_RCX_DIR"
+  fi
+fi
+
 # Report results
 if [[ -f "$SPEF_OUT" ]]; then
   SPEF_SIZE=$(wc -c < "$SPEF_OUT")
