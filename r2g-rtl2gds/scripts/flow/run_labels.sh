@@ -113,7 +113,7 @@ run_soft() {  # name + command...; never aborts the orchestrator
 # --- Congestion (DEF + tech.lef) -------------------------------------------
 if [[ -n "$DEF" ]]; then
   TECH_LEF="$TECH_LEF" run_soft congestion \
-    python3 "$LABELS_SRC/extract_congestion.py" "$DEF" "$LABELS_DIR/congestion.csv" "$DESIGN_NAME"
+    python3 "$LABELS_SRC/extract_congestion.py" "$DEF" "$LABELS_DIR/cell_congestion.csv" "$DESIGN_NAME"
 fi
 
 # --- Wirelength (DEF) ------------------------------------------------------
@@ -130,18 +130,18 @@ fi
 # an assignment); extract_timing.tcl treats an empty CLOCK_PORT as auto-detect.
 TIMING_LIBS="$LIB_FILES $ADDITIONAL_LIBS"
 if [[ -n "$ODB" ]]; then
-  ODB_FILE="$ODB" R2G_LIB_FILES="$TIMING_LIBS" OUTPUT_CSV="$LABELS_DIR/timing.csv" \
+  ODB_FILE="$ODB" R2G_LIB_FILES="$TIMING_LIBS" OUTPUT_CSV="$LABELS_DIR/timing_features.csv" \
     CLOCK_PERIOD="$CLOCK_PERIOD" CLOCK_PORT="$CLOCK_PORT" DESIGN_NAME="$DESIGN_NAME" \
     run_soft timing "$OPENROAD" -no_splash -exit "$LABELS_SRC/extract_timing.tcl"
 elif [[ -n "$DEF" ]]; then
-  DEF_FILE="$DEF" R2G_LIB_FILES="$TIMING_LIBS" TECH_LEF="$TECH_LEF" OUTPUT_CSV="$LABELS_DIR/timing.csv" \
+  DEF_FILE="$DEF" R2G_LIB_FILES="$TIMING_LIBS" TECH_LEF="$TECH_LEF" OUTPUT_CSV="$LABELS_DIR/timing_features.csv" \
     CLOCK_PERIOD="$CLOCK_PERIOD" CLOCK_PORT="$CLOCK_PORT" DESIGN_NAME="$DESIGN_NAME" \
     run_soft timing "$OPENROAD" -no_splash -exit "$LABELS_SRC/extract_timing.tcl"
 fi
 
 # --- IR drop (ODB) — liberty needed so PDNSim can compute cell power -------
 if [[ -n "$ODB" ]]; then
-  ODB_FILE="$ODB" R2G_LIB_FILES="$TIMING_LIBS" OUTPUT_RPT="$LABELS_DIR/irdrop.csv" \
+  ODB_FILE="$ODB" R2G_LIB_FILES="$TIMING_LIBS" OUTPUT_RPT="$LABELS_DIR/ir_drop.csv" \
     SUPPLY_VOLTAGE="$SUPPLY_VOLTAGE" DESIGN_NAME="$DESIGN_NAME" \
     run_soft irdrop "$OPENROAD" -no_splash -exit "$LABELS_SRC/extract_irdrop.tcl"
 fi

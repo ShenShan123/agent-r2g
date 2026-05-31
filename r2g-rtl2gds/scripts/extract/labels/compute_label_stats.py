@@ -14,10 +14,10 @@ import sys
 
 # label name -> (csv filename, label column, raw-metric column)
 SPECS = {
-    "congestion": {"file": "congestion.csv", "label": "label", "metric": "cell_congestion"},
+    "congestion": {"file": "cell_congestion.csv", "label": "label", "metric": "cell_congestion"},
     "wirelength": {"file": "wirelength.csv", "label": "label", "metric": "WireLength_um"},
-    "timing": {"file": "timing.csv", "label": "label", "metric": "Path_Delay_ns"},
-    "irdrop": {"file": "irdrop.csv", "label": "label", "metric": "IR_Drop_mV"},
+    "timing": {"file": "timing_features.csv", "label": "label", "metric": "Path_Delay_ns"},
+    "irdrop": {"file": "ir_drop.csv", "label": "label", "metric": "IR_Drop_mV"},
 }
 
 

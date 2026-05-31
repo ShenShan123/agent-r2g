@@ -70,6 +70,14 @@ if {[info exists ::env(OUTPUT_CSV)]} {
     set out_file "timing_features.csv"
 }
 
+set canonical_name "timing_features.csv"
+set out_dir [file dirname $out_file]
+if {$out_dir eq ""} { set out_dir "." }
+if {[file tail $out_file] ne $canonical_name} {
+    puts "Note: forcing canonical output name (was [file tail $out_file]) -> $canonical_name"
+}
+set out_file [file join $out_dir $canonical_name]
+
 puts "Reading DEF file: $def_file"
 if {$odb_file != "" && [file exists $odb_file]} {
     puts "Reading ODB file: $odb_file"

@@ -14,6 +14,21 @@ if _EXTRACT_DIR not in sys.path:
 
 from techlib.def_parse import route_segments  # noqa: E402
 
+CANONICAL_OUTPUT_NAME = "wirelength.csv"
+
+
+def _force_canonical(requested_path):
+    import os as _os
+    if requested_path:
+        out_dir = _os.path.dirname(_os.path.abspath(requested_path))
+    else:
+        out_dir = _os.path.dirname(_os.path.abspath(__file__))
+    forced = _os.path.join(out_dir, CANONICAL_OUTPUT_NAME)
+    if requested_path and _os.path.basename(requested_path) != CANONICAL_OUTPUT_NAME:
+        print(f"Note: forcing canonical output name -> {forced} "
+              f"(requested basename was '{_os.path.basename(requested_path)}')")
+    return forced
+
 def parse_def_wirelength(def_file):
     wirelengths = {}
     net_types = {}
@@ -98,7 +113,9 @@ def main():
         def_file = sys.argv[1]
         output_csv = sys.argv[2] if len(sys.argv) > 2 else os.path.join(os.path.dirname(__file__), 'wirelength.csv')
         design_name = sys.argv[3] if len(sys.argv) > 3 else None
-    
+
+    output_csv = _force_canonical(output_csv)
+
     if not os.path.exists(def_file):
         print(f"Error: {def_file} not found.")
         sys.exit(1)

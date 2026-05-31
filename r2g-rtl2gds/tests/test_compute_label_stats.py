@@ -39,7 +39,7 @@ def test_summarize_missing_csv_is_skipped(tmp_path):
 
 
 def test_build_report_writes_json(tmp_path):
-    (tmp_path / "irdrop.csv").write_text(
+    (tmp_path / "ir_drop.csv").write_text(
         "Design,Cell,X,Y,Voltage_V,IR_Drop_mV,P95_mV,label,has_irdrop\n"
         "d,c1,0,0,1.09,10.0,12.0,0.69,true\n"
     )
