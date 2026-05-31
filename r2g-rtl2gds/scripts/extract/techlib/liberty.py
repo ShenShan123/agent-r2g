@@ -29,7 +29,13 @@ GROUND_PIN_NAMES = {"VSS", "VGND", "GND", "VSSA", "VSSD"}
 
 
 def _strip_name_token(s):
-    return (s or "").replace("\\", "").strip()
+    # Strip backslashes, surrounding whitespace, AND surrounding double-quotes.
+    # sky130 liberty quotes cell/pin names (`cell ("sky130_fd_sc_hd__...")`); without
+    # stripping the quotes the cells-dict keys retain them and never match the unquoted
+    # DEF master (`master.upper()`), zeroing cell_area/power/pin-cap and collapsing
+    # cell_type_id to UNKNOWN on every sky130 cell. Unquoted-name platforms
+    # (nangate45/asap7/gf180/ihp-sg13g2) have no surrounding quotes, so this is a no-op there.
+    return (s or "").replace("\\", "").strip().strip('"').strip()
 
 
 def _norm_key(s):

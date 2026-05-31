@@ -6,9 +6,11 @@ before/after on two pinned designs that exercise two different PDKs:
 
   * aes_core (nangate45) — V_nom 1.10, metal1..metal10, 61 distinct curated
     cell_type_ids.
-  * cordic  (sky130hd)  — V_nom 1.80, li1/met1..met5, cell_type_id collapses to a
-    single value (428) for every gate row. That collapse is the CURRENT baseline
-    behavior and is intentionally PRESERVED by the gate, not "fixed".
+  * cordic  (sky130hd)  — V_nom 1.80, li1/met1..met5, differentiated cell_type_ids and
+    non-zero cell_area/power. (The sky130 quote-bug — quoted liberty cell names that
+    collapsed these to 0/UNKNOWN — was fixed on this branch, so the baseline now carries
+    the corrected, non-degenerate values.) Labels use canonical names
+    (cell_congestion/timing_features/ir_drop/wirelength).
 
 This module is SCAFFOLDING. It:
   1. Regenerates both stages for both designs into a temp dir via the pinned
@@ -31,7 +33,7 @@ failure. They skip per-platform when a PDK file is absent (ORFS is machine-local
   cordic metadata: num_cells=6508 num_nets=1454 num_ios=107 dbu=1000
     tracks_per_layer=li1:1125|met1:1294|met2:956|met3:646|met4:478|met5:128 V_nom=1.80
   cordic nodes_net col 'num_layer' distinct set = {0,2,3,4,5}
-  cordic nodes_gate col 'cell_type_id' == 428 for every row (6508 rows)
+  cordic nodes_gate col 'cell_type_id' differentiated + cell_area/power > 0 (quote-bug fixed)
   aes_core metadata: nangate45, V_nom=1.10, dbu=2000, metal1..metal10
   aes_core nodes_gate 'cell_type_id' distinct count = 61 (curated, varied)
 

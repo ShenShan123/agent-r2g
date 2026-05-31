@@ -9,23 +9,19 @@ these tests pin ``techlib.cell_types`` against KNOWN values:
   * ``cell_type_id`` — curated hits, lowercase inputs, non-existent master -> UNKNOWN.
   * ``build_runtime_map`` determinism — two calls equal, UNKNOWN=N, macro/garbage->UNKNOWN.
   * ``resolve_cell_type_map`` strategy — nangate45 returns the curated dict; sky130hd builds runtime.
-  * cordic-style "all masters UNKNOWN" baseline — observed value pinned; root-cause documented.
+  * sky130 real masters resolve via the runtime map — differentiated ids (quote-bug fixed).
 
 The no-file tests run unconditionally. Liberty-backed tests SKIP (never fail) when the
 ORFS platforms directory is absent, so the suite runs cleanly on a bare checkout.
 
-CONCERN (do not fix here — out of scope, tracked for Task 13):
-  The sky130hd runtime map built by ``build_runtime_map(db, sc_lib_paths=[lib])`` has keys
-  that include surrounding double-quote characters in the cell name token, e.g.
-  ``'"SKY130_FD_SC_HD__A211OI_1"'`` (the liberty parser preserves the ``"..."`` token
-  verbatim around the cell name and ``_norm_key`` just upper-cases without stripping quotes).
-  Because a worker calls ``cell_type_id(master, mapping)`` with ``master.upper()`` =
-  ``"SKY130_FD_SC_HD__A211OI_1"`` (no surrounding quotes), no key matches and every real
-  sky130 master resolves to UNKNOWN. This is a pre-existing bug (it existed in the original
-  ``cell_type_map`` too — it was NOT introduced by the techlib migration), and it means the
-  sky130hd feature dataset has ``cell_type_id == UNKNOWN`` for every
-  standard cell. Task 13 correctness validation should address the quote-stripping in
-  ``techlib.liberty._norm_key`` so that ``lib_db['cells']`` keys are quote-free.
+sky130 quote-bug — FIXED on this branch:
+  sky130 liberty quotes cell names (``cell ("sky130_fd_sc_hd__...")``). Previously
+  ``techlib.liberty._strip_name_token`` did not strip the surrounding ``"`` chars, so
+  ``lib_db['cells']`` keys retained them and never matched the unquoted ``master.upper()``
+  lookup — collapsing cell_area/power/cell_type_id to 0/UNKNOWN for every sky130 cell (a
+  pre-existing bug, not introduced by the techlib migration). ``_strip_name_token`` now
+  strips the quotes, so sky130 masters resolve to real, differentiated ids and non-zero
+  area/power (asap7/gf180/ihp/nangate are unquoted, so the strip is a no-op there).
 """
 from __future__ import annotations
 
@@ -229,80 +225,43 @@ def test_resolve_cell_type_map_sky130hd_returns_runtime():
 
 
 # ---------------------------------------------------------------------------
-# 5. cordic-style "all masters -> UNKNOWN" baseline (needs sky130hd liberty)
-#
-# PINS THE CURRENT BEHAVIOR — do NOT change this test to assert non-UNKNOWN.
-# The root cause is documented in this module's docstring (CONCERN section).
+# 5. sky130 real masters resolve via the runtime map (quote-bug FIXED; needs sky130hd liberty)
 # ---------------------------------------------------------------------------
 
-_REAL_SKY130_MASTERS = [
-    "sky130_fd_sc_hd__a211oi_1",
-    "sky130_fd_sc_hd__fill_8",
-    "sky130_fd_sc_hd__buf_1",
-    "sky130_fd_sc_hd__inv_1",
-    "sky130_fd_sc_hd__dfxtp_1",
-]
 
+def test_sky130_masters_resolve_via_runtime_map():
+    """Real sky130 masters resolve to differentiated, non-UNKNOWN ids (quote-bug fixed).
 
-def test_cordic_masters_resolve_to_unknown_equivalence():
-    """Real sky130 masters -> UNKNOWN in both modules (pins current behavior).
-
-    OBSERVED VALUE: every real sky130 master resolves to UNKNOWN (== len(sc_names)).
-    This is because the liberty parser retains surrounding double-quote characters in
-    the cell-name token used as the dict key (e.g. '"SKY130_FD_SC_HD__A211OI_1"'),
-    so master.upper() (without quotes) never matches any key in the runtime map.
-    See the module CONCERN docstring for the full analysis.
+    Masters are taken straight from the parsed liberty (now quote-free uppercase keys),
+    so the test never guesses cell names that might be absent from a given corner lib.
     """
     lib = _sky130hd_lib_or_skip()
     from techlib import liberty
     db = liberty.load_liberty_db([lib])
 
-    sc_map_new = cell_types.resolve_cell_type_map("sky130hd", db, sc_lib_paths=[lib])
+    sc_map = cell_types.resolve_cell_type_map("sky130hd", db, sc_lib_paths=[lib])
+    unknown = sc_map["UNKNOWN"]
 
-    expected_unknown = sc_map_new["UNKNOWN"]
-
-    for master in _REAL_SKY130_MASTERS:
-        result_new = cell_types.cell_type_id(master, sc_map_new)
-
-        # Pin the observed value: every real sky130 master is UNKNOWN
-        # NOTE: this is the pre-existing bug documented in the CONCERN docstring.
-        # Do not change this assertion — it documents the baseline, not the desired state.
-        assert result_new == expected_unknown, (
-            f"cell_type_id({master!r}) = {result_new}, expected UNKNOWN={expected_unknown} "
-            f"(observed baseline). If this assertion fails, the liberty key format changed."
-        )
+    real = [k for k in db.get("cells", {}) if k.startswith("SKY130_FD_SC_HD__")][:8]
+    assert real, "no sky130 standard cells parsed from the liberty"
+    ids = {m: cell_types.cell_type_id(m, sc_map) for m in real}
+    # Every real master must now resolve to a real id, not UNKNOWN (the quote-bug fix).
+    assert all(cid != unknown for cid in ids.values()), \
+        f"some real sky130 masters still resolve to UNKNOWN={unknown}: {ids}"
+    # And the ids are differentiated (not all collapsed onto one bucket).
+    assert len(set(ids.values())) > 1, f"expected differentiated cell_type_ids, got {ids}"
 
 
-def test_cordic_masters_unknown_root_cause_evidence():
-    """Documents evidence of the quoted-key root cause (no assertion on fix needed).
-
-    Verifies that the runtime map keys contain surrounding quote characters, which
-    causes master.upper() lookups to miss. This is purely diagnostic — it pins the
-    symptom that Task 13 correctness validation should resolve.
-    """
+def test_sky130_runtime_map_keys_are_quote_free():
+    """Quote-bug fix evidence: liberty cell keys carry no surrounding double-quotes."""
     lib = _sky130hd_lib_or_skip()
     from techlib import liberty
     db = liberty.load_liberty_db([lib])
 
     cells = db.get("cells", {})
-    # Sample keys from the cells dict
-    sample_keys = list(cells.keys())[:10]
-
-    # At least one key must start with a quote character — if this assertion fails,
-    # the liberty parser was fixed upstream and the cordic-UNKNOWN bug may be resolved.
-    quoted_keys = [k for k in sample_keys if k.startswith('"')]
-    assert len(quoted_keys) > 0, (
-        "No quoted keys found in sky130hd db['cells'] — liberty parser may have "
-        "been fixed; re-evaluate the cordic-UNKNOWN root cause and update Task 13 plan."
-    )
-
-    # The quoted key does NOT match the unquoted master.upper() form
-    first_quoted = quoted_keys[0]
-    unquoted_form = first_quoted.strip('"')
+    quoted = [k for k in cells if k.startswith('"') or k.endswith('"')]
+    assert not quoted, f"liberty cell keys still carry surrounding quotes: {quoted[:5]}"
+    # The unquoted, uppercased master form is now a real key in the runtime map.
     sc_map = cell_types.build_runtime_map(db, sc_lib_paths=[lib])
-    # The quoted key IS in the map
-    assert first_quoted in sc_map, \
-        f"Quoted key {first_quoted!r} should be in the runtime map"
-    # The unquoted form is NOT in the map (unless UNKNOWN)
-    assert unquoted_form not in sc_map or unquoted_form == "UNKNOWN", \
-        f"Unquoted form {unquoted_form!r} unexpectedly found in runtime map — root cause changed"
+    assert "SKY130_FD_SC_HD__INV_1" in sc_map, \
+        "unquoted sky130 master key missing from runtime map (quote-strip regression)"
