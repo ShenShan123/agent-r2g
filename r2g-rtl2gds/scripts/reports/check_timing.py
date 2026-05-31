@@ -20,11 +20,13 @@ Exit codes:
   1 — user decision needed (moderate / severe / unconstrained)
   2 — usage error or missing data
 """
+from __future__ import annotations
 import json
 import math
 import re
 import sys
 from pathlib import Path
+from typing import Optional, List, Dict, Union
 
 # Severity ordering for tier comparison
 TIER_ORDER = {'clean': 0, 'minor': 1, 'moderate': 2, 'severe': 3, 'unconstrained': 4}
@@ -59,7 +61,7 @@ def classify_tns(tns: float, moderate_thr: float, severe_thr: float) -> str:
     return 'clean'
 
 
-def read_clock_period(project: Path) -> float | None:
+def read_clock_period(project: Path) -> Optional[float]:
     """Read clock period from constraint.sdc."""
     sdc_file = project / 'constraints' / 'constraint.sdc'
     if not sdc_file.exists():
@@ -69,7 +71,7 @@ def read_clock_period(project: Path) -> float | None:
     return float(m.group(1)) if m else None
 
 
-def read_core_utilization(project: Path) -> float | None:
+def read_core_utilization(project: Path) -> Optional[float]:
     """Read CORE_UTILIZATION from config.mk."""
     config_file = project / 'constraints' / 'config.mk'
     if not config_file.exists():
@@ -82,9 +84,9 @@ def read_core_utilization(project: Path) -> float | None:
 
 
 def build_options_moderate(wns: float, tns: float, violation_count,
-                           clock_period: float | None,
-                           utilization: float | None,
-                           wns_tier: str, tns_tier: str) -> list[dict]:
+                           clock_period: Optional[float],
+                           utilization: Optional[float],
+                           wns_tier: str, tns_tier: str) -> List[dict]:
     """Build numbered fix options for moderate timing violations."""
     options = []
     if clock_period and wns < 0:
@@ -134,9 +136,9 @@ def build_options_moderate(wns: float, tns: float, violation_count,
 
 
 def build_options_severe(wns: float, tns: float, violation_count,
-                         clock_period: float | None,
-                         utilization: float | None,
-                         wns_tier: str, tns_tier: str) -> list[dict]:
+                         clock_period: Optional[float],
+                         utilization: Optional[float],
+                         wns_tier: str, tns_tier: str) -> List[dict]:
     """Build numbered fix options for severe timing violations."""
     options = []
     if clock_period and wns < 0:
@@ -176,7 +178,7 @@ def build_options_severe(wns: float, tns: float, violation_count,
     return options
 
 
-def build_options_unconstrained(clock_period: float | None) -> list[dict]:
+def build_options_unconstrained(clock_period: Optional[float]) -> List[dict]:
     """Build fix options for unconstrained timing (SDC mismatch)."""
     return [
         {
