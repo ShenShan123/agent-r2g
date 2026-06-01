@@ -78,3 +78,60 @@ def test_lvs_macro_emits_operator_only_strategy():
     assert s["id"] == "lvs_macro_cdl"
     assert s["auto_apply"] is False
     assert "operator_note" in s
+
+
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+MOD = Path(__file__).resolve().parents[1] / "scripts" / "reports" / "diagnose_signoff_fix.py"
+
+
+def _mk_project(tmp_path, drc=None, lvs=None, config="export DESIGN_NAME = t\nexport CORE_UTILIZATION = 10\n"):
+    p = tmp_path / "proj"
+    (p / "reports").mkdir(parents=True)
+    (p / "constraints").mkdir(parents=True)
+    if drc is not None:
+        (p / "reports" / "drc.json").write_text(json.dumps(drc))
+    if lvs is not None:
+        (p / "reports" / "lvs.json").write_text(json.dumps(lvs))
+    (p / "constraints" / "config.mk").write_text(config)
+    return p
+
+
+def test_apply_writes_idempotent_block(tmp_path):
+    p = _mk_project(tmp_path, drc={"status": "fail", "total_violations": 7,
+                                   "categories": {"METAL7_ANTENNA": {"count": 7}}})
+    cfg = p / "constraints" / "config.mk"
+    for _ in range(2):  # apply twice → block must not duplicate
+        subprocess.run([sys.executable, str(MOD), str(p), "--check", "drc",
+                        "--apply", "antenna_diode_iters"], check=True)
+    text = cfg.read_text()
+    assert text.count("# >>> r2g signoff-fix (auto) >>>") == 1
+    assert "export CORE_ANTENNACELL = ANTENNA_X1" in text
+    assert text.count("export DESIGN_NAME = t") == 1  # original preserved once
+
+
+def test_next_prints_first_auto_strategy(tmp_path):
+    p = _mk_project(tmp_path, drc={"status": "fail", "total_violations": 7,
+                                   "categories": {"METAL7_ANTENNA": {"count": 7}}})
+    out = subprocess.run([sys.executable, str(MOD), str(p), "--check", "drc", "--next"],
+                         capture_output=True, text=True, check=True).stdout.strip()
+    sid, rerun, recheck = out.split("\t")
+    assert sid == "antenna_diode_iters" and rerun == "route" and recheck == "drc"
+
+
+def test_next_prints_stop_when_clean(tmp_path):
+    p = _mk_project(tmp_path, drc={"status": "clean", "total_violations": 0, "categories": {}})
+    out = subprocess.run([sys.executable, str(MOD), str(p), "--check", "drc", "--next"],
+                         capture_output=True, text=True, check=True).stdout.strip()
+    assert out.startswith("STOP\tclean")
+
+
+def test_apply_operator_only_strategy_errors(tmp_path):
+    p = _mk_project(tmp_path, lvs={"status": "fail", "log_info": {"errors": ["don't match"]}},
+                    config="export VERILOG_FILES = /x/fakeram45_64x32.v\n")
+    r = subprocess.run([sys.executable, str(MOD), str(p), "--check", "lvs",
+                        "--apply", "lvs_macro_cdl"], capture_output=True, text=True)
+    assert r.returncode == 3 and "operator-only" in r.stderr

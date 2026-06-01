@@ -41,13 +41,14 @@ def _applied(cfg: dict, edits: dict) -> bool:
     return all(str(cfg.get(k)) == str(v) for k, v in edits.items())
 
 
-def _antenna_strategies(cfg: dict) -> list:
+def _antenna_catalog(cfg: dict) -> list:
+    """Return the full antenna strategy catalog (all entries, regardless of applied state)."""
     try:
         cur_util = int(float(cfg.get("CORE_UTILIZATION", "")))
     except (TypeError, ValueError):
         cur_util = None
     new_util = max(5, cur_util - 5) if cur_util is not None else 20
-    catalog = [
+    return [
         {"id": "antenna_diode_iters",
          "rationale": "Wire ANTENNA_X1 as the antenna diode and raise repair_antennas "
                       "iterations so OpenROAD inserts diodes / jumpers to break long metal.",
@@ -67,7 +68,10 @@ def _antenna_strategies(cfg: dict) -> list:
          "config_edits": {"CORE_UTILIZATION": str(new_util)},
          "rerun_from": "floorplan", "recheck": "drc", "auto_apply": True},
     ]
-    return [s for s in catalog if not _applied(cfg, s["config_edits"])]
+
+
+def _antenna_strategies(cfg: dict) -> list:
+    return [s for s in _antenna_catalog(cfg) if not _applied(cfg, s["config_edits"])]
 
 
 def _drc_plan(drc: dict, cfg: dict, exclude: set) -> dict:
@@ -182,8 +186,14 @@ def main(argv=None) -> int:
     if args.apply:
         strat = next((s for s in plan["strategies"] if s["id"] == args.apply), None)
         if strat is None:
-            print(f"ERROR: strategy '{args.apply}' not in current plan", file=sys.stderr)
-            return 2
+            # Strategy may be filtered out because it was already applied (idempotent
+            # re-apply). Search the full unfiltered catalog to distinguish "already
+            # applied" from "unknown id".
+            full_catalog = _antenna_catalog(cfg) if args.check == "drc" else []
+            strat = next((s for s in full_catalog if s["id"] == args.apply), None)
+            if strat is None:
+                print(f"ERROR: strategy '{args.apply}' not in current plan", file=sys.stderr)
+                return 2
         if not strat.get("auto_apply", False):
             print(f"ERROR: '{args.apply}' is operator-only: {strat.get('operator_note','')}", file=sys.stderr)
             return 3
