@@ -379,6 +379,9 @@ When klayout DRC is stuck on a polygon op and gets SIGKILL'd by something **othe
 - **Action:** Same as the timeout variant — treat as stuck, do not retry. The signoff outcome for the design is effectively "DRC unavailable, GDS+LVS+RCX still valid". The 3 v2 cases (APB_GPIO_register, AXI_Lite_DMA_axilite, DMA_Controller_DMA_registers) that previously logged as `drc=fail(2)` are now correctly tagged `stuck` after this fix.
 
 ### LVS Mismatch
+
+**Automated fix:** `scripts/flow/fix_signoff.sh` (see `references/signoff-fixing.md`). Note: the 400:1 antenna-ratio relaxation is RETIRED — real layout fixes only.
+
 - **Symptom:** `ERROR : Netlists don't match` in LVS log; mismatches in `6_lvs.lvsdb`
 - **Diagnosis:** Check the extracted SPICE netlist (`*_extracted.cir`) vs the CDL reference. Common mismatch patterns:
   - Empty extracted netlist (0 devices) → gate layer definitions don't match GDS layers
@@ -880,11 +883,19 @@ Empirical fix yield (from the 93-failure retry): memory/place-density/io-pin fix
 **Root Cause:**
 Long unbroken metal routes accumulate charge during plasma etching, which can damage thin gate oxides at the route endpoint. FIFO designs with deep address buses are particularly susceptible because the router creates long metal paths from address logic to SRAM-like structures.
 
-**Action:**
-- Enable ORFS antenna repair: add `export ANTENNA_CHECK = 1` and `export DIODE_INSERTION = 1` to config.mk (if supported by platform)
-- If ORFS doesn't support native antenna repair: manually insert diode cells as antenna protection
-- Increase die area to give the router more freedom to break long metal paths
-- As a workaround, try `export DETAILED_ROUTE_ARGS = -droute_end_iteration 10` for more routing iterations
+**Automated fix:** `scripts/flow/fix_signoff.sh` (see `references/signoff-fixing.md`). Note: the 400:1 antenna-ratio relaxation is RETIRED — real layout fixes only.
+
+**Action (real-layout path, in order):**
+1. Wire the nangate45 `ANTENNA_X1` diode macro and raise repair iterations:
+   `export CORE_ANTENNACELL = ANTENNA_X1`, `export MAX_REPAIR_ANTENNAS_ITER_GRT = 10`,
+   `export MAX_REPAIR_ANTENNAS_ITER_DRT = 10` in config.mk; re-route.
+2. Give the detailed router more end-iterations to reroute long metal:
+   `export DETAILED_ROUTE_ARGS = -droute_end_iteration 10`; re-route.
+3. Lower `CORE_UTILIZATION` by 5 (floor 5) so the router has more room to spread routes
+   across layers; re-run from floorplan. `PLACE_DENSITY_LB_ADDON` is never touched
+   (hard rule: never below 0.10).
+- Do NOT relax the DRC rule deck (e.g., raising the antenna ratio). The honest 300:1
+  deck is the reference; install via `tools/install_nangate45_drc.sh`.
 
 ### Hold Timing Violations Post-CTS
 

@@ -171,6 +171,9 @@ Extract results into JSON for reporting and dashboard:
 - `scripts/extract/extract_drc.py <project-root> reports/drc.json`
 - `scripts/extract/extract_lvs.py <project-root> reports/lvs.json`
 - `scripts/extract/extract_rcx.py <project-root> reports/rcx.json`
+- If DRC/LVS is `fail`, attempt automated real-layout fixes:
+  `scripts/flow/fix_signoff.sh <project-dir> [platform] [--check drc|lvs|both]`
+  (See `references/signoff-fixing.md`.)
 
 #### Platform Support Matrix
 
@@ -365,6 +368,11 @@ design_cases/<design-name>/
     - `scripts/extract/extract_drc.py <project-root> reports/drc.json`
     - `scripts/extract/extract_lvs.py <project-root> reports/lvs.json`
     - `scripts/extract/extract_rcx.py <project-root> reports/rcx.json`
+    - If DRC/LVS status is `fail`, attempt real layout fixes (antenna diode insertion +
+      repair iters, route effort, density relief; LVS triage):
+      `scripts/flow/fix_signoff.sh <project-dir> [platform] [--check drc|lvs|both] [--max-iters 3]`
+      Real-fixes-only — never relaxes the rule deck. Residual stuck/timeout/KLayout-crash
+      cases are reported honestly. See `references/signoff-fixing.md`.
 13b. Extract dataset labels (optional, for dataset building):
     - `scripts/flow/run_labels.sh <project-dir> [platform]`
     - Emits per-cell/per-net label CSVs to `<project-dir>/labels/` (congestion,

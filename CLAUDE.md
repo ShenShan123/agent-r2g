@@ -100,6 +100,7 @@ The skill enforces this order. Don't skip a failed stage — diagnose first via
 | Spec / config / SDC templates | `r2g-rtl2gds/references/spec-template.md`, `r2g-rtl2gds/assets/` |
 | Validated config tuning per design family | `r2g-rtl2gds/references/lessons-learned.md` (corpus tables) |
 | Platform extras (nangate45 LVS rule, etc.) | `r2g-rtl2gds/assets/platforms/<plat>/` |
+| DRC/LVS violation fixing (antenna diode insertion, route/density, LVS triage) | `r2g-rtl2gds/references/signoff-fixing.md` |
 
 ## When You Fix a Bug
 
