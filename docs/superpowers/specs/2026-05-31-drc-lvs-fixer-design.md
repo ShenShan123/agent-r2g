@@ -241,3 +241,22 @@ New:
 Modified:
 - `r2g-rtl2gds/SKILL.md`, `r2g-rtl2gds/references/failure-patterns.md`, `CLAUDE.md`
 - `r2g-rtl2gds/assets/platforms/nangate45/drc/FreePDK45.lydrc` (→ 300:1)
+
+## 12. Amendments (2026-06-01, post-implementation)
+
+The §6 antenna strategy catalog was corrected during a final integration review (both bugs
+verified against the live ORFS install; commit `42d0e0b`):
+
+- **`CORE_ANTENNACELL` dropped** — it is not an env var ORFS reads; `repair_antennas`
+  auto-discovers the diode from the LEF (`ANTENNA_X1` declares `CLASS CORE ANTENNACELL`).
+- **`antenna_route_effort` removed** — `-droute_end_iteration` is not a valid flag (real
+  flag `-droute_end_iter`; knob `DETAILED_ROUTE_END_ITERATION` defaults to 64, so the
+  specced value 10 would *reduce* routing), and DRT convergence is not an antenna lever.
+
+The shipped antenna catalog is therefore **two** real-fix strategies:
+1. `antenna_diode_iters` — `MAX_REPAIR_ANTENNAS_ITER_GRT/_DRT=10` (default 5); rerun `route`.
+2. `antenna_density_relief` — lower `CORE_UTILIZATION` by 5 (floor 5); rerun `floorplan`.
+
+Diagnoser/driver hardening from code review (commits `26d133e`, `d76daed`) is detailed in
+the plan's Amendments section. Whether two strategies suffice (vs. the residual-7) is the
+open question Phase 0 resolves empirically.

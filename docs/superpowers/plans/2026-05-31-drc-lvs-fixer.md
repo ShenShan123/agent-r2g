@@ -908,3 +908,15 @@ truth:
     collapsed it, shifting `recheck` into `rerun` and triggering a spurious re-route.
   - `--check` value validated; strategy blacklisted (`tried`) only after a successful apply;
     `None` counts render as blank in `fix_summary.md`.
+- **Antenna catalog corrected to real ORFS knobs — commit `42d0e0b`** (final integration
+  review): the §6 antenna catalog as originally specced had two domain bugs, both verified
+  against the live ORFS install:
+  - `CORE_ANTENNACELL` is **not** an env var ORFS reads — `repair_antennas` auto-discovers
+    the diode from the LEF (`ANTENNA_X1` declares `CLASS CORE ANTENNACELL`). Setting it in
+    config.mk is a no-op → removed from `antenna_diode_iters`.
+  - `DETAILED_ROUTE_ARGS=-droute_end_iteration 10` is invalid (real flag `-droute_end_iter`,
+    knob `DETAILED_ROUTE_END_ITERATION` defaults to **64**, so 10 would *reduce* iterations)
+    and isn't an antenna lever → the `antenna_route_effort` strategy was **removed**.
+  - Final antenna catalog is **two** real-fix strategies: `antenna_diode_iters`
+    (`MAX_REPAIR_ANTENNAS_ITER_GRT/_DRT=10`, default 5) then `antenna_density_relief`
+    (lower `CORE_UTILIZATION`). Tests + `signoff-fixing.md` + `failure-patterns.md` updated.
