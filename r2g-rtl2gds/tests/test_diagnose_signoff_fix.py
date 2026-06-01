@@ -38,13 +38,14 @@ def test_antenna_fail_yields_two_ordered_strategies_sky130hd():
     assert relief["CORE_UTILIZATION"] == "5"
 
 
-def test_antenna_fail_yields_density_only_nangate45():
-    """nangate45: repair_antennas is inert, so only antenna_density_relief is offered."""
+def test_antenna_fail_nangate45_is_immediate_residual():
+    """nangate45: both diode-iters and density-relief are suppressed (inert + counterproductive)
+    → immediate residual with a nangate45-specific reason, no strategies offered."""
     cfg = {"CORE_UTILIZATION": "10", "PLATFORM": "nangate45"}
     plan = d.build_plan(_drc("fail", 7, _antenna_cats()), {}, cfg, check="drc")
-    ids = [s["id"] for s in plan["strategies"]]
-    assert ids == ["antenna_density_relief"]
-    assert "antenna_diode_iters" not in ids
+    assert plan["status"] == "residual"
+    assert plan["strategies"] == []
+    assert "nangate45 antenna repair inert" in plan["residual_reason"]
     assert plan["dominant_category"] == "METAL7_ANTENNA"
 
 
@@ -99,6 +100,53 @@ def test_lvs_macro_emits_operator_only_strategy():
     assert s["id"] == "lvs_macro_cdl"
     assert s["auto_apply"] is False
     assert "operator_note" in s
+
+
+# --- FIX #1: LVS crash / incomplete → residual ---
+
+def test_lvs_status_crash_yields_residual():
+    """status='crash' (from extract_lvs) → residual, klayout_cpp_crash reason, no strategies."""
+    plan = d.build_plan({}, {"status": "crash"}, {}, check="lvs")
+    assert plan["status"] == "residual"
+    assert plan["strategies"] == []
+    assert "klayout_cpp_crash" in plan["residual_reason"]
+
+
+def test_lvs_status_incomplete_yields_residual():
+    """status='incomplete' (from extract_lvs) → residual, lvs incomplete reason, no strategies."""
+    plan = d.build_plan({}, {"status": "incomplete"}, {}, check="lvs")
+    assert plan["status"] == "residual"
+    assert plan["strategies"] == []
+    assert "lvs incomplete" in plan["residual_reason"]
+    assert "no verdict" in plan["residual_reason"]
+
+
+def test_lvs_status_unknown_still_yields_resolve_strategy():
+    """Truly unknown status (uninformative log) still emits lvs_resolve_unknown (re-extract)."""
+    plan = d.build_plan({}, {"status": "unknown", "mismatch_count": None}, {}, check="lvs")
+    assert plan["strategies"] != []
+    assert plan["strategies"][0]["id"] == "lvs_resolve_unknown"
+
+
+# --- FIX #4b: nangate45 antenna immediately residual ---
+
+def test_antenna_fail_nangate45_residual_reason_is_specific():
+    """nangate45 antenna fail → residual_reason mentions 'nangate45 antenna repair inert'."""
+    cfg = {"CORE_UTILIZATION": "15", "PLATFORM": "nangate45"}
+    plan = d.build_plan(_drc("fail", 3, _antenna_cats()), {}, cfg, check="drc")
+    assert plan["status"] == "residual"
+    assert plan["strategies"] == []
+    assert "nangate45 antenna repair inert" in plan["residual_reason"]
+    # Must NOT use the generic exhausted message
+    assert "all real-fix strategies exhausted" not in plan["residual_reason"]
+
+
+def test_antenna_fail_sky130hd_still_yields_both_strategies():
+    """sky130hd (non-inert platform) still gets both antenna strategies unchanged."""
+    cfg = {"CORE_UTILIZATION": "30", "PLATFORM": "sky130hd"}
+    plan = d.build_plan(_drc("fail", 5, _antenna_cats()), {}, cfg, check="drc")
+    ids = [s["id"] for s in plan["strategies"]]
+    assert ids == ["antenna_diode_iters", "antenna_density_relief"]
 
 
 def test_apply_edits_round_trip():
@@ -238,11 +286,9 @@ def test_driver_stops_when_cleaned(tmp_path):
     assert final["status"] == "clean"
 
 
-def test_driver_exhausts_strategies_after_no_improvement(tmp_path):
-    # nangate45 has only one antenna strategy (antenna_density_relief).
-    # With counts that never improve the driver must: apply → no_improvement → log +
-    # continue → next --next returns STOP (all strategies tried) → log stop row.
-    # Two log rows total: one attempted strategy + one stop row.
+def test_driver_nangate45_antenna_stops_immediately(tmp_path):
+    # nangate45 has NO antenna strategies (both diode-iters and density-relief suppressed).
+    # The driver must: --next returns STOP immediately (iter=1) → 1 log row (stop row only).
     p = _mk_project(tmp_path,
                     drc={"status": "fail", "total_violations": 7,
                          "categories": {"METAL7_ANTENNA": {"count": 7}}},
@@ -250,14 +296,11 @@ def test_driver_exhausts_strategies_after_no_improvement(tmp_path):
     sd = _stub_dir(tmp_path, counts=[7, 7, 7])
     r = _run_driver(p, sd)
     summary = (p / "reports" / "fix_summary.md").read_text()
-    # The attempted strategy must appear in the log
-    assert "no_improvement" in summary
     lines = (p / "reports" / "fix_log.jsonl").read_text().strip().splitlines()
-    # Exactly 2 log rows: the applied strategy (no_improvement) + the stop row
-    assert len(lines) == 2, f"expected 2 log rows, got {len(lines)}: {lines}"
+    # Exactly 1 log row: the stop row (no strategy was ever applied)
+    assert len(lines) == 1, f"expected 1 log row, got {len(lines)}: {lines}"
     row0 = json.loads(lines[0])
-    row1 = json.loads(lines[1])
-    assert row0["strategy"] == "antenna_density_relief"
-    assert row0["verdict"] == "no_improvement"
-    assert row1["strategy"] == "none"
-    assert "stop" in row1["verdict"]
+    assert row0["strategy"] == "none"
+    assert "stop" in row0["verdict"]
+    # summary table must exist
+    assert "| check |" in summary

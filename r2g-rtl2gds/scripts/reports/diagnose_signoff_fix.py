@@ -22,7 +22,9 @@ KLAYOUT_CPP_CRASH = re.compile(r"sort_circuit|gen_log_entry|segmentation|sigsegv
 
 # Platforms where OpenROAD repair_antennas is inert: no tech-LEF antenna rules
 # (check_antennas finds nothing) and/or a zero-ANTENNADIFFAREA diode cell, so diode
-# insertion cannot run. See docs/campaign_signoff_fixer_2026-06-01.md (Finding B).
+# insertion cannot run. Density relief is also empirically COUNTERPRODUCTIVE on
+# nangate45 (fifo_basic went 14→16 antennas when CORE_UTILIZATION dropped 10→5).
+# See docs/campaign_signoff_fixer_2026-06-01.md (Finding B).
 ANTENNA_REPAIR_INERT_PLATFORMS = {"nangate45"}
 
 
@@ -50,37 +52,39 @@ def _applied(cfg: dict, edits: dict) -> bool:
 def _antenna_catalog(cfg: dict) -> list:
     """Full antenna strategy catalog (real layout fixes; regardless of applied state).
 
-    antenna_diode_iters is omitted for platforms where OpenROAD repair_antennas is
-    inert (no tech-LEF antenna rules / zero-ANTENNADIFFAREA diode cell) — it would
-    just waste a ~28-min re-route with no effect.
+    For platforms in ANTENNA_REPAIR_INERT_PLATFORMS (nangate45): returns [] — no
+    auto strategies at all.  Both antenna_diode_iters (OpenROAD repair_antennas is
+    inert with no tech-LEF antenna rules / zero-ANTENNADIFFAREA diode) and
+    antenna_density_relief (empirically counterproductive: fifo_basic 14→16 antennas
+    when CORE_UTILIZATION dropped 10→5) are suppressed.  The caller will mark these
+    as residual immediately.
     """
+    platform = cfg.get("PLATFORM")
+    if platform in ANTENNA_REPAIR_INERT_PLATFORMS:
+        return []
+
     try:
         cur_util = int(float(cfg.get("CORE_UTILIZATION", "")))
     except (TypeError, ValueError):
         cur_util = None
     new_util = max(5, cur_util - 5) if cur_util is not None else 20
-    platform = cfg.get("PLATFORM")
-    catalog = []
-    if platform not in ANTENNA_REPAIR_INERT_PLATFORMS:
-        catalog.append(
-            {"id": "antenna_diode_iters",
-             "rationale": "Raise repair_antennas iterations (GRT+DRT, default 5) so OpenROAD "
-                          "inserts more antenna diodes (auto-discovered ANTENNA_X1, which the "
-                          "nangate45 LEF declares CLASS CORE ANTENNACELL) and jumpers to break "
-                          "long metal.",
-             "config_edits": {"MAX_REPAIR_ANTENNAS_ITER_GRT": "10",
-                              "MAX_REPAIR_ANTENNAS_ITER_DRT": "10"},
-             "rerun_from": "route", "recheck": "drc", "auto_apply": True}
-        )
-    catalog.append(
+
+    return [
+        {"id": "antenna_diode_iters",
+         "rationale": "Raise repair_antennas iterations (GRT+DRT, default 5) so OpenROAD "
+                      "inserts more antenna diodes (auto-discovered ANTENNA_X1, which the "
+                      "nangate45 LEF declares CLASS CORE ANTENNACELL) and jumpers to break "
+                      "long metal.",
+         "config_edits": {"MAX_REPAIR_ANTENNAS_ITER_GRT": "10",
+                          "MAX_REPAIR_ANTENNAS_ITER_DRT": "10"},
+         "rerun_from": "route", "recheck": "drc", "auto_apply": True},
         {"id": "antenna_density_relief",
          "rationale": "Lower placement utilization so the router has room to place diodes and "
                       "spread routes across layers (breaks long single-layer runs). "
                       "PLACE_DENSITY_LB_ADDON is never touched (hard rule: never < 0.10).",
          "config_edits": {"CORE_UTILIZATION": str(new_util)},
-         "rerun_from": "floorplan", "recheck": "drc", "auto_apply": True}
-    )
-    return catalog
+         "rerun_from": "floorplan", "recheck": "drc", "auto_apply": True},
+    ]
 
 
 def _antenna_strategies(cfg: dict) -> list:
@@ -104,7 +108,16 @@ def _drc_plan(drc: dict, cfg: dict, exclude: set) -> dict:
             plan["strategies"] = strategies
             if not strategies:
                 plan["status"] = "residual"
-                plan["residual_reason"] = "antenna: all real-fix strategies exhausted"
+                platform = cfg.get("PLATFORM")
+                if platform in ANTENNA_REPAIR_INERT_PLATFORMS:
+                    plan["residual_reason"] = (
+                        "nangate45 antenna repair inert (no tech-LEF antenna rules + "
+                        "zero-ANTENNADIFFAREA diode); density relief empirically "
+                        "counterproductive (fifo_basic 14->16). Honest residual — deck "
+                        "not relaxed. Consider DRC_BEOL_ONLY or accept residual."
+                    )
+                else:
+                    plan["residual_reason"] = "antenna: all real-fix strategies exhausted"
         else:
             non_antenna = sorted(k for k in cats if not k.upper().endswith("_ANTENNA"))
             plan["residual_reason"] = "non-antenna DRC class not handled in v1: " + ", ".join(non_antenna)
@@ -118,6 +131,17 @@ def _lvs_plan(lvs: dict, cfg: dict, exclude: set) -> dict:
     plan = {"check": "lvs", "status": status, "violation_count": lvs.get("mismatch_count"),
             "dominant_category": None, "strategies": [], "residual_reason": None}
     if status in ("clean", "skipped"):
+        return plan
+    if status == "crash":
+        plan["status"] = "residual"
+        plan["residual_reason"] = "klayout_cpp_crash_needs_upgrade (>=0.30.10)"
+        return plan
+    if status == "incomplete":
+        plan["status"] = "residual"
+        plan["residual_reason"] = (
+            "lvs incomplete: extracted but no verdict/lvsdb — likely crash/kill mid-run; "
+            "not auto-retried (would re-crash)"
+        )
         return plan
     if status == "unknown":
         s = {"id": "lvs_resolve_unknown",

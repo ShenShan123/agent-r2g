@@ -63,16 +63,56 @@ def parse_lvsdb(lvs_dir: Path) -> dict:
     return result
 
 
+_CRASH_RE = re.compile(
+    r"signal number:\s*\d+|segmentation|sigsegv|sort_circuit|gen_log_entry"
+    r"|ruby_run_node|klayout_crash\.log",
+    re.I,
+)
+
+_DEVICE_EXTRACT_RE = re.compile(
+    r'"extract_devices"\s+in:\s+FreePDK45|"netlist"\s+in:\s+FreePDK45'
+    r"|extract_devices|\"netlist\"",
+    re.I,
+)
+
+
+def _read_both_logs(lvs_dir: Path) -> tuple[str, str]:
+    """Return (text_6_lvs, text_run_log) for crash-detection; empty string if absent."""
+    def _read(p: Path) -> str:
+        return p.read_text(encoding='utf-8', errors='ignore') if p.exists() else ''
+    return _read(lvs_dir / '6_lvs.log'), _read(lvs_dir / 'lvs_run.log')
+
+
 def parse_lvs_log(lvs_dir: Path) -> dict:
-    """Parse LVS log for status and runtime info."""
+    """Parse LVS log for status and runtime info.
+
+    Reads both 6_lvs.log and lvs_run.log so that crash signatures present only
+    in lvs_run.log (e.g. ``ERROR: Signal number: 11``) are detected correctly.
+    Sets info['crash'] = True and info['crash_line'] when a crash is found.
+    Sets info['reached_device_extraction'] = True when device-extraction progress
+    is logged (indicating an incomplete run, not just a missing log).
+    """
     info = {}
-    log_file = lvs_dir / '6_lvs.log'
-    if not log_file.exists():
-        log_file = lvs_dir / 'lvs_run.log'
-    if not log_file.exists():
+    text_main, text_run = _read_both_logs(lvs_dir)
+    combined = text_main + "\n" + text_run
+
+    if not combined.strip():
         return info
 
-    text = log_file.read_text(encoding='utf-8', errors='ignore')
+    # --- crash detection (checked across BOTH logs) ---
+    m_crash = _CRASH_RE.search(combined)
+    if m_crash:
+        info['crash'] = True
+        info['crash_line'] = m_crash.group(0)
+
+    # --- device-extraction progress (indicates run started but may not have
+    #     produced a verdict) ---
+    if _DEVICE_EXTRACT_RE.search(combined):
+        info['reached_device_extraction'] = True
+
+    # Use main log (6_lvs.log) preferentially for verdict/timing; fall back to
+    # lvs_run.log so the rest of the logic mirrors the original behaviour.
+    text = text_main if text_main.strip() else text_run
     lower = text.lower()
 
     # Determine match status from log — check negative patterns FIRST
@@ -94,6 +134,13 @@ def parse_lvs_log(lvs_dir: Path) -> dict:
                    if 'error' in l.lower() and 'no error' not in l.lower()]
     if error_lines:
         info['errors'] = error_lines[:5]
+
+    # Surface crash line as a prominent error so diagnose_signoff_fix can find it
+    if info.get('crash') and info.get('crash_line'):
+        errors = info.setdefault('errors', [])
+        crash_entry = f"CRASH: {info['crash_line']}"
+        if crash_entry not in errors:
+            errors.insert(0, crash_entry)
 
     return info
 
@@ -127,9 +174,13 @@ def main():
     lvsdb_result = parse_lvsdb(lvs_dir)
     log_info = parse_lvs_log(lvs_dir)
 
+    lvsdb_exists = (lvs_dir / '6_lvs.lvsdb').exists()
+
     # Determine overall status
     mismatch_count = lvsdb_result.get('mismatch_count', -1)
     log_status = log_info.get('log_status', '')
+
+    result_reason: str | None = None
 
     if log_status == 'mismatch':
         status = 'fail'
@@ -142,7 +193,17 @@ def main():
     elif log_status == 'not_supported':
         status = 'skipped'
     else:
-        status = 'unknown'
+        # Distinguish crash vs. incomplete vs. truly unknown
+        if log_info.get('crash'):
+            status = 'crash'
+            result_reason = 'klayout_cpp_crash'
+        elif log_info.get('reached_device_extraction') and not lvsdb_exists:
+            # Run got deep enough to extract devices / write netlist but then
+            # died before producing a match/mismatch verdict and no lvsdb file.
+            status = 'incomplete'
+            result_reason = 'lvs_no_verdict_no_lvsdb'
+        else:
+            status = 'unknown'
 
     result = {
         'status': status,
@@ -150,6 +211,8 @@ def main():
         'lvsdb': lvsdb_result,
         'log_info': log_info,
     }
+    if result_reason is not None:
+        result['reason'] = result_reason
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(result, indent=2, ensure_ascii=False), encoding='utf-8')
