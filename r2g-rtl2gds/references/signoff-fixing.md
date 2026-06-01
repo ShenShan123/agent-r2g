@@ -76,7 +76,7 @@ Default: `platform=nangate45`, `--check both`, `--max-iters 3`.
 ```json
 {
   "check": "drc|lvs",
-  "status": "fail|residual|clean|skipped|stuck|timeout|unknown",
+  "status": "fail|residual|clean|clean_beol|skipped|stuck|timeout|unknown",
   "violation_count": 42,
   "dominant_category": "METAL4_ANTENNA",
   "strategies": [

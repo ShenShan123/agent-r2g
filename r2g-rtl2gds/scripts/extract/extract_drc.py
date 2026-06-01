@@ -127,10 +127,17 @@ def main():
         except (ValueError, OSError):
             drc_result = None
 
+    # BEOL-only runs disable BOTH the FEOL and ANTENNA rule groups (run_drc.sh,
+    # commit 56a1175), so a 0-violation result only proves metal/via/cut routing
+    # is clean — it does NOT cover FEOL geometry or antenna ratios.  Mark it with
+    # the qualified status 'clean_beol' (cf. LVS 'clean_algorithmic') so that
+    # status-based aggregation cannot silently miscount it as a full clean.
+    beol_only = bool(drc_result) and drc_result.get('drc_mode') == 'beol_only'
+
     if drc_result and drc_result.get('status') in ('stuck', 'timeout', 'failed', 'skipped'):
         status = drc_result['status']
     elif total_count == 0:
-        status = 'clean'
+        status = 'clean_beol' if beol_only else 'clean'
     elif total_count > 0:
         status = 'fail'
     else:

@@ -97,7 +97,9 @@ def _drc_plan(drc: dict, cfg: dict, exclude: set) -> dict:
     dominant = max(cats, key=lambda k: cats[k].get("count") or 0) if cats else None
     plan = {"check": "drc", "status": status, "violation_count": drc.get("total_violations"),
             "dominant_category": dominant, "strategies": [], "residual_reason": None}
-    if status in ("clean", "skipped"):
+    # 'clean_beol' = BEOL-only run with 0 violations (FEOL+ANTENNA skipped); no
+    # routing-DRC fix is available or warranted — treat as clean for fix purposes.
+    if status in ("clean", "clean_beol", "skipped"):
         return plan
     if status in ("stuck", "timeout"):
         plan["residual_reason"] = f"drc_{status}_tooling_out_of_v1_scope"

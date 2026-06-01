@@ -179,6 +179,37 @@ def test_drc_mode_beol_only_carried_through(tmp_path):
     assert result["total_violations"] == 3
 
 
+def test_drc_mode_beol_only_clean_is_qualified(tmp_path):
+    """A 0-violation BEOL-only run must NOT report plain 'clean'.
+
+    BEOL-only mode disables BOTH the FEOL and ANTENNA rule groups (see
+    run_drc.sh / commit 56a1175), so a 0-violation result only proves the
+    metal/via/cut routing is clean — it says nothing about FEOL geometry or
+    antenna ratios.  Reporting it as full 'clean' would silently inflate the
+    corpus clean-rate.  It must be the qualified status 'clean_beol' so that
+    status-based aggregation cannot miscount it (mirrors LVS 'clean_algorithmic').
+    """
+    proj = _make_project(tmp_path, lyrdb_content=None, count_rpt=0)
+    drc_result = {
+        "status": "clean",
+        "violations": 0,
+        "drc_mode": "beol_only",
+    }
+    (proj / "drc" / "drc_result.json").write_text(
+        json.dumps(drc_result), encoding="utf-8"
+    )
+    out = tmp_path / "drc_beol_clean.json"
+    r = _run(proj, out)
+    assert r.returncode == 0, r.stderr
+    result = json.loads(out.read_text())
+
+    assert result["total_violations"] == 0
+    assert result.get("drc_mode") == "beol_only"
+    assert result["status"] == "clean_beol", (
+        f"BEOL-only 0-violation must be 'clean_beol', got {result['status']!r}"
+    )
+
+
 def test_drc_mode_full_carried_through(tmp_path):
     """drc_result.json with drc_mode=full is propagated into reports/drc.json."""
     proj = _make_project(tmp_path, lyrdb_content=None, count_rpt=0)
