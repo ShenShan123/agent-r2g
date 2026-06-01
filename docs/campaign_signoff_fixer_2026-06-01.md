@@ -113,8 +113,26 @@ no antenna rules** (`grep -ci ANTENNA` = 0). So:
 and never tried S2 (density relief). `no_improvement` should advance to the NEXT strategy, not
 abandon the check. → fix #3.
 
-### Stuck-DRC probe (2–3 designs)
-_Deferred — antenna findings took priority; will probe after the fixer escalation fix._
+### Stuck-DRC probe (2026-06-01) — TRACTABLE via BEOL-only DRC
+
+Probed the 271 stuck designs. `stuck_at_rule` distribution: `FreePDK45.lydrc:131` (137),
+`:91` (105), `:121` (26) — all in the **FEOL** (front-end-of-line) section (Well/Poly/Active
+boolean `or`/`and`/`not` ops). Designs are 14K–30K+ instances. The deck is parameterized:
+lines 35–36 are `FEOL = true` / `BEOL = true` toggles.
+
+**Insight:** FEOL checks validate the *internal* geometry of standard cells, which come from a
+pre-characterized, DRC-clean library (NangateOpenCellLibrary) and are NOT modified by P&R —
+only the BEOL metal/via/antenna routing varies per design. So FEOL DRC on a placed design is
+largely redundant re-checking of clean library cells, and it is exactly those FEOL boolean ops
+that hang KLayout.
+
+**Decision (scope):** Add a **BEOL-only DRC mode** (`FEOL=false`) as a fallback for designs that
+hang on FEOL. It's tractable (a deck flag, not a rewrite), defensible (library cells are
+vendor-verified), and would unblock all 271 stuck designs' routing-DRC signoff. Must be
+labelled honestly in results (`drc_mode: beol_only`, "FEOL skipped — library cells
+pre-verified"), NOT reported as full "clean". → improvement #6. Empirical validation (run a
+stuck design with FEOL=false, confirm completion + BEOL count) deferred until the fifo_basic
+fixer run releases the DRC machinery.
 
 ## Skill improvements identified (from runs)
 
@@ -133,6 +151,8 @@ _Deferred — antenna findings took priority; will probe after the fixer escalat
    Keep diode_iters for platforms with a working diode. [applying]
 5. **Document nangate45 antenna reality** in failure-patterns + signoff-fixing (Finding B).
    [pending docs]
+6. **BEOL-only DRC mode** (`FEOL=false`) — fallback for the 271 designs that hang on FEOL
+   boolean ops; completes routing-DRC signoff, labelled `drc_mode: beol_only`. [pending]
 
 ## Phase 1 (known-fail set) — pending
 
