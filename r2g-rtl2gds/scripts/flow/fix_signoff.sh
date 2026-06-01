@@ -25,6 +25,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 [[ -z "$PROJECT_DIR" ]] && { echo "usage: fix_signoff.sh <project-dir> [platform] [--check drc|lvs|both] [--max-iters N] [--resume]" >&2; exit 1; }
+[[ "$CHECK" =~ ^(drc|lvs|both)$ ]] || { echo "ERROR: --check must be drc|lvs|both" >&2; exit 1; }
 PROJECT_DIR="$(cd "$PROJECT_DIR" && pwd)"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -48,12 +49,10 @@ v=d.get("total_violations"); v=d.get("mismatch_count") if v is None else v
 print("" if v is None else v)' "$1" 2>/dev/null || echo ""
 }
 
-_run_extract() {  # $1=check
-  if [[ "$1" == "drc" ]]; then
-    [[ -x "$EXTRACT_DRC" || "$EXTRACT_DRC" == *.py ]] && python3 "$EXTRACT_DRC" "$PROJECT_DIR" "$REPORTS/drc.json" || "$EXTRACT_DRC" "$PROJECT_DIR" "$REPORTS/drc.json"
-  else
-    python3 "$EXTRACT_LVS" "$PROJECT_DIR" "$REPORTS/lvs.json"
-  fi
+_run_extract() {  # $1 = drc|lvs
+  local script
+  if [[ "$1" == "drc" ]]; then script="$EXTRACT_DRC"; else script="$EXTRACT_LVS"; fi
+  python3 "$script" "$PROJECT_DIR" "$REPORTS/$1.json"
 }
 
 _log_iter() {  # check iter strategy before after verdict
@@ -71,17 +70,31 @@ fix_one() {  # $1 = drc|lvs
   before="$(_count "$report")"
   for ((it=1; it<=MAX_ITERS; it++)); do
     line="$(python3 "$DIAGNOSE" "$PROJECT_DIR" --check "$check" --exclude "$tried" --next)"
-    IFS=$'\t' read -r sid rerun recheck <<<"$line"
+    # Split on tab WITHOUT collapsing empty middle fields. `read` with a
+    # whitespace IFS (tab) would merge consecutive tabs, dropping an empty
+    # rerun_from column and shifting recheck into rerun; map tabs to a
+    # non-whitespace unit-separator first so empty fields are preserved.
+    IFS=$'\x1f' read -r sid rerun recheck <<<"${line//$'\t'/$'\x1f'}"
+    [[ -n "$sid" ]] || { echo "[$check] ERROR: diagnose returned empty output; aborting" >&2; return 1; }
     if [[ "$sid" == "STOP" ]]; then
       _log_iter "$check" "$it" "none" "$before" "$before" "stop_${rerun}"
       echo "[$check] stop: $rerun ${recheck:-}"; return 0
     fi
     echo "[$check] iter $it: applying $sid (rerun_from=${rerun:-none})"
-    python3 "$DIAGNOSE" "$PROJECT_DIR" --check "$check" --apply "$sid" >/dev/null
+    if ! python3 "$DIAGNOSE" "$PROJECT_DIR" --check "$check" --apply "$sid" >/dev/null; then
+      echo "[$check] apply '$sid' failed; aborting" >&2
+      _log_iter "$check" "$it" "$sid" "$before" "$before" "apply_failed"; return 1
+    fi
     tried="${tried:+$tried,}$sid"
     if [[ -n "$rerun" ]]; then
-      if [[ "$RESUME" == "1" ]]; then FROM_STAGE="$rerun" "$RUN_ORFS" "$PROJECT_DIR" "$PLATFORM"
-      else "$RUN_ORFS" "$PROJECT_DIR" "$PLATFORM"; fi
+      local rc=0
+      if [[ "$RESUME" == "1" ]]; then FROM_STAGE="$rerun" "$RUN_ORFS" "$PROJECT_DIR" "$PLATFORM" || rc=$?
+      else "$RUN_ORFS" "$PROJECT_DIR" "$PLATFORM" || rc=$?; fi
+      if [[ $rc -ne 0 ]]; then
+        echo "[$check] run_orfs failed (rc=$rc); aborting this check" >&2
+        _log_iter "$check" "$it" "$sid" "$before" "$before" "rerun_failed_rc$rc"
+        return 1
+      fi
     fi
     if [[ "$check" == "drc" ]]; then "$RUN_DRC" "$PROJECT_DIR" "$PLATFORM" || true; else "$RUN_LVS" "$PROJECT_DIR" "$PLATFORM" || true; fi
     _run_extract "$check"
@@ -108,8 +121,11 @@ python3 -c 'import json,sys
 log=sys.argv[1]; out=sys.argv[2]
 rows=[json.loads(l) for l in open(log) if l.strip()]
 lines=["# Signoff fix summary","","| check | iter | strategy | before | after | verdict |","|---|---|---|---|---|---|"]
+def c(v): return "" if v is None else v
 for r in rows:
-    lines.append("| {check} | {iter} | {strategy} | {before} | {after} | {verdict} |".format(**r))
+    lines.append("| {} | {} | {} | {} | {} | {} |".format(
+        c(r.get("check")), c(r.get("iter")), c(r.get("strategy")),
+        c(r.get("before")), c(r.get("after")), c(r.get("verdict"))))
 open(out,"w").write("\n".join(lines)+"\n")' "$LOG" "$REPORTS/fix_summary.md"
 echo "Summary: $REPORTS/fix_summary.md"
 

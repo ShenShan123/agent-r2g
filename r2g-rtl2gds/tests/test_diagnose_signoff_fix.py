@@ -176,23 +176,25 @@ DRIVER = Path(__file__).resolve().parents[1] / "scripts" / "flow" / "fix_signoff
 
 
 def _stub_dir(tmp_path, counts):
-    """Build stub run_orfs/run_drc + an extract that pops `counts` into drc.json."""
+    """Build stub run_orfs/run_drc + a python extract that pops `counts` into drc.json."""
     sd = tmp_path / "stubs"
     sd.mkdir()
     (sd / "counts.txt").write_text("\n".join(str(c) for c in counts) + "\n")
     (sd / "run_orfs.sh").write_text("#!/usr/bin/env bash\nexit 0\n")
     (sd / "run_drc.sh").write_text("#!/usr/bin/env bash\nexit 0\n")
-    extract = f"""#!/usr/bin/env bash
-proj="$1"; out="$2"
-cf="{sd}/counts.txt"
-n=$(head -1 "$cf"); tail -n +2 "$cf" > "$cf.tmp" && mv "$cf.tmp" "$cf"
-[ -z "$n" ] && n=0
-if [ "$n" = "0" ]; then
-  printf '{{"status":"clean","total_violations":0,"categories":{{}}}}' > "$out"
-else
-  printf '{{"status":"fail","total_violations":%s,"categories":{{"METAL7_ANTENNA":{{"count":%s}}}}}}' "$n" "$n" > "$out"
-fi
-"""
+    extract = '''#!/usr/bin/env python3
+import sys, json, pathlib
+proj, out = sys.argv[1], sys.argv[2]
+cf = pathlib.Path(__file__).with_name("counts.txt")
+lines = cf.read_text().splitlines()
+n = lines[0] if lines else "0"
+cf.write_text("\\n".join(lines[1:]) + ("\\n" if lines[1:] else ""))
+n = int(n or 0)
+if n == 0:
+    json.dump({"status":"clean","total_violations":0,"categories":{}}, open(out,"w"))
+else:
+    json.dump({"status":"fail","total_violations":n,"categories":{"METAL7_ANTENNA":{"count":n}}}, open(out,"w"))
+'''
     (sd / "extract_drc.py").write_text(extract)
     for f in ("run_orfs.sh", "run_drc.sh", "extract_drc.py"):
         os.chmod(sd / f, 0o755)
@@ -231,3 +233,5 @@ def test_driver_early_exits_on_no_improvement(tmp_path):
     r = _run_driver(p, sd)
     summary = (p / "reports" / "fix_summary.md").read_text()
     assert "no_improvement" in summary
+    # early-exit invariant: only 1 iteration was logged, not all 3
+    assert len((p / "reports" / "fix_log.jsonl").read_text().strip().splitlines()) == 1
