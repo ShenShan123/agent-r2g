@@ -29,10 +29,23 @@ non-misleading per-platform output — so the refactor only has to **preserve** 
 |----------|-----------------|--------|
 | nangate45 (`aes_core`) | full 8 features + 4 labels | 1.1 V, metal1–10, curated cell-type map, taps, area/power non-zero |
 | sky130hd (`cordic`) | full 8 features + 4 labels | 1.8 V, dbu 1000, li1/met layers, **runtime** cell-type map (98 sky130 masters), taps, area 100 % non-zero; congestion 6508 / wirelength 1454 / timing 6508 / irdrop 1870 rows |
-| asap7 / gf180 / ihp-sg13g2 | tech resolution on real PDK files | supply 0.70 / 5.00 / 1.20 V; `.lib.gz` liberty parses; M1–M9 / Metal1–5(+TopMetal) routing layers parse; TAPCELL / `__filltie` tap patterns match |
+| asap7 / gf180 / ihp-sg13g2 | tech resolution on real PDK files | supply 0.70 / 5.00 / 1.20 V; `.lib.gz` liberty parses; M1–M9 / Metal1–5(+TopMetal) routing layers parse; TAPCELL / `__filltie` tap patterns match; area/power non-zero (see fix below) |
 
 This covers **both** cell-type strategies (curated nangate45 map + liberty-runtime map for
 the rest), both layer-naming schemes, all six supply voltages, and gzip liberty.
+
+> **Post-restructure correctness fix (2026-05-31, commit `c9d284f`).** The empirical
+> check above only verified that asap7/gf180 `.lib.gz` *parses* — it did **not** assert
+> `cell_power > 0`, which masked a pre-existing degeneracy: asap7 and gf180 carry leakage
+> as block-form `leakage_power () { value : X }` with **no** scalar `cell_leakage_power`,
+> and gf180 **quotes** the value (`value : "0.00029065"`). `techlib.liberty` only read the
+> scalar form, so every asap7/gf180 cell's `power` collapsed to 0 — the same degenerate
+> class as the sky130 quoted-cell-name bug. asap7's INVBUF corner additionally omits the
+> trailing `;` on `area`, zeroing those cells' area. Fixed in `_merge_liberty_file`
+> (block-form leakage + optional quotes + optional area `;`); scalar still wins so
+> nangate45/sky130/ihp are byte-unchanged. Pinned by a degeneracy guard in the Task-10
+> gz-liberty tests (asap7 + gf180: area>0, ≥90 % power>0). Verified power>0: gf180 0→229/229,
+> asap7 0→42/42.
 
 ## The technology-dependent concerns to centralize (ported verbatim — no value change)
 

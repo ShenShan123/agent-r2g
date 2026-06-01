@@ -34,6 +34,21 @@ shared by the label and feature extractors — a **behavior-neutral** refactor (
 > 3. **Measured baseline values** for `aes_core` + `cordic` are recorded in Task 0 / Task 10 as
 >    concrete assertions, and the `cell_type_id` baseline quirk is documented as preserve-don't-fix.
 
+> **FOLLOW-UP FIXES (post-restructure correctness — out of the behavior-neutral scope above).**
+> Two degenerate-liberty-value bugs were found and fixed *after* the restructure landed; both
+> change values, so they are NOT byte-neutral and the local `/tmp/techlib_baseline` was
+> re-captured (rename + sky130 values confirmed content-equivalent except the intended fixes):
+> 1. **sky130 quoted cell names** (commit `363a8b2`) — quoted liberty cell-name tokens never
+>    matched the unquoted DEF master keys, collapsing `cell_area`/`cell_power`/`cell_type_id`
+>    to 0/UNKNOWN on every sky130 cell. The `cordic` baseline was re-captured to the corrected,
+>    non-degenerate values (`cell_type_id` is no longer uniformly UNKNOWN — supersedes the
+>    Invariants note below).
+> 2. **asap7/gf180 block-form + quoted leakage power** (commit `c9d284f`, 2026-05-31) — these
+>    PDKs carry leakage as `leakage_power () { value : X }` with no scalar `cell_leakage_power`
+>    (gf180 quotes the value), so every cell's `power` was 0. Fixed in `techlib.liberty` and
+>    pinned by a degeneracy guard in the Task-10 gz-liberty tests. See the design doc's
+>    "Post-restructure correctness fix" note for details.
+
 > **BEHAVIOR-NEUTRAL GATE.** The pass/fail criterion is **byte-for-byte identical CSV output** on
 > two platforms. Capture the baseline FIRST (Task 0); after every module move, re-run the
 > extractors on `aes_core` (nangate45) and `cordic` (sky130hd) and assert the CSVs are unchanged.
