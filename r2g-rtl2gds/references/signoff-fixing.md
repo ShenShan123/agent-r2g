@@ -188,3 +188,29 @@ Check results afterwards:
 cat design_cases/my_design/reports/fix_summary.md
 cat design_cases/my_design/reports/fix_log.jsonl
 ```
+
+### Batch BEOL-only DRC for the `stuck` population
+
+`tools/batch_beol_drc.sh` converts the FEOL-hang `stuck` designs to an honest
+routing-DRC verdict (`clean_beol` / `fail`) in bulk. It auto-discovers
+`status==stuck` designs, orders them by instance count, caps by size (to skip the
+large tail that re-hangs on the BEOL CONTACT op), bounds parallelism by memory, and
+is idempotent (skips designs already `clean_beol`). Any design that still hangs is
+killed by the per-design `DRC_TIMEOUT` and left honestly `stuck`.
+
+```bash
+# Preview the work-list (no runs)
+tools/batch_beol_drc.sh --max-inst 100000 --dry-run
+
+# Convert all stuck designs <=100K instances, 5 concurrent, 30-min per-design cap
+tools/batch_beol_drc.sh --max-inst 100000 --jobs 5 --timeout 1800
+
+# Specific designs
+tools/batch_beol_drc.sh DMA_Controller_DMA_registers verilog_ethernet_ip_demux
+```
+
+Results: one JSON line per design in `design_cases/_batch/beol_drc_<stamp>.jsonl`
+plus a status-count summary on stdout. **Size guidance:** ≤20K-inst designs finish
+in seconds, 20K–100K in tens of seconds to minutes; >~400K designs hang on the BEOL
+CONTACT op (`cont.width`/`cont.space` over millions of contacts) — leave them
+`stuck` (see failure-patterns.md "BEOL-only fallback").

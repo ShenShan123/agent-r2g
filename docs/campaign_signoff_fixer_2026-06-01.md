@@ -211,6 +211,21 @@ campaign's anti-zombie rule); their `reports/drc.json` stays honest `stuck`.
   large tail (incl. BOOM 5–9M-inst) remains `stuck` and needs the deeper fallback or a very
   long timeout. A population batch must also bound parallelism by memory (~7GB/large design).
 
+### Batch tool + population conversion (2026-06-01)
+
+Built `tools/batch_beol_drc.sh` (auto-discover stuck → order by size → cap by
+`--max-inst` → bounded-parallel BEOL-only DRC → extract → JSONL + summary;
+idempotent on `clean_beol`; per-design `DRC_TIMEOUT` self-cleans hangs).
+
+Stuck-DRC size distribution (271 total): **≤20K: 171, 20K–100K: 69, 100K–400K: 21,
+>400K: 8** (the >400K tail incl. BOOM 5–9M hangs on BEOL CONTACT — left `stuck`).
+
+- **Wave 1** (`--max-inst 3500`, jobs 4): **27/27 → `clean_beol`**, max wall 54s.
+  Tool validated end-to-end (parallel dispatch, JSONL, summary, idempotency).
+- **Full wave** (`--max-inst 100000`, jobs 5, timeout 1800): 213-design work-list
+  (27 already done skipped) — running; results in
+  `design_cases/_batch/beol_drc_<stamp>.jsonl`.
+
 ## Phase 2 (large_rtl_designs) — pending
 
 `large_rtl_designs/` = BOOM CPU (boom_mediumboom 9.1M, boom_mediumseboom 8.3M, boom_smallseboom
