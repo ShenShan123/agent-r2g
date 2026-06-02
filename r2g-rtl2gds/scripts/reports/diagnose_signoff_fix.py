@@ -170,8 +170,27 @@ def _lvs_plan(lvs: dict, cfg: dict, exclude: set) -> dict:
             if s["id"] not in exclude:
                 plan["strategies"].append(s)
         else:
-            plan["residual_reason"] = ("lvs mismatch with no auto-fix in v1; likely rule-deck "
-                                       "(.lylvs) issue — operator review required")
+            # Use extract_lvs.py's lvsdb mismatch classification for an honest,
+            # specific residual instead of a generic "operator review".  See
+            # references/failure-patterns.md "LVS symmetric-matcher residual".
+            mismatch_class = lvs.get("mismatch_class")
+            if mismatch_class == "symmetric_matcher":
+                plan["status"] = "residual"
+                plan["residual_reason"] = (
+                    "lvs_symmetric_matcher_residual: KLayout-0.30.7 mis-pairs interchangeable "
+                    "instances in symmetric logic (0 net deltas, only same-cell swaps in "
+                    "ambiguous groups). Layout is correct; not flow-fixable (raising "
+                    "max_depth/max_branch_complexity does NOT help). Needs newer KLayout."
+                )
+            elif mismatch_class == "real_connectivity":
+                plan["residual_reason"] = (
+                    "lvs_real_connectivity_mismatch: a layout net genuinely does not match the "
+                    "schematic (\"not matching any net\"). Real layout defect — inspect the "
+                    "GDS/DEF at the named net; not auto-fixable."
+                )
+            else:
+                plan["residual_reason"] = ("lvs mismatch with no auto-fix in v1; likely rule-deck "
+                                           "(.lylvs) issue — operator review required")
         return plan
     plan["residual_reason"] = f"lvs status '{status}' not actionable in v1"
     return plan

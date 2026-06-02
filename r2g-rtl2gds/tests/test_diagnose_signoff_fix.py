@@ -112,6 +112,33 @@ def test_lvs_status_crash_yields_residual():
     assert "klayout_cpp_crash" in plan["residual_reason"]
 
 
+# --- LVS mismatch_class → precise honest residual (2026-06-02 triage) ---
+
+def test_lvs_symmetric_matcher_residual():
+    """mismatch_class=symmetric_matcher → honest residual, no doomed re-run strategy."""
+    lvs = {"status": "fail", "log_info": {"errors": ["Netlists don't match"]},
+           "mismatch_class": "symmetric_matcher"}
+    plan = d.build_plan({}, lvs, {}, check="lvs")
+    assert plan["status"] == "residual"
+    assert plan["strategies"] == []
+    assert "lvs_symmetric_matcher_residual" in plan["residual_reason"]
+
+
+def test_lvs_real_connectivity_residual():
+    """mismatch_class=real_connectivity → flagged as a real defect, not benign."""
+    lvs = {"status": "fail", "log_info": {"errors": ["Netlists don't match"]},
+           "mismatch_class": "real_connectivity"}
+    plan = d.build_plan({}, lvs, {}, check="lvs")
+    assert "lvs_real_connectivity_mismatch" in plan["residual_reason"]
+
+
+def test_lvs_generic_mismatch_still_operator_review():
+    """No mismatch_class (e.g. no lvsdb) → unchanged generic operator-review residual."""
+    lvs = {"status": "fail", "log_info": {"errors": ["Netlists don't match"]}}
+    plan = d.build_plan({}, lvs, {}, check="lvs")
+    assert "operator review" in plan["residual_reason"]
+
+
 def test_lvs_status_incomplete_yields_residual():
     """status='incomplete' (from extract_lvs) → residual, lvs incomplete reason, no strategies."""
     plan = d.build_plan({}, {"status": "incomplete"}, {}, check="lvs")

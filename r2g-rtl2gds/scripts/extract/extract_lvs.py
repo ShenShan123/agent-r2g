@@ -63,6 +63,48 @@ def parse_lvsdb(lvs_dir: Path) -> dict:
     return result
 
 
+# --- Mismatch-class classification (s-expression lvsdb) ----------------------
+# Distinguishes the dominant LVS "fail" sub-causes so the diagnoser can emit a
+# precise, honest residual instead of a generic "operator review".  See
+# references/failure-patterns.md "LVS symmetric-matcher residual".
+# CONSERVATIVE BY DESIGN: only the unambiguous symmetric signature (zero genuine
+# net deltas + same-circuit instance swaps + ambiguous-group warnings) is labelled
+# `symmetric_matcher` (a KLayout-0.30.7 tool limitation, layout actually correct).
+# Anything with real net/pin deltas stays `generic` for operator review, and any
+# explicit "not matching any net" error is `real_connectivity` (a true defect) —
+# real_connectivity takes priority so a benign label is never applied to a real bug.
+_NET_MISMATCH_RE = re.compile(r"net\(\(\)\s+\d+\s+mismatch\)|net\(\d+\s+\(\)\s+mismatch\)")
+_CIRCUIT_SWAP_RE = re.compile(r"circuit\(\d+\s+\d+\s+mismatch\)")
+_AMBIGUOUS_RE = re.compile(r"ambiguous group of nets")
+_NOT_MATCHING_RE = re.compile(r"is not matching any net", re.I)
+
+
+def classify_lvs_mismatch(lvs_dir: Path) -> dict:
+    """Classify a 'fail' lvsdb into symmetric_matcher / real_connectivity / generic.
+
+    Returns {} when no lvsdb is present (e.g. crash before write).
+    """
+    lvsdb_file = lvs_dir / '6_lvs.lvsdb'
+    if not lvsdb_file.exists():
+        return {}
+    text = lvsdb_file.read_text(encoding='utf-8', errors='ignore')
+    net_mismatches = len(_NET_MISMATCH_RE.findall(text))
+    circuit_swaps = len(_CIRCUIT_SWAP_RE.findall(text))
+    ambiguous = len(_AMBIGUOUS_RE.findall(text))
+    if _NOT_MATCHING_RE.search(text):
+        cls = 'real_connectivity'
+    elif net_mismatches == 0 and circuit_swaps > 0 and ambiguous > 0:
+        cls = 'symmetric_matcher'
+    else:
+        cls = 'generic'
+    return {
+        'mismatch_class': cls,
+        'net_mismatches': net_mismatches,
+        'circuit_swaps': circuit_swaps,
+        'ambiguous_groups': ambiguous,
+    }
+
+
 _CRASH_RE = re.compile(
     r"signal number:\s*\d+|segmentation|sigsegv|sort_circuit|gen_log_entry"
     r"|ruby_run_node|klayout_crash\.log",
@@ -213,6 +255,14 @@ def main():
     }
     if result_reason is not None:
         result['reason'] = result_reason
+
+    # For a real mismatch with an lvsdb, classify the sub-cause (symmetric-matcher
+    # tool residual vs real connectivity vs generic) so the diagnoser can report
+    # an honest, specific residual_reason instead of "operator review".
+    if status == 'fail' and lvsdb_exists:
+        cls = classify_lvs_mismatch(lvs_dir)
+        if cls:
+            result.update(cls)
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(result, indent=2, ensure_ascii=False), encoding='utf-8')

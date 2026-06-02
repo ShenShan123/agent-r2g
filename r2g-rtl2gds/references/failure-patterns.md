@@ -408,6 +408,44 @@ When klayout DRC is stuck on a polygon op and gets SIGKILL'd by something **othe
 - **Platforms without KLayout LVS:** asap7
 - **Alternative:** For sky130hd/sky130hs, use `run_netgen_lvs.sh` (Netgen + Magic) as an alternative LVS flow
 
+### LVS symmetric-matcher residual (KLayout `Netlists don't match`, layout actually correct)
+
+- **Symptom:** `6_lvs.log` ends with `ERROR : Netlists don't match`, but the `.lvsdb` shows the
+  failure is **only** same-cell-type instance swaps and/or a handful of unmatched nets that all sit
+  inside *ambiguous groups* — there are **zero (or very few) genuine net/pin/device-count deltas**.
+  Tell-tale lvsdb lines: `entry(warning description('Matching nets $N vs. NAME from an ambiguous
+  group of nets'))`, `circuit(<layoutId> <schemId> mismatch)` where both ids resolve to the *same*
+  cell type (e.g. NAND2_X1 vs NAND2_X1), and optionally `entry(warning description('Maximum depth
+  exhausted (max depth is 16)'))`.
+- **Root cause:** KLayout 0.30.7's netlist comparer cannot uniquely fingerprint topologically
+  identical instances in **symmetric structures** — parallel NAND/NOR/XOR trees, crypto mixing
+  functions (e.g. blake2s G-function), register files (e.g. a 543×DLL_X1 array), and flat
+  combinational benchmarks (ICCAD units). It heuristically mis-pairs a few interchangeable
+  instances and reports a spurious mismatch. **This is a tool limitation, not a layout error** —
+  net/pin/device counts agree on both sides.
+- **What does NOT fix it (validated 2026-06-02, signoff-fixer campaign):** raising the comparer
+  search budget. The deck exposes `max_branch_complexity`/`max_depth` (env
+  `LVS_MAX_BRANCH_COMPLEXITY`/`LVS_MAX_DEPTH`). Tested:
+  - `verilog_ethernet_axis_baser_rx_64` at `max_depth=32` → identical 2 NAND2 swaps; the matcher
+    was **not** budget-limited (no "depth exhausted"), it simply mis-paired.
+  - `iccad2017_unit5_F` at `max_depth=64, max_branch_complexity=1048576` → the "Maximum depth
+    exhausted" *warning* vanished but **all 292 net mismatches persisted** (run took only 168s).
+  So budget removes the *symptom warning* without touching the *real* mismatch. Do not burn
+  re-runs cranking it.
+- **Honest handling:** classify as residual `lvs_symmetric_matcher_residual` (see
+  `signoff-fixing.md` residual taxonomy). Do **not** relax the rule deck, and do **not** promote it
+  to `clean`. The genuine fix is a newer KLayout (improved symmetric matcher) or per-design
+  `same_nets`/`same_circuits` seeding from the synthesized instance names — both out of automated
+  scope. Distinguish from a **real connectivity error** (residual `lvs_real_connectivity_mismatch`):
+  if the lvsdb has an `entry(error description('Net <PORT> is not matching any net ...'))` or two
+  layout nets the schematic expects merged (e.g. wb2axip_axi2axilite: `M_AXI_BREADY` + `$8924`
+  vs `S_AXI_WREADY`), that is a genuine layout defect, not this pattern.
+- **Cross-platform stale-status caveat:** a design can also show a bogus LVS `fail`/`failed` when
+  its `6_lvs.log` is a **concatenation of an older different-platform run** prepended to the current
+  one (the extractor then keys off the old failure marker). Re-running LVS fresh on the current
+  platform resolves it (e.g. `cordic`: stale sky130hd failure → re-ran nangate45 → `clean`). Always
+  re-run before trusting an LVS `fail` on a design that changed platform.
+
 ### Magic DRC Failure
 - **Symptom:** Magic DRC script fails or produces no output
 - **Common causes:**

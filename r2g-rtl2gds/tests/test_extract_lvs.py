@@ -191,3 +191,67 @@ def test_status_unknown_for_uninformative_log(tmp_path):
     out = tmp_path / "lvs.json"
     result = _run_script(proj, out)
     assert result["status"] == "unknown", f"expected unknown; got {result['status']!r}"
+
+
+# ---------------------------------------------------------------------------
+# Mismatch-class classification (symmetric-matcher residual vs real connectivity)
+# Models the KLayout s-expression lvsdb shapes seen in the 2026-06-02 LVS triage.
+# ---------------------------------------------------------------------------
+_MISMATCH_LOG = "KLayout 0.30.7\nERROR : Netlists don't match\n"
+
+
+def _make_fail_project(tmp_path: Path, lvsdb_text: str) -> Path:
+    proj = tmp_path / "proj"
+    lvs_dir = proj / "lvs"
+    lvs_dir.mkdir(parents=True)
+    (lvs_dir / "6_lvs.log").write_text(_MISMATCH_LOG, encoding="utf-8")
+    (lvs_dir / "6_lvs.lvsdb").write_text(lvsdb_text, encoding="utf-8")
+    return proj
+
+
+def test_mismatch_class_symmetric_matcher(tmp_path):
+    """Zero net deltas + same-cell instance swaps + ambiguous groups → symmetric_matcher."""
+    lvsdb = (
+        "circuit(top TOP nomatch\n"
+        "   entry(warning description('Matching nets $3003 vs. _2694_ from an ambiguous group of nets'))\n"
+        "   entry(warning description('Matching nets $3191 vs. _2727_ from an ambiguous group of nets'))\n"
+        "   circuit(2359 601 mismatch)\n"
+        "   circuit(7871 598 mismatch)\n"
+        ")\n"
+    )
+    out = tmp_path / "lvs.json"
+    result = _run_script(_make_fail_project(tmp_path, lvsdb), out)
+    assert result["status"] == "fail"
+    assert result["mismatch_class"] == "symmetric_matcher", result
+    assert result["net_mismatches"] == 0 and result["circuit_swaps"] == 2
+
+
+def test_mismatch_class_real_connectivity(tmp_path):
+    """An explicit 'not matching any net' error → real_connectivity (priority over swaps)."""
+    lvsdb = (
+        "circuit(axi2axilite AXI2AXILITE nomatch\n"
+        "   entry(error description('Net M_AXI_BREADY is not matching any net from reference netlist'))\n"
+        "   entry(warning description('foo from an ambiguous group of nets'))\n"
+        "   net(3204 () mismatch)\n"
+        "   circuit(10450 3687 mismatch)\n"
+        ")\n"
+    )
+    out = tmp_path / "lvs.json"
+    result = _run_script(_make_fail_project(tmp_path, lvsdb), out)
+    assert result["mismatch_class"] == "real_connectivity", result
+
+
+def test_mismatch_class_generic_when_net_deltas_present(tmp_path):
+    """Real net deltas present (no 'not matching' error) → generic, NOT auto-labelled benign."""
+    lvsdb = (
+        "circuit(axi_slave AXI_SLAVE nomatch\n"
+        "   entry(warning description('x from an ambiguous group of nets'))\n"
+        "   net(() 1635 mismatch)\n"
+        "   net(1919 () mismatch)\n"
+        "   circuit(100 200 mismatch)\n"
+        ")\n"
+    )
+    out = tmp_path / "lvs.json"
+    result = _run_script(_make_fail_project(tmp_path, lvsdb), out)
+    assert result["mismatch_class"] == "generic", result
+    assert result["net_mismatches"] == 2

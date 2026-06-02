@@ -383,8 +383,22 @@ equivalent_pins("OAI33_X1","B1","B2","B3")
 
 equivalent_pins("HA_X1","A","B")
 
-max_branch_complexity(65536)
-max_depth(16)
+# Netlist-comparer search budget (env-overridable for operator tuning).
+# These bound how far the matcher backtracks to disambiguate symmetric structures.
+# EMPIRICAL FINDING (2026-06-02, signoff-fixer campaign): raising these does NOT
+# resolve the corpus's LVS "Netlists don't match" residuals.  Tested on
+# verilog_ethernet_axis_baser_rx_64 (depth 32) and iccad2017_unit5_F (depth 64,
+# complexity 1M): the "Maximum depth exhausted" *warning* disappears but the
+# actual net/instance mismatches persist unchanged (2 and 292 respectively).
+# Those failures are genuine KLayout-0.30.7 matcher limitations on symmetric logic
+# (parallel NAND/NOR trees, register files, flat combinational benchmarks), NOT a
+# budget problem and NOT a real layout error -- see references/failure-patterns.md
+# "LVS symmetric-matcher residual".  Defaults kept at the validated values; the env
+# knobs exist only so an operator can experiment on a future depth-limited design
+# without editing the deck.  Raising the budget can never turn a real match into a
+# mismatch (only the reverse), so it is always safe to try.
+max_branch_complexity((ENV['LVS_MAX_BRANCH_COMPLEXITY'] || 65536).to_i)
+max_depth((ENV['LVS_MAX_DEPTH'] || 16).to_i)
 
 # --- VERBOSE-MISMATCH PATCH (wave_f2 diagnosis 2026-05-28) ---
 # Force lvsdb to be written even on mismatch by explicitly calling report_lvs

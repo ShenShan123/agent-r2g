@@ -143,7 +143,18 @@ These are reported honestly by `diagnose_signoff_fix.py` with a non-null `residu
 | Non-antenna DRC class | `non-antenna DRC class not handled in v1: ...` | Operator review of the specific category. |
 | All antenna strategies exhausted | `antenna: all real-fix strategies exhausted` | No further config lever available; consider manual routing intervention or structural RTL change. |
 | LVS KLayout C++ crash (`sort_circuit` / `gen_log_entry` SIGSEGV) | `klayout_cpp_crash_needs_upgrade (>=0.30.10)` | Upgrade KLayout. |
-| LVS rule-deck mismatch (non-macro) | `lvs mismatch with no auto-fix in v1; ...` | Operator review of the `.lylvs` rule deck. |
+| LVS symmetric-matcher residual (`Netlists don't match` with only same-cell-type instance swaps / unmatched nets in *ambiguous groups*, 0 or few genuine net/pin deltas) | `lvs_symmetric_matcher_residual` | **No flow fix.** KLayout-0.30.7 limitation on symmetric logic (parallel NAND/NOR trees, register files, flat combinational benchmarks). The layout is almost certainly correct; the matcher just can't prove it. Increasing the comparer budget does **not** help (validated — see below). Needs a newer KLayout or manual `same_nets`/`same_circuits` seeding. See `failure-patterns.md` "LVS symmetric-matcher residual". |
+| LVS real connectivity error (a port/signal net genuinely unmatched, "not matching any net", two layout nets that should be one) | `lvs_real_connectivity_mismatch` | A genuine layout defect — inspect the GDS/DEF at the named net. Not auto-fixable. |
+| LVS rule-deck mismatch (non-macro, none of the above) | `lvs mismatch with no auto-fix in v1; ...` | Operator review of the `.lylvs` rule deck. |
+
+**LVS comparer budget knobs (do NOT chase symmetric residuals with these).** `FreePDK45.lylvs`
+exposes `max_branch_complexity` / `max_depth` via `LVS_MAX_BRANCH_COMPLEXITY` / `LVS_MAX_DEPTH`
+env vars (defaults 65536 / 16). Raising them removes the "Maximum depth exhausted" *warning* but
+does **not** resolve the actual mismatches — empirically validated 2026-06-02 on
+`verilog_ethernet_axis_baser_rx_64` (depth 32: 2 swaps unchanged) and `iccad2017_unit5_F`
+(depth 64 / complexity 1M: 292 net mismatches unchanged). The knobs exist only so an operator can
+experiment on a genuinely depth-limited *future* design; they are not a lever for the residuals in
+this corpus.
 
 ---
 
