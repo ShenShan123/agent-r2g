@@ -973,6 +973,35 @@ physical-only `ANTENNA_X1` cell (`Flatten layout cell (no schematic): ANTENNA_X1
 diodes are not counted as schematic-missing devices — stream_register stays `LVS CLEAN` with a
 diode inserted (verified 2026-06-02). Re-run LVS after a DRC antenna fix to refresh the report.
 
+**Coverage, residuals, and fast verification (2026-06-02 campaign).** Validated on the small
+fail set: stream_register, riscv_alu4b, fifo_basic (16→0, 13 diodes), pyocdriscv stream_register,
+iccad2017_unit2_G / _unit18_F, eth_arb_mux (133→0, 19 nets) all → **CLEAN**; cpu → 0 antennas
+(OpenROAD). The one partial case, eth_demux, went **147 → 3** (98% reduction) and resists full
+closure:
+
+- **Irreducible residual (per-gate vs summed-gate).** KLayout's `antenna_check` flags via the
+  *worst single gate* on the net (e.g. `#agate 0.02625`, `#ratio 307`), while OpenROAD's per-net
+  PAR uses the *sum* of `ANTENNAGATEAREA` over the net's fanout. A high-fanout net driving one
+  tiny gate therefore reads `<< 300` in OpenROAD even though KLayout sees `> 300`, so
+  `repair_antennas` never touches it. A tighter install (`--ratio 200`) clears *single-gate*
+  borderline nets but not these multi-gate ones (re-routing also shifts which net is borderline,
+  a moving target). Report the small remainder as an **honest residual** — never relax the deck.
+  Clearing it would need KLayout-violation-driven diode insertion (map flagged polygons → nets →
+  insert diodes), not yet implemented.
+
+- **Fast antenna verification for large designs.** Full KLayout DRC is impractically slow on
+  ≥~5K-cell designs (the FreePDK45 FEOL `or`/well-derivation rule runs minutes-to-stuck — cpu hit
+  ~30 min). But with the model installed, **OpenROAD `check_antennas` matches KLayout's antenna
+  ratio to the decimal** (stream_register 488.80 vs 489.17), so use it as the antenna verifier:
+  `read_lef <tech> <sc>; read_def 6_final.def; check_antennas`. Reserve the full KLayout DRC for
+  final signoff / non-antenna checks.
+
+- **Larger designs carry *unchecked* antennas.** Every nangate45 design ≥~10K cells in the corpus
+  is `clean_beol` — BEOL-only DRC skips ANTENNA, so antennas were never verified (e.g. oc54_cpu,
+  10K, has 2 METAL4 antennas found by an antenna-inclusive check). The fix (re-route + diode
+  repair) and OpenROAD verification extend to them; an antenna-inclusive DRC mode that skips the
+  slow FEOL derivations (not just the `.output` checks) would let KLayout sign them off too.
+
 **Other platforms** (sky130/asap7/gf180/ihp — ship a real antenna model + non-zero-diffarea
 diode): unchanged — raise repair iterations (`MAX_REPAIR_ANTENNAS_ITER_GRT/_DRT = 10`, default
 5); the diode is auto-discovered from its `CLASS CORE ANTENNACELL` LEF declaration (do NOT set

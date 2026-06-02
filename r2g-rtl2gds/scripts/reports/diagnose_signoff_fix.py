@@ -129,12 +129,14 @@ def _drc_plan(drc: dict, cfg: dict, exclude: set) -> dict:
                 platform = cfg.get("PLATFORM")
                 if platform in DIODE_FORCED_REPAIR_PLATFORMS:
                     plan["residual_reason"] = (
-                        "nangate45 antenna: diode-forced repair (antenna_diode_repair) already "
-                        "applied but KLayout still flags. Most likely the antenna model is not "
-                        "installed (run tools/install_nangate45_antenna.sh) or OpenROAD's "
-                        "diode-credit underestimates this net vs the FreePDK45 deck — escalate "
-                        "with a tighter ratio (install_nangate45_antenna.sh --ratio 200) and "
-                        "re-run. Deck never relaxed."
+                        "nangate45 antenna: diode-forced repair (antenna_diode_repair) applied; "
+                        "the bulk cleared but a few nets remain. Two causes: (1) the antenna model "
+                        "is not installed (run tools/install_nangate45_antenna.sh) — check_antennas "
+                        "would find 0; or (2) an irreducible modeling gap — OpenROAD's per-net PAR "
+                        "sums gate areas over fanout, so a high-fanout net driving one tiny gate "
+                        "reads << KLayout's per-gate ratio and OpenROAD won't repair it. A tighter "
+                        "install (--ratio 200) clears single-gate borderline nets but not the "
+                        "multi-gate ones; those are an honest residual. Deck never relaxed."
                     )
                 else:
                     plan["residual_reason"] = "antenna: all real-fix strategies exhausted"
