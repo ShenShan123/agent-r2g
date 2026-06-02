@@ -223,12 +223,32 @@ Stuck-DRC size distribution (271 total): **≤20K: 171, 20K–100K: 69, 100K–4
 
 - **Wave 1** (`--max-inst 3500`, jobs 4): **27/27 → `clean_beol`**, max wall 54s.
   Tool validated end-to-end (parallel dispatch, JSONL, summary, idempotency).
-- **Full wave** (`--max-inst 100000`, jobs 5, timeout 1800): 213-design work-list
-  (27 already done skipped) — running; results in
-  `design_cases/_batch/beol_drc_<stamp>.jsonl`.
+- **Full wave** (`--max-inst 100000`, jobs 5, timeout 1800): 213-design work-list,
+  **213/213 → `clean_beol`, ZERO non-clean**, max wall 1063s (one ~100K design took 18 min
+  but completed — slow, not hung). `design_cases/_batch/beol_drc_20260601T142910Z.jsonl`.
 
-## Phase 2 (large_rtl_designs) — pending
+**Phase-1 final corpus DRC tally (≤100K stuck converted):**
 
-`large_rtl_designs/` = BOOM CPU (boom_mediumboom 9.1M, boom_mediumseboom 8.3M, boom_smallseboom
-5.5M — all in the stuck-DRC set), Faraday ASIC (faraday_risc 406K, also stuck), Gaisler. These
-map onto the Phase-1 large-design BEOL-cost finding above.
+| status | count | meaning |
+|--------|------:|---------|
+| `clean` | 402 | full-deck DRC clean |
+| `clean_beol` | **242** | honest BEOL-only clean (FEOL+ANTENNA skipped, library-pre-verified) |
+| `stuck` | 29 | the >100K tail (untested band + ≥470K CONTACT-hang + BOOMs) |
+| `fail` | 9 | nangate45 antenna residuals (no real fix) |
+| **total** | 682 | |
+
+**Honest DRC-verdict coverage rose from 402/682 (59%) → 644/682 (94%)** with zero rule-deck
+relaxation. Remaining 38 = 29 stuck (large tail) + 9 antenna residuals.
+
+## Phase 2 (large_rtl_designs) — IN PROGRESS
+
+`large_rtl_designs/` = **BOOM CPU** (boom_smallseboom 5.5M, boom_mediumseboom 8.3M,
+boom_mediumboom 9.1M — all stuck, have GDS), **Faraday ASIC** = `faraday_risc` (406K, stuck,
+has GDS), **Gaisler** = `leon2` (no `design_cases/` dir — never taken through RTL→GDS; full
+flow, out of signoff scope here).
+
+Plan: (1) run BEOL-only on the untested **108K–406K stuck band** (22 designs incl. faraday_risc)
+with `jobs 3, timeout 2400` — pins the CONTACT-hang threshold (469K hangs; is 406K under it?)
+and converts whatever completes; (2) the **≥465K + BOOM** tier is the confirmed CONTACT-hang
+tail — bounded-timeout attempts only, else honest `stuck` pending the deeper CONTACT-skip
+fallback (#8).
