@@ -275,3 +275,25 @@ defensive fallback + documents the KLayout quirk, not a corpus unblock.
 6/22 `clean_beol` (up to 152K, ~17–22 min each); 16 remaining incl. faraday_risc (406K).
 
 **Gaisler/leon2** has no `design_cases/` run (RTL→GDS never executed) — out of signoff scope.
+
+## Metafile / staleness refresh (2026-06-01)
+
+Audited all logs/metafiles for staleness after the conversions:
+- **No false-clean from killed runs:** the killed large-design DRC runs (eth_mac_1g_fifo,
+  koios) self-classified `stuck` (exit 137, no lyrdb); their 2 lagging `reports/drc.json`
+  extracts were re-synced (still `stuck`). All 250 `clean_beol` reports are internally
+  consistent (`reports/drc.json` ↔ `drc/drc_result.json`, `beol_only*` mode, drc_result
+  `clean`); **0 inconsistencies**, 0 stale clean-vs-beol mismatches.
+- **Repo cleanliness:** `knowledge/runs.sqlite`, `heuristics.json`, `failure_candidates.json`
+  and all `design_cases/*/reports/*` are **gitignored** — corpus staleness can't dirty the repo.
+- **Knowledge store re-ingested:** `ingest_run.py` over all **682** designs (OK=682, errors=0;
+  `INSERT OR REPLACE` on stable run_id → in-place refresh, no lineage bloat). Store
+  `drc_status` now: `clean` 409, `clean_beol` 249, `fail` 10, `stuck` 22, `unknown` 9,
+  `None` 51 (750 rows). Rebuilt `learn_heuristics.py` (0 families — corpus has <3 runs/family,
+  below the heuristic threshold; expected) + `mine_rules.py` (0 candidate signatures).
+- The earlier `docs/signoff_snapshot_2026-05-27.json` is no longer present; the refreshed
+  `runs.sqlite` is now the canonical current record.
+
+**Live corpus DRC tally (band wave still running):** `clean` 402, `clean_beol` 250, `stuck` 21,
+`fail` 9 = **652/682 (95.6%)** honest DRC verdict and climbing as the band wave converts the
+108K–406K designs. (The "Phase-1 final tally" table above is a labelled checkpoint at 242/29.)
