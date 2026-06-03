@@ -19,6 +19,31 @@ skipped as library-pre-verified).
 
 ---
 
+## 2026-06-03 — LVS failure-cause analysis + CHANGELOG relocated to `docs/`
+*(doc: `docs/lvs-failure-analysis-2026-06-03.md`)*
+
+Corpus-wide report on what causes LVS failures, grounded in `knowledge/runs.sqlite` + each
+design's `reports/lvs.json`. **604/690 LVS-data designs are clean (87.5%);** the non-clean
+remainder is overwhelmingly KLayout tooling limits, not real layout defects:
+
+- **9 `fail`** verdicts sub-classify (via `extract_lvs.py`) into **symmetric_matcher** (3 —
+  KLayout-0.30.7 can't disambiguate interchangeable instances in symmetric logic; layout is
+  correct), **generic** (3 — real net/pin deltas needing per-design triage; +2 large designs
+  that hit a mismatch verdict after 2–3 h without writing an lvsdb), and **real_connectivity**
+  (1 — a candidate true defect, wb2axip_axi2axilite).
+- The 9 `fail` are dwarfed by **43 `incomplete`** (≈230–245K-cell designs whose deep-mode
+  comparison doesn't finish — a runtime limit, not a mismatch) and **7 `crash`** (KLayout C++
+  SIGSEGV — fixed by upgrading to ≥0.30.10). **17 `skipped`** are platforms with no `.lylvs`.
+- Conclusion: unlike DRC antenna violations, LVS mismatches are not placement/routing artifacts
+  (the netlist comes from synthesis/RTL), so they are **not back-end-flow-fixable**; the skill
+  reports them as honest, specifically-labeled residuals. Verified the DRC antenna fix does not
+  create LVS failures (the `.lylvs` flattens the physical-only `ANTENNA_X1`).
+
+This file (`CHANGELOG.md`) is relocated from the repo root into `docs/` alongside the other
+curated history; references to it from within `docs/` resolve unchanged.
+
+---
+
 ## 2026-06-02 — nangate45 antenna DRC made genuinely fixable (tech-model + diode-forced repair)
 *(skill: `scripts/flow/antenna_lef_patch.py`, `tools/install_nangate45_antenna.sh`, `tools/batch_antenna_fix.sh`, `diagnose_signoff_fix.py`)*
 
