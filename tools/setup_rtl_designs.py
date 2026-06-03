@@ -11,7 +11,7 @@ For each design in rtl_designs/:
 
 Usage:
   python3 tools/setup_rtl_designs.py [--designs design1,design2,...] [--force]
-  python3 tools/setup_rtl_designs.py --rtl-dir=rtl_designs_v2 --designs-file=list.txt
+  python3 tools/setup_rtl_designs.py --rtl-dir=/path/to/alt_rtl_collection --designs-file=list.txt
 
 Options:
   --rtl-dir=<dir>        Source RTL directory (default: rtl_designs). Absolute
@@ -701,8 +701,8 @@ def main():
         elif arg.startswith("--designs-file="):
             designs_file = arg.split("=", 1)[1]
         elif arg.startswith("--rtl-dir="):
-            # Source RTL directory override (e.g. rtl_designs_v2). Accepts an
-            # absolute path or a name relative to the repo root.
+            # Source RTL directory override (default is the unified rtl_designs/).
+            # Accepts an absolute path or a name relative to the repo root.
             rd = arg.split("=", 1)[1]
             rd_path = Path(rd)
             RTL_DESIGNS_DIR = rd_path if rd_path.is_absolute() else BASE_DIR / rd
