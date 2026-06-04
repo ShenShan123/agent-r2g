@@ -1,5 +1,5 @@
 {
-  "_comment": "Conservative curation: explicit pins reproduce the existing split('_')[0].lower() grouping for the dominant IP families so they are intentional and drift-protected. We deliberately do NOT merge across behavior boundaries (e.g. networking vs bus vs crypto) — name-token similarity != design-behavior similarity. Bus-heavy designs (axi_crossbar etc.) are protected by suggest_config's bus_heavy CORE_UTILIZATION clamp, not by family taxonomy.",
+  "_comment": "Conservative curation: explicit anchored (^prefix_) pins make the dominant underscore-separated IP families intentional and drift-protected, and stop unanchored prefixes from silently swallowing unrelated future designs. Ambiguous run-together names (e.g. spimemio, axildouble) deliberately fall through to the split('_')[0] singleton fallback rather than being force-merged. We never merge across behavior boundaries — bus-heavy designs are protected by suggest_config's bus_heavy CORE_UTILIZATION clamp, not by family taxonomy.",
   "mappings": {
     "aes128_core":   "aes_xcrypt",
     "ibex_core":     "ibex",
@@ -27,15 +27,15 @@
     {"regex": "^frisc",                     "family": "faraday_risc"},
 
     {"regex": "^axis_",                     "family": "axis"},
-    {"regex": "^axil",                      "family": "axil"},
+    {"regex": "^axil_",                     "family": "axil"},
     {"regex": "^axi_",                      "family": "axi"},
-    {"regex": "^eth",                       "family": "eth"},
-    {"regex": "^udp",                       "family": "udp"},
+    {"regex": "^eth_",                      "family": "eth"},
+    {"regex": "^udp_",                      "family": "udp"},
     {"regex": "^ip[_0-9]",                  "family": "ip"},
-    {"regex": "^i2c",                       "family": "i2c"},
-    {"regex": "^spi",                       "family": "spi"},
-    {"regex": "^uart",                      "family": "uart"},
+    {"regex": "^i2c_",                      "family": "i2c"},
+    {"regex": "^spi_",                      "family": "spi"},
+    {"regex": "^uart_",                     "family": "uart"},
     {"regex": "^can_",                      "family": "can"},
-    {"regex": "^sha256",                    "family": "sha256"}
+    {"regex": "^sha256_",                   "family": "sha256"}
   ]
 }

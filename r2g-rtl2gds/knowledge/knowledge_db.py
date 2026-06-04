@@ -78,7 +78,13 @@ def is_success(row: dict) -> bool:
 
     # symmetric_matcher is a KLayout tool limitation on a clean layout, not a
     # real defect (see references LVS notes), so it counts as a not-failed LVS.
-    lvs_not_failed = (lvs in LVS_NOT_FAILED) or (mclass == "symmetric_matcher")
+    # It is only meaningful on a 'fail' verdict (a complete, electrically-correct
+    # lvsdb the symmetric matcher couldn't balance); requiring lvs == "fail" stops
+    # a future path that set the class on an incomplete/crash LVS from leaking a
+    # real failure through as a success.
+    lvs_not_failed = (lvs in LVS_NOT_FAILED) or (
+        mclass == "symmetric_matcher" and lvs == "fail"
+    )
     drc_not_failed = drc in DRC_NOT_FAILED
     rcx_not_failed = rcx in RCX_NOT_FAILED
 

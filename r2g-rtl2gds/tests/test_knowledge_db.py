@@ -85,6 +85,17 @@ def test_is_success_symmetric_matcher_is_true():
     })
 
 
+def test_is_success_symmetric_matcher_only_on_fail_verdict():
+    # Defensive: symmetric_matcher is only a clean-layout signal on a 'fail'
+    # verdict. If a future path sets it on an incomplete/crash LVS, the real
+    # failure must NOT leak through as a success.
+    assert not knowledge_db.is_success({
+        "orfs_status": "partial", "drc_status": "clean",
+        "lvs_status": "incomplete", "lvs_mismatch_class": "symmetric_matcher",
+        "rcx_status": "complete",
+    })
+
+
 def test_is_success_clean_beol_is_true():
     assert knowledge_db.is_success({
         "orfs_status": "partial", "drc_status": "clean_beol",
@@ -97,15 +108,21 @@ def test_is_success_clean_beol_is_true():
 def test_curated_families_map_dominant_ip_prefixes(tmp_knowledge_dir):
     families = knowledge_db.load_families(tmp_knowledge_dir / "families.json")
     infer = lambda n: knowledge_db.infer_family(n, families)
-    # AXI-stream / AXI-lite must NOT be swallowed by the broader ^axi_ rule.
+    # Anchored (^prefix_) pins: every underscore-separated IP design maps via
+    # the curated family. AXI-stream / AXI-lite must NOT be swallowed by ^axi_.
     assert infer("axis_fifo") == "axis"
     assert infer("axil_crossbar") == "axil"
     assert infer("axi_crossbar") == "axi"
     assert infer("axi_register") == "axi"
-    # IGNORECASE: ^i2c matches I2C_master, ^spi matches SPI_Master.
+    # IGNORECASE: ^i2c_ matches I2C_master, ^spi_ matches SPI_Master.
     assert infer("I2C_master") == "i2c"
     assert infer("SPI_Master") == "spi"
     assert infer("eth_mac_1g") == "eth"
+    assert infer("uart_tx") == "uart"
     # We intentionally do NOT over-split: both AXI bus designs share family
     # 'axi' (bus_heavy behavior is handled by suggest_config's clamp).
     assert infer("axi_crossbar") == infer("axi_register") == "axi"
+    # Conservative anchoring: ambiguous run-together names fall through to the
+    # honest split('_')[0] singleton fallback instead of being force-merged.
+    assert infer("spider") == "spider"          # NOT "spi"
+    assert infer("axildouble") == "axildouble"  # NOT "axil"
