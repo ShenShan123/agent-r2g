@@ -13,6 +13,14 @@ if str(_REPORTS_DIR) not in sys.path:
     sys.path.insert(0, str(_REPORTS_DIR))
 import build_lineage_view  # noqa: E402
 
+# Make scripts/dashboard/ importable to exercise the render helpers (HTML
+# escaping). Importing the module is side-effect-free: it computes BASE/OUT at
+# import but does not call main(), so no filesystem writes occur.
+_DASHBOARD_DIR = Path(__file__).resolve().parents[1] / "scripts" / "dashboard"
+if str(_DASHBOARD_DIR) not in sys.path:
+    sys.path.insert(0, str(_DASHBOARD_DIR))
+import generate_multi_project_dashboard as dashboard  # noqa: E402
+
 
 def _insert(conn, **row):
     defaults = dict.fromkeys([
@@ -265,3 +273,85 @@ def test_empty_db_health(tmp_knowledge_dir):
     assert h["pct_partial_or_unknown"] == 0.0
     assert h["learnable_pairs"] == 0
     assert view["provenance"] == []
+
+
+def test_provenance_fanout_and_cycle_no_drop_no_hang(tmp_knowledge_dir):
+    """Non-linearizable lineage (fan-out + cycle) must not drop, dup, or hang.
+
+    Production ChipTop is a fan-out (multiple currents share one root), so this
+    exercises the _order_edges fallback the clean-chain test never reaches.
+    """
+    conn, db_path = _open_db(tmp_knowledge_dir)
+    # Fan-out + continuation in design "fan": r0->r1, r0->r2, r2->r3.
+    for rid in ("r0", "r1", "r2", "r3"):
+        _insert(conn, run_id=rid, design_name="fan", design_family="fan",
+                platform="nangate45", orfs_status="partial", drc_status="clean",
+                lvs_status="clean", rcx_status="complete", timing_tier="met")
+    _insert_lineage(conn, "fan", "nangate45", "r1", "r0",
+                    {"changed": {}, "added": {"A": "1"}, "removed": {}},
+                    created_at="2026-05-01T00:00:00Z")
+    _insert_lineage(conn, "fan", "nangate45", "r2", "r0",
+                    {"changed": {}, "added": {"B": "1"}, "removed": {}},
+                    created_at="2026-05-02T00:00:00Z")
+    _insert_lineage(conn, "fan", "nangate45", "r3", "r2",
+                    {"changed": {}, "added": {"C": "1"}, "removed": {}},
+                    created_at="2026-05-03T00:00:00Z")
+
+    # A 2-edge cycle in a separate design: a->b, b->a. Must return both, no hang.
+    for rid in ("a", "b"):
+        _insert(conn, run_id=rid, design_name="cyc", design_family="cyc",
+                platform="nangate45", orfs_status="partial", drc_status="clean",
+                lvs_status="clean", rcx_status="complete", timing_tier="met")
+    _insert_lineage(conn, "cyc", "nangate45", "b", "a",
+                    {"changed": {}, "added": {"X": "1"}, "removed": {}},
+                    created_at="2026-05-01T00:00:00Z")
+    _insert_lineage(conn, "cyc", "nangate45", "a", "b",
+                    {"changed": {}, "added": {"Y": "1"}, "removed": {}},
+                    created_at="2026-05-02T00:00:00Z")
+    conn.commit()
+    conn.close()
+
+    view = build_lineage_view.build_view(db_path)
+    by_design = {p["design_name"]: p for p in view["provenance"]}
+
+    fan = by_design["fan"]
+    assert fan["edge_count"] == 3
+    fan_pairs = [(e["previous_run_id"], e["current_run_id"]) for e in fan["edges"]]
+    # Every edge appears exactly once — no drop, no duplicate.
+    assert sorted(fan_pairs) == sorted([("r0", "r1"), ("r0", "r2"), ("r2", "r3")])
+    assert len(fan_pairs) == len(set(fan_pairs)) == 3
+
+    cyc = by_design["cyc"]
+    assert cyc["edge_count"] == 2
+    cyc_pairs = {(e["previous_run_id"], e["current_run_id"]) for e in cyc["edges"]}
+    assert cyc_pairs == {("a", "b"), ("b", "a")}
+
+
+def test_render_helpers_escape_html(tmp_knowledge_dir):
+    """Lock in HTML escaping: hostile design_name / diff values must be escaped."""
+    conn, db_path = _open_db(tmp_knowledge_dir)
+    hostile_name = "evil<script>"
+    hostile_val = '\'"><svg onload=alert(1)>'
+    for rid in ("p", "c"):
+        _insert(conn, run_id=rid, design_name=hostile_name,
+                design_family="evil", platform="nangate45",
+                orfs_status="partial", drc_status="clean", lvs_status="clean",
+                rcx_status="complete", timing_tier="met")
+    _insert_lineage(conn, hostile_name, "nangate45", "c", "p",
+                    {"changed": {"CORE_UTILIZATION": {"old": "20", "new": hostile_val}},
+                     "added": {}, "removed": {}},
+                    created_at="2026-05-01T00:00:00Z")
+    conn.commit()
+    conn.close()
+
+    view = build_lineage_view.build_view(db_path)
+
+    prov_html = dashboard.tuning_provenance_panel(view["provenance"])
+    health_html = dashboard.knowledge_health_strip(view["health"])
+
+    for raw in ("<script>", "<svg onload"):
+        assert raw not in prov_html, f"unescaped {raw!r} leaked into provenance HTML"
+        assert raw not in health_html, f"unescaped {raw!r} leaked into health HTML"
+    # Positive check: the escaped forms are present where the hostile data flows.
+    assert "&lt;script&gt;" in prov_html
+    assert "&lt;svg onload" in prov_html

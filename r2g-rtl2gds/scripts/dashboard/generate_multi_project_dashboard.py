@@ -551,6 +551,7 @@ def knowledge_health_strip(health):
     total = health.get('total_runs', 0)
     pct = health.get('pct_partial_or_unknown', 0.0)
     learnable = health.get('learnable_pairs', 0)
+    min_success = health.get('min_successful_required', 3)
     fam_count = health.get('heuristics_family_count', 0)
     populated = health.get('heuristics_populated', False)
 
@@ -577,7 +578,7 @@ def knowledge_health_strip(health):
 <tr><th>Total runs</th><td>{total}</td></tr>
 <tr><th>ORFS status</th><td>{counts_str}</td></tr>
 <tr><th>% partial/unknown</th><td>{pct}%</td></tr>
-<tr><th>Learnable family/platform pairs (&ge;3 success)</th><td>{learnable}</td></tr>
+<tr><th>Learnable family/platform pairs (&ge;{html.escape(str(min_success))} successes)</th><td>{learnable}</td></tr>
 <tr><th>Signoff positives</th><td>{html.escape(sp_str)}</td></tr>
 <tr><th>Heuristics</th><td>{heur_html}</td></tr>
 </table>
