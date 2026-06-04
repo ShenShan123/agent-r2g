@@ -76,6 +76,13 @@ def _read_stage_log(path: Path) -> list[dict[str, Any]]:
     return entries
 
 
+# orfs_status is intentionally a FAITHFUL record of backend/stage_log.jsonl:
+# it returns 'pass' only when all six stages appear there, and does NOT infer
+# completion from signoff (a clean GDS implies finish ran, but we don't
+# back-fill the stage log). Signoff-based "did this run reach a signed-off
+# layout" learning is handled separately by knowledge_db.is_success in the
+# learner — keep this function a pure stage-log mirror; do not change it to
+# read drc/lvs/rcx.
 def _derive_orfs_status(stages: list[dict[str, Any]]) -> tuple[str, str | None]:
     if not stages:
         return ("unknown", None)
@@ -294,7 +301,7 @@ def ingest(project: Path,
             if k not in {
                 "DESIGN_NAME", "PLATFORM", "CORE_UTILIZATION",
                 "PLACE_DENSITY_LB_ADDON", "SYNTH_HIERARCHICAL", "ABC_AREA",
-                "DIE_AREA", "CLOCK_PERIOD",
+                "DIE_AREA", "CLOCK_PERIOD", "EVAL_ARM",
             }
         }, sort_keys=True),
 
@@ -311,6 +318,7 @@ def ingest(project: Path,
         "lvs_status":      lvs.get("status"),          # clean | fail | skipped | crash | incomplete | unknown
         "lvs_mismatch_class": lvs.get("mismatch_class"),  # symmetric_matcher | real_connectivity | generic (fail only)
         "rcx_status":      rcx.get("status"),          # complete | empty | no_spef | skipped
+        "eval_arm":        cfg.get("EVAL_ARM"),         # naive | learned | None (payoff A/B harness)
 
         "total_elapsed_s":  total_elapsed,
         "stage_times_json": json.dumps(stage_log, sort_keys=True),

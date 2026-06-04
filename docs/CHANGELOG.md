@@ -19,25 +19,110 @@ skipped as library-pre-verified).
 
 ---
 
-## 2026-06-03 — LVS failure-cause analysis + CHANGELOG relocated to `docs/`
-*(doc: `docs/lvs-failure-analysis-2026-06-03.md`)*
+## 2026-06-04 — OpenSpace absorption: live learning loop + observability + payoff eval
+*(plan: `docs/plans/openspace-absorption-2026-06-03.md`; skill commits `356d517`→`5dd99ee`; PR [#3](https://github.com/ShenShan123/agent-r2g/pull/3))*
 
-Corpus-wide report on what causes LVS failures, grounded in `knowledge/runs.sqlite` + each
-design's `reports/lvs.json`. **604/690 LVS-data designs are clean (87.5%);** the non-clean
-remainder is overwhelmingly KLayout tooling limits, not real layout defects:
+Three wins from the OpenSpace study, implemented against `knowledge/`. The self-improvement loop was
+**dead** — `heuristics.json` was `"families": {}` because `_is_success` required `orfs_status=='pass'`,
+which **0 of 750** runs had (747 `partial`); meanwhile 607 LVS-clean / 681 DRC-clean(+beol) /
+699 RCX-complete sat unused.
 
-- **9 `fail`** verdicts sub-classify (via `extract_lvs.py`) into **symmetric_matcher** (3 —
-  KLayout-0.30.7 can't disambiguate interchangeable instances in symmetric logic; layout is
-  correct), **generic** (3 — real net/pin deltas needing per-design triage; +2 large designs
-  that hit a mismatch verdict after 2–3 h without writing an lvsdb), and **real_connectivity**
-  (1 — a candidate true defect, wb2axip_axi2axilite).
-- The 9 `fail` are dwarfed by **43 `incomplete`** (≈230–245K-cell designs whose deep-mode
-  comparison doesn't finish — a runtime limit, not a mismatch) and **7 `crash`** (KLayout C++
-  SIGSEGV — fixed by upgrading to ≥0.30.10). **17 `skipped`** are platforms with no `.lylvs`.
-- Conclusion: unlike DRC antenna violations, LVS mismatches are not placement/routing artifacts
-  (the netlist comes from synthesis/RTL), so they are **not back-end-flow-fixable**; the skill
-  reports them as honest, specifically-labeled residuals. Verified the DRC antenna fix does not
-  create LVS failures (the `.lylvs` flattens the physical-only `ANTENNA_X1`).
+- **Win 1 — learning loop repaired (the unlock).** Added a shared `knowledge_db.is_success` (strict
+  6-stage pass OR signoff-positive: ≥1 positive clean signal, no failed signoff; `symmetric_matcher`
+  gated to a `fail` verdict; absence-of-data is *not* success), imported by `learn_heuristics.py` +
+  `monitor_health.py`. Re-running `learn_heuristics.py` against the existing DB — **no re-ingest** —
+  took `heuristics.json` from **0 → 48 learned family/platform pairs** (631 runs learnable). The fix
+  is in the learner, not `ingest`, so `orfs_status` stays a faithful record of the stage log. Added
+  the `PLACE_DENSITY_LB_ADDON ≥ 0.10` floor the hard rules named but `suggest_config` never enforced;
+  the `bus_heavy` CU→15 clamp still overrides learned medians. `families.json` curated conservatively
+  with anchored `^prefix_` patterns; the fuzzy/Jaccard fallback rejected.
+- **Win 2 — read-only observability.** `scripts/reports/build_lineage_view.py` is a deterministic
+  `mode=ro` projection over `runs.sqlite` + `config_lineage` + `heuristics.json` → two dashboard
+  panels (the diagnostic that would have screamed "747/750 partial, heuristics empty"). Reuses
+  `is_success` so the health strip and the learner can't disagree; never wired into `suggest_config`;
+  lineage is a loose single-parent diff chain, not a true DAG.
+- **Win 3 — payoff A/B harness.** `knowledge/eval_heuristics.py` (`emit` paired naive/learned arms via
+  a new `suggest_config --no-learned`; `summarize` → deterministic `eval_summary.json`) + frozen
+  `eval_set.json` (non-bus families only — `bus_heavy` clamp would mask the difference) + nullable
+  `eval_arm` column. Cost is **wall-clock** (`stage_log.jsonl` records only `elapsed_s`;
+  CPU-hours/peak-RAM are not instrumented) — recorded as `cost_metric`, never fabricated. A `win`
+  requires a *usable* signed-off learned arm; cheaper-but-both-fail is `inconclusive`. The multi-hour
+  A/B *run* is operator-driven.
+
+Tests: **331 passed, 8 skipped** (~30 new). Each win went implementer → spec review → code-quality
+review → empirical controller verification. Skill changes also recorded in
+`references/lessons-learned.md` ("Dead Learning Loop — Repaired 2026-06-04") and `knowledge/README.md`.
+
+---
+
+## 2026-06-03 — LVS failure-cause analysis + residual campaign (corrected, re-ingested)
+*(doc: `docs/lvs-failure-analysis-2026-06-03.md`, merged; skill commit `7129d9b`)*
+
+> **Post-residual-campaign correction.** The previous version of this entry was built from a stale
+> knowledge store: 9 designs it labelled `skipped` were already `clean` on disk, several
+> `crash`/`incomplete` rows had moved, and `clean_algorithmic` was hiding a real defect. A
+> five-domain subagent campaign drove every persistent residual to ground truth, re-ingested the
+> corpus, and updated the headline numbers below. Skill changes recorded in
+> `references/failure-patterns.md` and `references/signoff-fixing.md`.
+
+Corpus-wide analysis grounded in `knowledge/runs.sqlite` + each design's `reports/lvs.json`.
+**607/674 designs with LVS data are clean (90%).** Of the 18 `fail` verdicts, **only TWO are
+genuine layout defects** (both `wb2axip`) — the other 16, plus all `crash`/`incomplete`, are
+KLayout-0.30.7 tooling limits, not layout defects.
+
+**Status distribution (per project, latest run):**
+
+| Status | Count | Meaning |
+|--------|------:|---------|
+| `clean` | 607 | Netlists match |
+| `incomplete` | 44 | No verdict under the cap — mostly a comparer bug, not slowness (see below) |
+| `fail` | 18 | Comparer reached a "don't match" verdict (sub-classified below) |
+| `unknown` | 3 | spi_master (CDL parse error) + 2 ChipTop BOOMs (intractable) |
+| `crash` | 2 | KLayout SIGSEGV that did not survive retries (`usbf_device`, `wb2axip_axixclk`) |
+
+**What changed from the stale snapshot:** `skipped` 17→0 (9 were already clean; the rest
+re-ran); `crash` 7→2 (retry — see §1 below); `clean_algorithmic` 7→0 (dead legacy label —
+re-extracting folds them into `fail`+sub-class, and one was a real defect); `fail` 9→18 (now
+includes ex-crash and ex-clean_algorithmic symmetric residuals, correctly labelled).
+
+**The 18 `fail` verdicts, sub-classified** by `extract_lvs.py::classify_lvs_mismatch`
+(balance-based, not zero-delta; refined 2026-06-03):
+
+| mismatch_class | Count | Layout correct? |
+|----------------|------:|-----------------|
+| `symmetric_matcher` | 15 | Yes — KLayout-0.30.7 can't disambiguate symmetric structures |
+| `real_connectivity` | 2 | No — `wb2axip_axi2axilite` (1 net open), `wb2axip_axilsingle` (16 bus opens; was mislabeled `clean_algorithmic`) |
+| (no lvsdb) | 1 | `iccad2015_unit08_in1` — pre-patch deck, no db written |
+
+**Root causes, ranked:**
+
+1. **KLayout-0.30.7 SIGSEGV** (`sort_circuit`/`gen_log_entry`, during compare after extraction
+   succeeds) — non-deterministic; a surviving run gives the true verdict. `run_lvs.sh` now
+   retries automatically (`LVS_CRASH_RETRIES`, default 4; auto-1 for >150K cells). 6 of 7 crash
+   designs resolved (3 → `clean`, 3 → `fail`/symmetric). `threads(1)`, `verbose(false)`,
+   tcmalloc, and `flat` mode don't fix it; KLayout ≥0.30.10 would fix at source.
+2. **KLayout-0.30.7 symmetric-matcher limit** — dominant `fail` cause; 15 of 18. Layout
+   correct; matcher can't fingerprint topologically identical instances (parallel NAND/XOR/parity
+   trees, crypto mixing rounds, register files, replicated bit-slices). Raising comparer budget
+   (`max_depth`/`max_branch_complexity`) does NOT help (re-confirmed). `same_nets!` seeding
+   can clear a localized one — validated on `verilog_ethernet_axis_baser_rx_64` → clean
+   (operator-only; doesn't generalize).
+3. **Genuine connectivity defects (2)** — both `wb2axip`; described in the mismatch table.
+4. **`incomplete` (44) — mostly a comparer bug, not honest slowness.** Three distinct causes:
+   comparer SIGSEGV (e.g. `usbf_device` crashes at ~750 s at 23K cells — *smaller* than
+   `aes_core` which finishes → structure-driven, not size), comparer internal assertion
+   `dbNetlistCompareCore.cc:1003`, and honest extraction timeout (super-linear: ~2700 s @ 51K,
+   ~10200 s @ 62K — the old 3600 s cap SIGTERM'd ≥50K designs mid-extraction). `run_lvs.sh`
+   timeout tiers raised: >50K→14400 s, >100K→21600 s, >250K→28800 s, base 5400 s. Memory never
+   binds (peak ≤1.65 GB @ 242K). ChipTop 5–9M-instance BOOMs die mid-geometry → intractable.
+5. **CDL parse error (`unknown`, 1)** — `spi_master_single_cs`: KLayout mis-tokenizes an
+   escaped-bracket negative-index instance name (`Xr_CS_Inactive_Count\[-1\]$_DFFE_PN0P_`).
+   Not a layout defect.
+
+**Why most LVS failures are not back-end-flow-fixable:**
+SIGSEGV is now auto-retried; symmetric-matcher and incomplete/comparer-crash require a newer
+KLayout (≥0.30.10); real-connectivity defects are genuine bugs. `diagnose_signoff_fix.py`
+reports these as honest, specifically-labelled residuals rather than spawning doomed re-runs.
 
 This file (`CHANGELOG.md`) is relocated from the repo root into `docs/` alongside the other
 curated history; references to it from within `docs/` resolve unchanged.
