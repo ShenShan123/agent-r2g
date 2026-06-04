@@ -446,7 +446,8 @@ def ingest(project: Path,
 
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    p.add_argument("project", type=Path, help="Path to design_cases/<project> directory")
+    p.add_argument("project", type=Path, nargs="?", default=None,
+                   help="Path to design_cases/<project> directory (omit when using --backfill)")
     p.add_argument("--db", type=Path, default=knowledge_db.DEFAULT_DB_PATH,
                    help="SQLite database path (default: knowledge/runs.sqlite)")
     p.add_argument("--schema", type=Path, default=knowledge_db.DEFAULT_SCHEMA_PATH,
@@ -465,6 +466,8 @@ def main() -> int:
         conn.close()
         print(f"Backfilled staged slacks for {n} run(s) under {args.backfill}")
         return 0
+    if args.project is None:
+        p.error("project is required unless --backfill is given")
     run_id = ingest(args.project, conn, families_path=args.families)
     # Warn loudly if the run is about to be classified 'unknown' because
     # stage_log.jsonl is missing — this silently excludes runs from learning.

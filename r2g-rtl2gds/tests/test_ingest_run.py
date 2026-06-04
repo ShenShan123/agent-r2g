@@ -189,3 +189,20 @@ def test_backfill_filters_unconstrained_sentinel(tmp_path, tmp_knowledge_dir):
     ingest_run.backfill(cases, conn)
     assert conn.execute("SELECT place_setup_ws FROM runs").fetchone()[0] is None
     conn.close()
+
+
+def test_main_backfill_runs_without_a_project_arg(tmp_path, tmp_knowledge_dir, monkeypatch, capsys):
+    """`ingest_run.py --backfill <dir>` must work standalone — the --help text
+    promises a self-contained 'backfill ... then exit' mode, so requiring a
+    dummy `project` positional is a usability bug."""
+    import ingest_run
+    cases = tmp_path / "design_cases"
+    cases.mkdir()
+    monkeypatch.setattr("sys.argv", [
+        "ingest_run.py", "--backfill", str(cases),
+        "--db", str(tmp_knowledge_dir / "runs.sqlite"),
+        "--schema", str(tmp_knowledge_dir / "schema.sql"),
+    ])
+    rc = ingest_run.main()
+    assert rc == 0
+    assert "Backfilled" in capsys.readouterr().out
