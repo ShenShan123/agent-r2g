@@ -16,6 +16,12 @@ import re
 import sys
 from pathlib import Path
 
+try:
+    import fix_model
+except ImportError:                       # script run outside the test sys.path
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import fix_model
+
 BLOCK_START = "# >>> r2g signoff-fix (auto) >>>"
 BLOCK_END = "# <<< r2g signoff-fix (auto) <<<"
 KLAYOUT_CPP_CRASH = re.compile(r"sort_circuit|gen_log_entry|segmentation|sigsegv", re.I)
@@ -216,10 +222,26 @@ def _lvs_plan(lvs: dict, cfg: dict, exclude: set) -> dict:
     return plan
 
 
-def build_plan(drc: dict, lvs: dict, cfg: dict, *, check: str = "drc", exclude=()) -> dict:
-    """Pure: (drc.json, lvs.json, parsed config.mk) -> ordered fix plan dict."""
+def _rank_plan_strategies(plan: dict, recipes: dict | None) -> dict:
+    """Reorder plan['strategies'] by fix_model and attach the full ranking."""
+    if not plan.get("strategies"):
+        return plan
+    static_order = [s["id"] for s in plan["strategies"]]
+    ranking = fix_model.rank_strategies(recipes, static_order)
+    by_id = {s["id"]: s for s in plan["strategies"]}
+    plan["strategies"] = [by_id[r["strategy"]] for r in ranking if r["strategy"] in by_id]
+    plan["ranking"] = ranking
+    return plan
+
+
+def build_plan(drc: dict, lvs: dict, cfg: dict, *, check: str = "drc",
+               exclude=(), recipes: dict | None = None) -> dict:
+    """Pure: (drc.json, lvs.json, parsed config.mk) -> ordered fix plan dict.
+    When `recipes` (a Tier-3 fix_recipes entry for this check/violation_class)
+    is given, strategies are re-ranked by empirical clearance (fix_model)."""
     excl = set(exclude or ())
-    return _drc_plan(drc or {}, cfg, excl) if check == "drc" else _lvs_plan(lvs or {}, cfg, excl)
+    plan = _drc_plan(drc or {}, cfg, excl) if check == "drc" else _lvs_plan(lvs or {}, cfg, excl)
+    return _rank_plan_strategies(plan, recipes)
 
 
 def apply_edits(config_text: str, edits: dict) -> str:
@@ -245,12 +267,43 @@ def _load(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
 
 
+def _load_recipes(proj: Path, *, check: str, drc: dict, lvs: dict,
+                  heuristics: Path | None = None) -> dict | None:
+    """Look up the Tier-3 fix_recipes entry for this design's family/platform and
+    the current violation_class. Returns None (cold start) if absent."""
+    hp = heuristics or (Path(__file__).resolve().parents[1] / "knowledge" / "heuristics.json")
+    if not hp.exists():
+        return None
+    cfg = parse_config((proj / "constraints" / "config.mk").read_text(encoding="utf-8")
+                       if (proj / "constraints" / "config.mk").exists() else "")
+    try:
+        import knowledge_db
+        families = knowledge_db.load_families()
+        fam = knowledge_db.infer_family(cfg.get("DESIGN_NAME", ""), families)
+    except Exception:
+        fam = (cfg.get("DESIGN_NAME", "") or "").split("_", 1)[0].lower()
+    plat = cfg.get("PLATFORM", "nangate45")
+    data = json.loads(hp.read_text(encoding="utf-8"))
+    entry = (data.get("families", {}).get(fam, {})
+             .get("platforms", {}).get(plat, {}).get("fix_recipes"))
+    if not entry:
+        return None
+    if check == "drc":
+        cats = drc.get("categories") or {}
+        vclass = max(cats, key=lambda k: cats[k].get("count") or 0) if cats else None
+    else:
+        vclass = lvs.get("mismatch_class")
+    return entry.get(check, {}).get(vclass)
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="Diagnose DRC/LVS violations → real-fix plan.")
     ap.add_argument("project_dir")
     ap.add_argument("--check", choices=["drc", "lvs"], default="drc")
     ap.add_argument("--apply", metavar="STRATEGY_ID", help="write the strategy's edits into config.mk")
     ap.add_argument("--next", action="store_true", help="print one tab-separated action line for the driver")
+    ap.add_argument("--list", action="store_true",
+                    help="print the full priority-ranked candidate list as JSON")
     ap.add_argument("--exclude", default="", help="comma-separated strategy ids to skip")
     args = ap.parse_args(argv)
 
@@ -261,7 +314,8 @@ def main(argv=None) -> int:
     cfg_text = cfg_path.read_text(encoding="utf-8") if cfg_path.exists() else ""
     cfg = parse_config(cfg_text)
     exclude = [x for x in args.exclude.split(",") if x]
-    plan = build_plan(drc, lvs, cfg, check=args.check, exclude=exclude)
+    recipes = _load_recipes(proj, check=args.check, drc=drc, lvs=lvs)
+    plan = build_plan(drc, lvs, cfg, check=args.check, exclude=exclude, recipes=recipes)
 
     if args.apply:
         strat = next((s for s in plan["strategies"] if s["id"] == args.apply), None)
@@ -280,6 +334,10 @@ def main(argv=None) -> int:
         if strat["config_edits"]:
             cfg_path.write_text(apply_edits(cfg_text, strat["config_edits"]), encoding="utf-8")
         print(json.dumps({"applied": strat["id"], "config_edits": strat["config_edits"]}))
+        return 0
+
+    if args.list:
+        print(json.dumps(plan.get("ranking", []), indent=2))
         return 0
 
     if args.next:
