@@ -1,6 +1,6 @@
 {
-  "generated_at": "2026-06-06T04:34:24Z",
-  "source_run_count": 750,
+  "generated_at": "2026-06-06T13:20:09Z",
+  "source_run_count": 752,
   "min_successful_runs_required": 3,
   "families": {
     "execute": {
@@ -249,6 +249,12 @@
                   }
                 },
                 "n_sessions": 2
+              }
+            },
+            "drc": {
+              "METAL5_ANTENNA": {
+                "strategies": {},
+                "n_sessions": 1
               }
             }
           }
@@ -1645,8 +1651,8 @@
     "test": {
       "platforms": {
         "nangate45": {
-          "sample_size": 28,
-          "success_count": 28,
+          "sample_size": 29,
+          "success_count": 29,
           "success_rate": 1.0,
           "core_utilization": {
             "min_safe": 20.0,
@@ -1658,8 +1664,23 @@
             "max_safe": 0.2,
             "median": 0.2
           },
-          "typical_cell_count": 13894,
-          "p90_elapsed_s": 3275.0
+          "typical_cell_count": 16877,
+          "p90_elapsed_s": 3275.0,
+          "fix_recipes": {
+            "timing": {
+              "severe": {
+                "strategies": {
+                  "period_relax": {
+                    "attempts": 1,
+                    "successes": 0,
+                    "failures": 0,
+                    "median_reduction_pct": 0.6614961115473513
+                  }
+                },
+                "n_sessions": 1
+              }
+            }
+          }
         }
       }
     },
@@ -3817,6 +3838,23 @@
                     "median_reduction_pct": 1.0
                   }
                 },
+                "n_sessions": 1
+              }
+            }
+          }
+        }
+      }
+    },
+    "axi2axilite": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 0,
+          "success_count": 0,
+          "success_rate": 0.0,
+          "fix_recipes": {
+            "lvs": {
+              "real_connectivity": {
+                "strategies": {},
                 "n_sessions": 1
               }
             }

@@ -1844,3 +1844,29 @@ Prove capture→learn→improved-suggestion end-to-end on one design per case ty
 - **`repair_run_status` is a near-no-op on the current corpus** (partial 747→749, unknown 3→1). Real `stage_log.jsonl` stores integer exit codes (`"status": 0`), which `_derive_orfs_status` correctly does **not** treat as `"pass"`, and `knowledge_db.is_success` already credits signoff-positive partials to the learner. So the repair is a faithful no-invent reconciliation, **not** a mass `partial→pass` flip. (Possible follow-up: a reports-based status reconciler, if operators want clean partials shown as `pass` in `orfs_status`.)
 - **Task 16 result:** 382 fix_events (drc 267 cleared / 1 win; orfs 70 cleared / 44 no_change) → 337 resolved + 45 abandoned trajectories → **122 family/platform `fix_recipes` entries** across 130 families. The read-only `fix_effectiveness` projection renders 142 groups.
 - **Minor backfill data-quality:** a few `recover_pass` rows carry `platform=None` and a timeout value (e.g. `'14400'`) as `violation_class`. Cosmetic; affects only backfilled rows (the live loop records clean values). Candidate follow-up: tighten the backfill `from_stage`/`platform` mapping.
+
+---
+
+## Implementation Log — 2026-06-06 (Part B: Task 17 pilot + a live-loop bug fix)
+
+**Status:** Task 17 (Phase C pilot) **executed** via a dynamic 4-agent workflow — one design per case type. The live `capture → learn` loop is now proven end-to-end (until now it had only ever run on *backfilled* data). Paused at the **Task 18 checkpoint** for user go/no-go before Phase E/F (Tasks 19–20, the large compute spend). Full suite **374 passed / 8 skipped** (was 373/8; +1 regression test).
+
+**Pilot results (4 designs; all honest, no fabricated numbers):**
+
+| Design | Case | Outcome | Live fix_event |
+|---|---|---|---|
+| `darkriscv_core` | synth `#include` | **completed** (incomplete→setup_complete) — reconstructed `rtl/config.vh` (minimal RV32I 3-stage) → full nangate45 backend, WNS +6.159, 0 route-DRC | none (run-completion) |
+| `iccad2015_unit16_in1` | timing | **win** — `period_relax` 10→15 ns, WNS −4.508→−1.526 (severe→moderate, 66% reduction) | 1 (`timing`/`period_relax`/`win`) |
+| `verilog_ethernet_eth_demux` | DRC | **residual** (honest) — 3× METAL5_ANTENNA; diode-repair already exhausted (irreducible per-net-PAR vs per-gate modeling gap) | 1 (`drc`/`none`→`inconclusive`) |
+| `wb2axip_axi2axilite` | LVS | **abandoned** (honest) — `real_connectivity` genuine layout defect, no v1 lever | 1 (`lvs`/`none`→`inconclusive`) |
+
+**Store delta:** fix_events 382→385 (**live 0→3**), run_violations **0→4**, fix_recipes entries 142→145 (added `test/nangate45 timing/severe` → `period_relax` red=0.66, plus honest no-lever records for `eth/drc/METAL5_ANTENNA` and `axi/lvs/real_connectivity`).
+
+**Bug found + fixed (the pilot's payoff):** `ingest_run._normalize_verdict` only mapped the shell's legacy verdict strings, so the **canonical** verdicts `win`/`no_change`/`regression` emitted directly by `check_timing.py --journal` (Task 7) fell through to `inconclusive` — silently dropping the learning signal from every timing-journal episode. Backfill never exposed this (it writes canonical verdicts straight into `fix_events`); only the *live* timing path did. Fix: `_VERDICT_MAP` now passes canonical strings through idempotently (+ regression test `test_normalize_verdict_passes_through_canonical_strings`; doc note in `references/signoff-fixing.md` "Verdict vocabulary"). This is a 9th divergence-class finding, consistent with the verdict-vocabulary single-source invariant (Task 4).
+
+**Non-bugs ruled out during the pilot:** (a) `extract_ppa` *does* store final WNS/TNS from `6_report.json` under `summary.timing.*`; an early "None" was an ad-hoc-script wrong-key error, not a code bug. (b) `repair_run_status` remains the documented near-no-op.
+
+**Carried to the Task 18 checkpoint (open follow-ups, NOT blockers):**
+- Family-inference granularity differs between backfill and live ingest (backfill maps `axi2axilite`→`axi`; live ingest keeps `axi2axilite`). Cosmetic now; tighten `infer_family` for consistency *before* the campaign aggregates recipes.
+- `run_violations.timing_tier` for the iccad2015 re-run reads a stale `timing_check.json` (`severe`) while `wns_ns` is fresh (−1.526). Snapshot-freshness nit; does not affect recipes (those derive from Tier-2 trajectories).
+- iccad2015 needs a longer period (or retiming) for full closure — a campaign action, not pilot scope.
