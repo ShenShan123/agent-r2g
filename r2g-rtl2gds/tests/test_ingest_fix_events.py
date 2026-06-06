@@ -1,6 +1,9 @@
 """Tests for fix-event ingestion + the three new knowledge tables."""
 from __future__ import annotations
 
+import json as _json
+
+import ingest_run
 import knowledge_db
 
 
@@ -34,4 +37,71 @@ def test_fix_events_unique_constraint(tmp_knowledge_dir):
     conn.commit()
     n = conn.execute("SELECT COUNT(*) FROM fix_events").fetchone()[0]
     assert n == 1
+    conn.close()
+
+
+def _mk_project(tmp_path, name="demo", platform="nangate45", drc_status="clean",
+                fix_log=None):
+    proj = tmp_path / name
+    (proj / "constraints").mkdir(parents=True)
+    (proj / "reports").mkdir()
+    (proj / "constraints" / "config.mk").write_text(
+        f"export DESIGN_NAME = {name}\nexport PLATFORM = {platform}\n")
+    (proj / "reports" / "ppa.json").write_text(_json.dumps({"summary": {}, "geometry": {}}))
+    (proj / "reports" / "drc.json").write_text(_json.dumps(
+        {"status": drc_status, "total_violations": 0, "categories": {}}))
+    if fix_log is not None:
+        (proj / "reports" / "fix_log.jsonl").write_text(
+            "\n".join(_json.dumps(r) for r in fix_log) + "\n")
+    return proj
+
+
+def test_ingest_reads_fix_log_into_fix_events(tmp_path, tmp_knowledge_dir):
+    fix_log = [
+        {"check": "drc", "iter": 1, "strategy": "antenna_density_relief",
+         "before": "147", "after": "147", "verdict": "no_improvement",
+         "from_stage": "floorplan", "fix_session_id": "sessA",
+         "violation_class": "M3_ANTENNA",
+         "before_categories": _json.dumps({"M3_ANTENNA": {"count": 147}}),
+         "cumulative_config": _json.dumps({"CORE_UTILIZATION": "15"}),
+         "ts": "2026-06-05T00:00:00Z"},
+        {"check": "drc", "iter": 2, "strategy": "antenna_diode_repair",
+         "before": "147", "after": "0", "verdict": "cleared",
+         "from_stage": "route", "fix_session_id": "sessA",
+         "violation_class": "M3_ANTENNA",
+         "before_categories": _json.dumps({"M3_ANTENNA": {"count": 147}}),
+         "cumulative_config": _json.dumps({"SKIP_ANTENNA_REPAIR": "1"}),
+         "ts": "2026-06-05T00:01:00Z"},
+    ]
+    proj = _mk_project(tmp_path, fix_log=fix_log)
+    conn = knowledge_db.connect(tmp_knowledge_dir / "runs.sqlite")
+    knowledge_db.ensure_schema(conn, schema_path=tmp_knowledge_dir / "schema.sql")
+    ingest_run.ingest(proj, conn,
+                      families_path=tmp_knowledge_dir / "families.json")
+
+    rows = list(conn.execute(
+        "SELECT iter, strategy, verdict, violation_class, check_type, "
+        "from_stage, design_family, platform FROM fix_events ORDER BY iter"))
+    assert len(rows) == 2
+    assert rows[0][2] == "no_change"      # 'no_improvement' normalized
+    assert rows[1][2] == "cleared"
+    assert rows[1][3] == "M3_ANTENNA"
+    assert rows[1][4] == "drc" and rows[1][5] == "route"
+    assert rows[0][6] == "demo" and rows[0][7] == "nangate45"  # identity backfilled
+
+    # idempotent re-ingest: no duplicate fix_events
+    ingest_run.ingest(proj, conn, families_path=tmp_knowledge_dir / "families.json")
+    assert conn.execute("SELECT COUNT(*) FROM fix_events").fetchone()[0] == 2
+    conn.close()
+
+
+def test_ingest_writes_run_violations_snapshot(tmp_path, tmp_knowledge_dir):
+    proj = _mk_project(tmp_path, drc_status="clean")
+    conn = knowledge_db.connect(tmp_knowledge_dir / "runs.sqlite")
+    knowledge_db.ensure_schema(conn, schema_path=tmp_knowledge_dir / "schema.sql")
+    run_id = ingest_run.ingest(proj, conn,
+                               families_path=tmp_knowledge_dir / "families.json")
+    rv = conn.execute("SELECT run_id, drc_status, design_family FROM run_violations "
+                      "WHERE run_id=?", (run_id,)).fetchone()
+    assert rv is not None and rv[1] == "clean" and rv[2] == "demo"
     conn.close()

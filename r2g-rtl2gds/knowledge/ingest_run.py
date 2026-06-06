@@ -76,6 +76,70 @@ def _read_stage_log(path: Path) -> list[dict[str, Any]]:
     return entries
 
 
+# Map the shell's legacy verdict strings to the canonical fix verdict vocabulary.
+_VERDICT_MAP = {"cleared": "cleared", "applied": "win", "no_improvement": "no_change"}
+
+
+def _normalize_verdict(raw: str | None, before: Any, after: Any) -> str:
+    if raw in _VERDICT_MAP:
+        v = _VERDICT_MAP[raw]
+        # 'applied' with a worse count is a regression, not a win.
+        if v == "win" and before is not None and after is not None and after > before:
+            return "regression"
+        if v == "win" and before is not None and after is not None and after == before:
+            return "no_change"
+        return v
+    return "inconclusive"   # stop_* / apply_failed / rerun_failed_* / unknown
+
+
+def _read_fix_log(project: Path) -> list[dict[str, Any]]:
+    return _read_stage_log(project / "reports" / "fix_log.jsonl")
+
+
+def _ingest_fix_events(conn: sqlite3.Connection, project: Path,
+                       design_name: str, design_family: str, platform: str) -> int:
+    """Read reports/fix_log.jsonl into fix_events (idempotent via UNIQUE)."""
+    rows = _read_fix_log(project)
+    n = 0
+    for r in rows:
+        sid = r.get("fix_session_id")
+        if not sid:
+            continue
+        before = _to_float(r.get("before"))
+        after = _to_float(r.get("after"))
+        conn.execute(
+            "INSERT OR IGNORE INTO fix_events "
+            "(fix_session_id, project_path, design_name, design_family, platform, "
+            " check_type, violation_class, iter, strategy, from_stage, "
+            " before_count, after_count, before_categories_json, after_categories_json, "
+            " before_status, after_status, verdict, cumulative_config_json, ts, provenance) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (sid, str(project.resolve()), design_name, design_family, platform,
+             r.get("check"), r.get("violation_class"), _to_int(r.get("iter")),
+             r.get("strategy"), r.get("from_stage"), before, after,
+             r.get("before_categories"), r.get("after_categories"),
+             r.get("before_status"), r.get("after_status"),
+             _normalize_verdict(r.get("verdict"), before, after),
+             r.get("cumulative_config"), r.get("ts"), "live"))
+        n += 1
+    return n
+
+
+def _write_run_violations(conn: sqlite3.Connection, run_id: str,
+                          design_family: str, platform: str,
+                          drc: dict[str, Any], lvs: dict[str, Any],
+                          tcheck: dict[str, Any], wns: Any) -> None:
+    conn.execute(
+        "INSERT OR REPLACE INTO run_violations "
+        "(run_id, design_family, platform, drc_status, drc_categories_json, "
+        " lvs_status, lvs_mismatch_class, timing_tier, wns_ns, snapshot_ts) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?)",
+        (run_id, design_family, platform, drc.get("status"),
+         json.dumps(drc.get("categories") or {}, sort_keys=True),
+         lvs.get("status"), lvs.get("mismatch_class"), tcheck.get("tier"), wns,
+         _dt.datetime.utcnow().isoformat(timespec="seconds") + "Z"))
+
+
 # orfs_status is intentionally a FAITHFUL record of backend/stage_log.jsonl:
 # it returns 'pass' only when all six stages appear there, and does NOT infer
 # completion from signoff (a clean GDS implies finish ran, but we don't
@@ -348,6 +412,9 @@ def ingest(project: Path,
             "VALUES (?, ?, ?, ?)",
             (run_id, fail_stage, f"orfs-fail-{fail_stage}", None),
         )
+    _ingest_fix_events(conn, project, design_name, design_family, platform)
+    _write_run_violations(conn, run_id, design_family, platform, drc, lvs, tcheck,
+                          _to_float(timing.get("setup_wns")))
     _record_lineage(conn, run_id, design_name, platform, cfg, orfs_status)
     conn.commit()
     return run_id
