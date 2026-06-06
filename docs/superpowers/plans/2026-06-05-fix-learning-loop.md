@@ -1821,3 +1821,26 @@ Prove capture→learn→improved-suggestion end-to-end on one design per case ty
 **Placeholders:** Tasks 8-11 intentionally use "read first, then implement" because those files were not read verbatim during planning — each still carries a concrete failing test and the exact helper to add. All other tasks have complete code.
 
 **Type consistency:** verdict vocabulary (`cleared|win|no_change|regression|inconclusive`) is defined once (Task 4 `_normalize_verdict`) and used in Tasks 5,7,12. `rank_strategies(recipe_entry, static_order)` signature is identical in Tasks 2,6,8. `fix_recipes[check][violation_class] = {"strategies": {...}, "n_sessions": int}` shape matches across Tasks 5,6,8. `build_plan(..., recipes=None)` matches Task 6 test + caller.
+
+---
+
+## Implementation Log — 2026-06-06 (branch `feat/fix-learning-loop`, off `main` e2164bb)
+
+**Status:** Part A (the mechanism, Tasks 0–15) is fully implemented and TDD-green — full suite **373 passed / 8 skipped** (baseline was 331/8; **+42 new tests**, zero regressions). Part B **Task 16** (backfill + repair + first learn) ran locally. **Tasks 17–20** (pilot + campaign — real EDA flows / large compute) are paused at the **Task 18** checkpoint pending user go/no-go.
+
+**Commits (oldest→newest):** `cffb3b2` spec+plan · `1131b9a` track store (D14) · `d970732` T1 schema · `67e70c4` T2 fix_model · `c89c7c3` T2B helpers · `431a3fd` T3 fix_signoff · `0e51713` T7 check_timing · `352183e` T12 backfill · `d62757a` T13 repair · `fe621d5` T4 ingest · `314b81a` T5 learn · `aa7415f` T5B manage · `4748210` T6 diagnose-rank · `0b4cfe0` T8 analyze-rank · `13dc2f0` T9 lineage fix-view · `40dbf47` T10 eval arm · `a73c066` T11 mine fix-candidates · `6b4e98f` T14 docs · `0bcec8f` Task 16 store.
+
+**Divergences from the as-written plan** (each was required to make the plan's own tests pass, or to match real data):
+1. **T2B `_bucket()`:** `math.floor`→`round` (the floor band-edge artifact put 14 and 15 in adjacent bands, breaking the within-tolerance merge test).
+2. **T3 `_log_iter()`:** the plan re-read `reports/<check>.json` at log time, but `_run_extract` overwrites it with the post-fix *clean* report first → `before_categories`/`violation_class` would be empty. Added a `_snapshot()` taken at iteration start (pre-fix) and passed into `_log_iter`. Also: `$DIAGNOSE`/`$EXTRACT_*` are now invoked directly (their real files are `+x` with `#!/usr/bin/env python3` shebangs) instead of `python3 $DIAGNOSE`, because the plan's verbatim test stubs are bash scripts.
+3. **T7:** `check_timing.py main()` uses manual `sys.argv` parsing, not argparse; `--journal` is handled as the first statement in `main()`.
+4. **T8:** `analyze()` proposals are dicts keyed by `"parameter"`, not strategy-id strings; `rank_proposals()` was added as a standalone helper (the plan test calls it directly) and deliberately **not** wired into `analyze()` (would change existing output ordering).
+5. **T9:** `_fix_effectiveness` guards a missing `fix_trajectories` table (mode=ro cannot `CREATE`); the existing `test_build_lineage_view` exact-key-set assertion was updated to include the additive `"fix_effectiveness"` key.
+6. **T10:** no DB column added — `eval_arm` is encoded inside the existing `winning_config_json` field; a `summarize-fix` CLI subcommand was added.
+7. **T12:** real `_batch` record shapes differ from the plan's invented fixture (`antenna_fix`: `{design,inst,status,before,after,wall_s}`; `beol_drc`: `{…,violations}` — no before-count; `retry/recover/orfs_retry`: `{…,orfs,from_stage?}` — no counts). The parser + tests were rewritten against the real shapes. Synthetic strategy labels: `beol_only_drc`, `rerun_from_stage`, `antenna_diode_repair`.
+8. **T5/learn():** added `knowledge_db.ensure_schema(conn)` at entry so legacy DBs lacking the new tables don't crash; removed a now-dead `contextlib` import.
+
+**Findings carried to the checkpoint:**
+- **`repair_run_status` is a near-no-op on the current corpus** (partial 747→749, unknown 3→1). Real `stage_log.jsonl` stores integer exit codes (`"status": 0`), which `_derive_orfs_status` correctly does **not** treat as `"pass"`, and `knowledge_db.is_success` already credits signoff-positive partials to the learner. So the repair is a faithful no-invent reconciliation, **not** a mass `partial→pass` flip. (Possible follow-up: a reports-based status reconciler, if operators want clean partials shown as `pass` in `orfs_status`.)
+- **Task 16 result:** 382 fix_events (drc 267 cleared / 1 win; orfs 70 cleared / 44 no_change) → 337 resolved + 45 abandoned trajectories → **122 family/platform `fix_recipes` entries** across 130 families. The read-only `fix_effectiveness` projection renders 142 groups.
+- **Minor backfill data-quality:** a few `recover_pass` rows carry `platform=None` and a timeout value (e.g. `'14400'`) as `violation_class`. Cosmetic; affects only backfilled rows (the live loop records clean values). Candidate follow-up: tighten the backfill `from_stage`/`platform` mapping.

@@ -2,7 +2,15 @@
 
 **Date:** 2026-06-05
 **Skill:** `r2g-rtl2gds`
-**Status:** Design approved (brainstorming); implementation plan to follow.
+**Status:** Design approved (brainstorming); implementation plan executed.
+**Implementation (2026-06-06, branch `feat/fix-learning-loop`):** Part A (mechanism, Tasks 0–15)
+complete and TDD-green (full suite 373 passed / 8 skipped, +42 tests); Part B Task 16
+(backfill + repair + first learn) run locally — 382 fix_events → 337 resolved + 45 abandoned
+trajectories → 122 fix_recipes entries. Tasks 17–20 (pilot + corpus campaign, real EDA flows)
+paused at the Task 18 go/no-go checkpoint. See the implementation log at the end of
+`docs/superpowers/plans/2026-06-05-fix-learning-loop.md` for commit hashes and the 8 plan
+divergences (e.g. T3 pre-fix category snapshot, T8 standalone `rank_proposals`, real `_batch`
+record shapes, and the `repair_run_status` near-no-op finding).
 **Authors:** user5 + agent discussion team (learning-loop mapper `acc45c02f5421d3c4`,
 violation-fixing mapper `a498343376a94aa6b`, corpus surveyor `a580e2031dfae07d0`,
 self-evolution-surface mapper `a784d714f324ac04f`), synthesized and source-verified by the
