@@ -213,7 +213,45 @@ def format_timing_summary(wns, tns, violation_count, clock_period,
     return '  ' + ', '.join(parts)
 
 
+def _journal(project, before_path, after_path, strategy):
+    """Append a check=timing fix_event to <project>/reports/fix_log.jsonl."""
+    import hashlib, time
+    b = json.loads(Path(before_path).read_text(encoding="utf-8"))
+    a = json.loads(Path(after_path).read_text(encoding="utf-8"))
+    before_tier = b.get("tier")
+    after_tier = a.get("tier")
+    sid = hashlib.sha1((str(project) + "timing" + str(time.time())).encode()).hexdigest()[:16]
+    verdict = "cleared" if after_tier in ("clean", "minor") else (
+        "win" if abs(a.get("wns_ns", 0)) < abs(b.get("wns_ns", 0)) else "no_change")
+    row = {
+        "check": "timing", "iter": 1, "strategy": strategy,
+        "before": abs(b.get("wns_ns")) if b.get("wns_ns") is not None else None,
+        "after": abs(a.get("wns_ns")) if a.get("wns_ns") is not None else None,
+        "verdict": verdict, "from_stage": None, "fix_session_id": sid,
+        "violation_class": before_tier, "after_status": after_tier,
+        "before_categories": json.dumps({"tier": before_tier}),
+        "cumulative_config": json.dumps({"clock_period_ns": a.get("clock_period_ns")}),
+        "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    }
+    log = Path(project) / "reports" / "fix_log.jsonl"
+    log.parent.mkdir(parents=True, exist_ok=True)
+    with log.open("a") as f:
+        f.write(json.dumps(row) + "\n")
+
+
 def main():
+    if '--journal' in sys.argv:
+        import argparse
+        parser = argparse.ArgumentParser(prog='check_timing.py --journal')
+        parser.add_argument('--journal', action='store_true')
+        parser.add_argument('--project', required=True)
+        parser.add_argument('--before', required=True)
+        parser.add_argument('--after', required=True)
+        parser.add_argument('--strategy', required=True)
+        args = parser.parse_args()
+        _journal(args.project, args.before, args.after, args.strategy)
+        return 0
+
     if len(sys.argv) < 2:
         print('usage: check_timing.py <project-dir> [--wns-threshold <ns>] [--tns-threshold <ns>]',
               file=sys.stderr)
