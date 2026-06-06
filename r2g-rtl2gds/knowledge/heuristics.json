@@ -1,0 +1,1784 @@
+{
+  "generated_at": "2026-06-04T15:27:08Z",
+  "source_run_count": 750,
+  "min_successful_runs_required": 3,
+  "families": {
+    "execute": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 4,
+          "success_count": 3,
+          "success_rate": 0.75,
+          "core_utilization": {
+            "min_safe": 15.0,
+            "max_safe": 20.0,
+            "median": 20.0
+          },
+          "place_density_lb_addon": {
+            "min_safe": 0.2,
+            "max_safe": 0.2,
+            "median": 0.2
+          },
+          "typical_cell_count": 4408,
+          "p90_elapsed_s": 820.0,
+          "closing_period": {
+            "min": 3.06149,
+            "p10": 3.06149,
+            "median": 4.9565,
+            "n": 3
+          },
+          "slack_deterioration": {
+            "d_fp_pl": {
+              "ns_p90": 0.3810500000000001,
+              "pct_p90": 0.038105000000000014
+            },
+            "d_pl_fin": {
+              "ns_p90": -0.009780000000000122,
+              "pct_p90": -0.0009780000000000123
+            },
+            "n": 3
+          }
+        }
+      }
+    },
+    "rv32i": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 8,
+          "success_count": 7,
+          "success_rate": 0.875,
+          "core_utilization": {
+            "min_safe": 20.0,
+            "max_safe": 25.0,
+            "median": 20.0
+          },
+          "place_density_lb_addon": {
+            "min_safe": 0.2,
+            "max_safe": 0.2,
+            "median": 0.2
+          },
+          "typical_cell_count": 3310,
+          "p90_elapsed_s": 595.0,
+          "closing_period": {
+            "min": 2.30617,
+            "p10": 2.6219,
+            "median": 4.07696,
+            "n": 7
+          },
+          "slack_deterioration": {
+            "d_fp_pl": {
+              "ns_p90": 0.40134000000000025,
+              "pct_p90": 0.040134000000000024
+            },
+            "d_pl_fin": {
+              "ns_p90": -0.001100000000000101,
+              "pct_p90": -0.00011000000000001009
+            },
+            "n": 4
+          }
+        }
+      }
+    },
+    "i2c": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 16,
+          "success_count": 14,
+          "success_rate": 0.875,
+          "core_utilization": {
+            "min_safe": 25.0,
+            "max_safe": 25.0,
+            "median": 25.0
+          },
+          "place_density_lb_addon": {
+            "min_safe": 0.2,
+            "max_safe": 0.2,
+            "median": 0.2
+          },
+          "typical_cell_count": 762,
+          "p90_elapsed_s": 843.0,
+          "closing_period": {
+            "min": 2.11794,
+            "p10": 2.1868299999999996,
+            "median": 2.2671099999999997,
+            "n": 11
+          },
+          "slack_deterioration": {
+            "d_fp_pl": {
+              "ns_p90": 0.09312000000000076,
+              "pct_p90": 0.009312000000000075
+            },
+            "d_pl_fin": {
+              "ns_p90": 0.00387000000000004,
+              "pct_p90": 0.000387000000000004
+            },
+            "n": 11
+          }
+        }
+      }
+    },
+    "spi": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 16,
+          "success_count": 14,
+          "success_rate": 0.875,
+          "core_utilization": {
+            "min_safe": 20.0,
+            "max_safe": 25.0,
+            "median": 22.5
+          },
+          "place_density_lb_addon": {
+            "min_safe": 0.2,
+            "max_safe": 0.2,
+            "median": 0.2
+          },
+          "typical_cell_count": 377,
+          "p90_elapsed_s": 735.0,
+          "closing_period": {
+            "min": 2.1872499999999997,
+            "p10": 2.19008,
+            "median": 2.24258,
+            "n": 14
+          },
+          "slack_deterioration": {
+            "d_fp_pl": {
+              "ns_p90": 0.14827000000000012,
+              "pct_p90": 0.014827000000000012
+            },
+            "d_pl_fin": {
+              "ns_p90": 0.07518000000000047,
+              "pct_p90": 0.007518000000000047
+            },
+            "n": 14
+          }
+        }
+      }
+    },
+    "riscv32i": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 10,
+          "success_count": 7,
+          "success_rate": 0.7,
+          "core_utilization": {
+            "min_safe": 10.0,
+            "max_safe": 25.0,
+            "median": 17.5
+          },
+          "place_density_lb_addon": {
+            "min_safe": 0.2,
+            "max_safe": 0.2,
+            "median": 0.2
+          },
+          "typical_cell_count": 2509,
+          "p90_elapsed_s": 1062.0,
+          "closing_period": {
+            "min": 3.5187999999999997,
+            "p10": 4.16561,
+            "median": 4.30279,
+            "n": 7
+          },
+          "slack_deterioration": {
+            "d_fp_pl": {
+              "ns_p90": 0.62608,
+              "pct_p90": 0.062608
+            },
+            "d_pl_fin": {
+              "ns_p90": 0.006899999999999906,
+              "pct_p90": 0.0006899999999999906
+            },
+            "n": 7
+          }
+        }
+      }
+    },
+    "can": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 9,
+          "success_count": 8,
+          "success_rate": 0.8888888888888888,
+          "core_utilization": {
+            "min_safe": 20.0,
+            "max_safe": 20.0,
+            "median": 20.0
+          },
+          "place_density_lb_addon": {
+            "min_safe": 0.2,
+            "max_safe": 0.2,
+            "median": 0.2
+          },
+          "typical_cell_count": 1330,
+          "p90_elapsed_s": 617.0,
+          "closing_period": {
+            "min": 2.17082,
+            "p10": 2.2888599999999997,
+            "median": 3.250795,
+            "n": 8
+          },
+          "slack_deterioration": {
+            "d_fp_pl": {
+              "ns_p90": 0.20221999999999962,
+              "pct_p90": 0.020221999999999962
+            },
+            "d_pl_fin": {
+              "ns_p90": -0.0020699999999997942,
+              "pct_p90": -0.00020699999999997942
+            },
+            "n": 8
+          }
+        }
+      }
+    },
+    "eth": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 17,
+          "success_count": 9,
+          "success_rate": 0.5294117647058824,
+          "core_utilization": {
+            "min_safe": 25.0,
+            "max_safe": 25.0,
+            "median": 25.0
+          },
+          "place_density_lb_addon": {
+            "min_safe": 0.2,
+            "max_safe": 0.25,
+            "median": 0.2
+          },
+          "typical_cell_count": 1778,
+          "p90_elapsed_s": 775.0,
+          "closing_period": {
+            "min": 2.2734300000000003,
+            "p10": 2.38213,
+            "median": 2.5056599999999998,
+            "n": 7
+          },
+          "slack_deterioration": {
+            "d_fp_pl": {
+              "ns_p90": 0.22060999999999975,
+              "pct_p90": 0.022060999999999976
+            },
+            "d_pl_fin": {
+              "ns_p90": -0.004329999999999501,
+              "pct_p90": -0.0004329999999999501
+            },
+            "n": 6
+          }
+        }
+      }
+    },
+    "ip": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 12,
+          "success_count": 8,
+          "success_rate": 0.6666666666666666,
+          "core_utilization": {
+            "min_safe": 25.0,
+            "max_safe": 25.0,
+            "median": 25.0
+          },
+          "place_density_lb_addon": {
+            "min_safe": 0.2,
+            "max_safe": 0.2,
+            "median": 0.2
+          },
+          "typical_cell_count": 4312,
+          "p90_elapsed_s": 916.0,
+          "closing_period": {
+            "min": 2.4674199999999997,
+            "p10": 2.4680400000000002,
+            "median": 3.42841,
+            "n": 8
+          },
+          "slack_deterioration": {
+            "d_fp_pl": {
+              "ns_p90": 0.41422000000000025,
+              "pct_p90": 0.04142200000000003
+            },
+            "d_pl_fin": {
+              "ns_p90": -0.002080000000000304,
+              "pct_p90": -0.00020800000000003037
+            },
+            "n": 8
+          }
+        }
+      }
+    },
+    "udp": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 12,
+          "success_count": 6,
+          "success_rate": 0.5,
+          "core_utilization": {
+            "min_safe": 20.0,
+            "max_safe": 20.0,
+            "median": 20.0
+          },
+          "place_density_lb_addon": {
+            "min_safe": 0.2,
+            "max_safe": 0.25,
+            "median": 0.2
+          },
+          "typical_cell_count": 4280,
+          "p90_elapsed_s": 770.0,
+          "closing_period": {
+            "min": 2.44011,
+            "p10": 2.44011,
+            "median": 2.6215949999999997,
+            "n": 6
+          },
+          "slack_deterioration": {
+            "d_fp_pl": {
+              "ns_p90": 0.5007599999999996,
+              "pct_p90": 0.05007599999999997
+            },
+            "d_pl_fin": {
+              "ns_p90": -0.008169999999999789,
+              "pct_p90": -0.0008169999999999789
+            },
+            "n": 6
+          }
+        }
+      }
+    },
+    "lfsr": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 6,
+          "success_count": 4,
+          "success_rate": 0.6666666666666666,
+          "place_density_lb_addon": {
+            "min_safe": 0.2,
+            "max_safe": 0.2,
+            "median": 0.2
+          },
+          "typical_cell_count": 362,
+          "p90_elapsed_s": 1164.0,
+          "closing_period": {
+            "min": 2.2469099999999997,
+            "p10": 2.2469099999999997,
+            "median": 2.2973749999999997,
+            "n": 4
+          },
+          "slack_deterioration": {
+            "d_fp_pl": {
+              "ns_p90": 0.16267999999999994,
+              "pct_p90": 0.016267999999999994
+            },
+            "d_pl_fin": {
+              "ns_p90": -0.00451000000000068,
+              "pct_p90": -0.000451000000000068
+            },
+            "n": 4
+          }
+        }
+      }
+    },
+    "aes_xcrypt": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 7,
+          "success_count": 7,
+          "success_rate": 1.0,
+          "core_utilization": {
+            "min_safe": 15.0,
+            "max_safe": 25.0,
+            "median": 15.0
+          },
+          "place_density_lb_addon": {
+            "min_safe": 0.2,
+            "max_safe": 0.2,
+            "median": 0.2
+          },
+          "typical_cell_count": 8297,
+          "p90_elapsed_s": 1633.0,
+          "closing_period": {
+            "min": 2.45622,
+            "p10": 4.39093,
+            "median": 4.50849,
+            "n": 7
+          },
+          "slack_deterioration": {
+            "d_fp_pl": {
+              "ns_p90": 0.3414899999999994,
+              "pct_p90": 0.03414899999999994
+            },
+            "d_pl_fin": {
+              "ns_p90": 0.008280000000000065,
+              "pct_p90": 0.0008280000000000065
+            },
+            "n": 7
+          }
+        }
+      }
+    },
+    "axis": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 29,
+          "success_count": 24,
+          "success_rate": 0.8275862068965517,
+          "core_utilization": {
+            "min_safe": 25.0,
+            "max_safe": 25.0,
+            "median": 25.0
+          },
+          "place_density_lb_addon": {
+            "min_safe": 0.2,
+            "max_safe": 0.25,
+            "median": 0.2
+          },
+          "typical_cell_count": 578,
+          "p90_elapsed_s": 669.0,
+          "closing_period": {
+            "min": 2.20794,
+            "p10": 2.23562,
+            "median": 2.45736,
+            "n": 24
+          },
+          "slack_deterioration": {
+            "d_fp_pl": {
+              "ns_p90": 0.19284000000000034,
+              "pct_p90": 0.019284000000000034
+            },
+            "d_pl_fin": {
+              "ns_p90": 0.0997899999999996,
+              "pct_p90": 0.00997899999999996
+            },
+            "n": 24
+          }
+        }
+      }
+    },
+    "picorv32": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 5,
+          "success_count": 5,
+          "success_rate": 1.0,
+          "core_utilization": {
+            "min_safe": 25.0,
+            "max_safe": 25.0,
+            "median": 25.0
+          },
+          "place_density_lb_addon": {
+            "min_safe": 0.2,
+            "max_safe": 0.2,
+            "median": 0.2
+          },
+          "typical_cell_count": 14957,
+          "p90_elapsed_s": 2363.0,
+          "closing_period": {
+            "min": 2.5880599999999996,
+            "p10": 2.5880599999999996,
+            "median": 3.5454399999999997,
+            "n": 4
+          },
+          "slack_deterioration": {
+            "d_fp_pl": {
+              "ns_p90": 0.3958000000000004,
+              "pct_p90": 0.03958000000000004
+            },
+            "d_pl_fin": {
+              "ns_p90": 0.1870099999999999,
+              "pct_p90": 0.01870099999999999
+            },
+            "n": 4
+          }
+        }
+      }
+    },
+    "axi": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 23,
+          "success_count": 23,
+          "success_rate": 1.0,
+          "core_utilization": {
+            "min_safe": 10.0,
+            "max_safe": 25.0,
+            "median": 25.0
+          },
+          "place_density_lb_addon": {
+            "min_safe": 0.2,
+            "max_safe": 0.2,
+            "median": 0.2
+          },
+          "typical_cell_count": 2205,
+          "p90_elapsed_s": 1658.0,
+          "closing_period": {
+            "min": 2.2749699999999997,
+            "p10": 2.31879,
+            "median": 2.4754199999999997,
+            "n": 23
+          },
+          "slack_deterioration": {
+            "d_fp_pl": {
+              "ns_p90": 0.3526699999999998,
+              "pct_p90": 0.03526699999999998
+            },
+            "d_pl_fin": {
+              "ns_p90": 2.9999999999752447e-05,
+              "pct_p90": 2.9999999999752447e-06
+            },
+            "n": 23
+          }
+        }
+      }
+    },
+    "bm": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 3,
+          "success_count": 3,
+          "success_rate": 1.0,
+          "place_density_lb_addon": {
+            "min_safe": 0.2,
+            "max_safe": 0.2,
+            "median": 0.2
+          },
+          "typical_cell_count": 496,
+          "p90_elapsed_s": 599.0,
+          "closing_period": {
+            "min": 2.3201099999999997,
+            "p10": 2.3201099999999997,
+            "median": 4.3092,
+            "n": 3
+          },
+          "slack_deterioration": {
+            "d_fp_pl": {
+              "ns_p90": 0.13484000000000052,
+              "pct_p90": 0.013484000000000052
+            },
+            "d_pl_fin": {
+              "ns_p90": -0.0003100000000006986,
+              "pct_p90": -3.100000000006986e-05
+            },
+            "n": 3
+          }
+        }
+      }
+    },
+    "top": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 63,
+          "success_count": 53,
+          "success_rate": 0.8412698412698413,
+          "core_utilization": {
+            "min_safe": 10.0,
+            "max_safe": 25.0,
+            "median": 25.0
+          },
+          "place_density_lb_addon": {
+            "min_safe": 0.2,
+            "max_safe": 0.2,
+            "median": 0.2
+          },
+          "typical_cell_count": 1536,
+          "p90_elapsed_s": 1769.0,
+          "closing_period": {
+            "min": 2.18314,
+            "p10": 2.45188,
+            "median": 4.70289,
+            "n": 53
+          },
+          "slack_deterioration": {
+            "d_fp_pl": {
+              "ns_p90": 0.3151099999999998,
+              "pct_p90": 0.031510999999999977
+            },
+            "d_pl_fin": {
+              "ns_p90": 0.02151000000000014,
+              "pct_p90": 0.002151000000000014
+            },
+            "n": 53
+          }
+        }
+      }
+    },
+    "cf": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 5,
+          "success_count": 5,
+          "success_rate": 1.0,
+          "core_utilization": {
+            "min_safe": 20.0,
+            "max_safe": 25.0,
+            "median": 25.0
+          },
+          "place_density_lb_addon": {
+            "min_safe": 0.2,
+            "max_safe": 0.2,
+            "median": 0.2
+          },
+          "typical_cell_count": 20925,
+          "p90_elapsed_s": 3011.0,
+          "closing_period": {
+            "min": 2.5282,
+            "p10": 2.5282,
+            "median": 2.79549,
+            "n": 5
+          },
+          "slack_deterioration": {
+            "d_fp_pl": {
+              "ns_p90": 0.7907500000000001,
+              "pct_p90": 0.079075
+            },
+            "d_pl_fin": {
+              "ns_p90": -0.11460999999999988,
+              "pct_p90": -0.011460999999999989
+            },
+            "n": 5
+          }
+        }
+      }
+    },
+    "axil": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 16,
+          "success_count": 16,
+          "success_rate": 1.0,
+          "core_utilization": {
+            "min_safe": 25.0,
+            "max_safe": 25.0,
+            "median": 25.0
+          },
+          "place_density_lb_addon": {
+            "min_safe": 0.2,
+            "max_safe": 0.2,
+            "median": 0.2
+          },
+          "typical_cell_count": 802,
+          "p90_elapsed_s": 1738.0,
+          "closing_period": {
+            "min": 2.2234999999999996,
+            "p10": 2.2295,
+            "median": 2.32214,
+            "n": 16
+          },
+          "slack_deterioration": {
+            "d_fp_pl": {
+              "ns_p90": 0.28132,
+              "pct_p90": 0.028132
+            },
+            "d_pl_fin": {
+              "ns_p90": 0.21445000000000025,
+              "pct_p90": 0.021445000000000027
+            },
+            "n": 16
+          }
+        }
+      }
+    },
+    "timer": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 3,
+          "success_count": 3,
+          "success_rate": 1.0,
+          "place_density_lb_addon": {
+            "min_safe": 0.2,
+            "max_safe": 0.2,
+            "median": 0.2
+          },
+          "typical_cell_count": 510,
+          "p90_elapsed_s": 591.0,
+          "closing_period": {
+            "min": 2.1895,
+            "p10": 2.1895,
+            "median": 2.28937,
+            "n": 3
+          },
+          "slack_deterioration": {
+            "d_fp_pl": {
+              "ns_p90": 0.08656000000000041,
+              "pct_p90": 0.008656000000000042
+            },
+            "d_pl_fin": {
+              "ns_p90": -0.007310000000000372,
+              "pct_p90": -0.0007310000000000372
+            },
+            "n": 3
+          }
+        }
+      }
+    },
+    "cpu": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 3,
+          "success_count": 3,
+          "success_rate": 1.0,
+          "core_utilization": {
+            "min_safe": 25.0,
+            "max_safe": 25.0,
+            "median": 25.0
+          },
+          "place_density_lb_addon": {
+            "min_safe": 0.2,
+            "max_safe": 0.2,
+            "median": 0.2
+          },
+          "typical_cell_count": 3606,
+          "p90_elapsed_s": 653.0,
+          "closing_period": {
+            "min": 2.5876799999999998,
+            "p10": 2.5876799999999998,
+            "median": 7.464700000000001,
+            "n": 3
+          },
+          "slack_deterioration": {
+            "d_fp_pl": {
+              "ns_p90": 0.3083600000000004,
+              "pct_p90": 0.03083600000000004
+            },
+            "d_pl_fin": {
+              "ns_p90": -0.10897000000000023,
+              "pct_p90": -0.010897000000000023
+            },
+            "n": 3
+          }
+        }
+      }
+    },
+    "sha256": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 8,
+          "success_count": 8,
+          "success_rate": 1.0,
+          "core_utilization": {
+            "min_safe": 15.0,
+            "max_safe": 25.0,
+            "median": 25.0
+          },
+          "place_density_lb_addon": {
+            "min_safe": 0.2,
+            "max_safe": 0.2,
+            "median": 0.2
+          },
+          "typical_cell_count": 12396,
+          "p90_elapsed_s": 1907.0,
+          "closing_period": {
+            "min": 2.6045499999999997,
+            "p10": 2.64658,
+            "median": 3.5862700000000003,
+            "n": 8
+          },
+          "slack_deterioration": {
+            "d_fp_pl": {
+              "ns_p90": 0.5403700000000002,
+              "pct_p90": 0.05403700000000002
+            },
+            "d_pl_fin": {
+              "ns_p90": 0.011270000000000557,
+              "pct_p90": 0.0011270000000000557
+            },
+            "n": 8
+          }
+        }
+      }
+    },
+    "uart": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 12,
+          "success_count": 12,
+          "success_rate": 1.0,
+          "core_utilization": {
+            "min_safe": 25.0,
+            "max_safe": 25.0,
+            "median": 25.0
+          },
+          "place_density_lb_addon": {
+            "min_safe": 0.2,
+            "max_safe": 0.2,
+            "median": 0.2
+          },
+          "typical_cell_count": 698,
+          "p90_elapsed_s": 779.0,
+          "closing_period": {
+            "min": 2.1802200000000003,
+            "p10": 2.18855,
+            "median": 2.2630600000000003,
+            "n": 11
+          },
+          "slack_deterioration": {
+            "d_fp_pl": {
+              "ns_p90": 0.14109000000000016,
+              "pct_p90": 0.014109000000000016
+            },
+            "d_pl_fin": {
+              "ns_p90": 0.10136000000000056,
+              "pct_p90": 0.010136000000000056
+            },
+            "n": 11
+          }
+        }
+      }
+    },
+    "apb": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 7,
+          "success_count": 7,
+          "success_rate": 1.0,
+          "core_utilization": {
+            "min_safe": 10.0,
+            "max_safe": 25.0,
+            "median": 22.5
+          },
+          "place_density_lb_addon": {
+            "min_safe": 0.2,
+            "max_safe": 0.2,
+            "median": 0.2
+          },
+          "typical_cell_count": 1132,
+          "p90_elapsed_s": 1326.0,
+          "closing_period": {
+            "min": 2.51734,
+            "p10": 2.51734,
+            "median": 4.302795,
+            "n": 6
+          },
+          "slack_deterioration": {
+            "d_fp_pl": {
+              "ns_p90": 0.20205999999999946,
+              "pct_p90": 0.020205999999999946
+            },
+            "d_pl_fin": {
+              "ns_p90": 0.0027200000000000557,
+              "pct_p90": 0.0002720000000000056
+            },
+            "n": 6
+          }
+        }
+      }
+    },
+    "cdc": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 3,
+          "success_count": 3,
+          "success_rate": 1.0,
+          "place_density_lb_addon": {
+            "min_safe": 0.2,
+            "max_safe": 0.2,
+            "median": 0.2
+          },
+          "typical_cell_count": 399,
+          "p90_elapsed_s": 660.0
+        }
+      }
+    },
+    "dma": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 6,
+          "success_count": 6,
+          "success_rate": 1.0,
+          "core_utilization": {
+            "min_safe": 20.0,
+            "max_safe": 20.0,
+            "median": 20.0
+          },
+          "place_density_lb_addon": {
+            "min_safe": 0.2,
+            "max_safe": 0.2,
+            "median": 0.2
+          },
+          "typical_cell_count": 559,
+          "p90_elapsed_s": 830.0,
+          "closing_period": {
+            "min": 2.1874000000000002,
+            "p10": 2.1874000000000002,
+            "median": 2.3948500000000004,
+            "n": 6
+          },
+          "slack_deterioration": {
+            "d_fp_pl": {
+              "ns_p90": 0.21321000000000012,
+              "pct_p90": 0.021321000000000014
+            },
+            "d_pl_fin": {
+              "ns_p90": -0.00039999999999995595,
+              "pct_p90": -3.999999999999559e-05
+            },
+            "n": 6
+          }
+        }
+      }
+    },
+    "mem": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 4,
+          "success_count": 4,
+          "success_rate": 1.0,
+          "core_utilization": {
+            "min_safe": 15.0,
+            "max_safe": 15.0,
+            "median": 15.0
+          },
+          "place_density_lb_addon": {
+            "min_safe": 0.2,
+            "max_safe": 0.2,
+            "median": 0.2
+          },
+          "typical_cell_count": 614,
+          "p90_elapsed_s": 598.0,
+          "closing_period": {
+            "min": 2.2782099999999996,
+            "p10": 2.2782099999999996,
+            "median": 4.07076,
+            "n": 3
+          },
+          "slack_deterioration": {
+            "d_fp_pl": {
+              "ns_p90": 0.17656000000000027,
+              "pct_p90": 0.017656000000000026
+            },
+            "d_pl_fin": {
+              "ns_p90": -0.00016000000000016001,
+              "pct_p90": -1.6000000000016e-05
+            },
+            "n": 3
+          }
+        }
+      }
+    },
+    "msrv32": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 3,
+          "success_count": 3,
+          "success_rate": 1.0,
+          "core_utilization": {
+            "min_safe": 20.0,
+            "max_safe": 20.0,
+            "median": 20.0
+          },
+          "place_density_lb_addon": {
+            "min_safe": 0.2,
+            "max_safe": 0.2,
+            "median": 0.2
+          },
+          "typical_cell_count": 337,
+          "p90_elapsed_s": 679.0,
+          "closing_period": {
+            "min": 4.21218,
+            "p10": 4.21218,
+            "median": 4.22741,
+            "n": 3
+          },
+          "slack_deterioration": {
+            "d_fp_pl": {
+              "ns_p90": 0.26905,
+              "pct_p90": 0.026905000000000002
+            },
+            "d_pl_fin": {
+              "ns_p90": 0.002189999999999692,
+              "pct_p90": 0.00021899999999996922
+            },
+            "n": 3
+          }
+        }
+      }
+    },
+    "wb": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 4,
+          "success_count": 4,
+          "success_rate": 1.0,
+          "place_density_lb_addon": {
+            "min_safe": 0.2,
+            "max_safe": 0.2,
+            "median": 0.2
+          },
+          "typical_cell_count": 1064,
+          "p90_elapsed_s": 560.0,
+          "closing_period": {
+            "min": 2.2471500000000004,
+            "p10": 2.2471500000000004,
+            "median": 2.31701,
+            "n": 4
+          },
+          "slack_deterioration": {
+            "d_fp_pl": {
+              "ns_p90": 0.30702999999999925,
+              "pct_p90": 0.030702999999999925
+            },
+            "d_pl_fin": {
+              "ns_p90": -0.018040000000000056,
+              "pct_p90": -0.0018040000000000057
+            },
+            "n": 4
+          }
+        }
+      }
+    },
+    "sha1": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 4,
+          "success_count": 4,
+          "success_rate": 1.0,
+          "core_utilization": {
+            "min_safe": 10.0,
+            "max_safe": 25.0,
+            "median": 25.0
+          },
+          "place_density_lb_addon": {
+            "min_safe": 0.2,
+            "max_safe": 0.2,
+            "median": 0.2
+          },
+          "typical_cell_count": 8932,
+          "p90_elapsed_s": 1677.0,
+          "closing_period": {
+            "min": 2.56569,
+            "p10": 2.56569,
+            "median": 2.62616,
+            "n": 4
+          },
+          "slack_deterioration": {
+            "d_fp_pl": {
+              "ns_p90": 0.5682099999999997,
+              "pct_p90": 0.05682099999999997
+            },
+            "d_pl_fin": {
+              "ns_p90": 0.02057999999999982,
+              "pct_p90": 0.002057999999999982
+            },
+            "n": 4
+          }
+        }
+      }
+    },
+    "diffeq": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 4,
+          "success_count": 4,
+          "success_rate": 1.0,
+          "core_utilization": {
+            "min_safe": 10.0,
+            "max_safe": 10.0,
+            "median": 10.0
+          },
+          "place_density_lb_addon": {
+            "min_safe": 0.2,
+            "max_safe": 0.2,
+            "median": 0.2
+          },
+          "typical_cell_count": 9158,
+          "p90_elapsed_s": 1250.0,
+          "closing_period": {
+            "min": 5.08907,
+            "p10": 5.08907,
+            "median": 5.121335,
+            "n": 4
+          },
+          "slack_deterioration": {
+            "d_fp_pl": {
+              "ns_p90": 0.18940999999999963,
+              "pct_p90": 0.018940999999999965
+            },
+            "d_pl_fin": {
+              "ns_p90": -0.14411999999999914,
+              "pct_p90": -0.014411999999999914
+            },
+            "n": 4
+          }
+        }
+      }
+    },
+    "sv": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 3,
+          "success_count": 3,
+          "success_rate": 1.0,
+          "core_utilization": {
+            "min_safe": 25.0,
+            "max_safe": 25.0,
+            "median": 25.0
+          },
+          "place_density_lb_addon": {
+            "min_safe": 0.2,
+            "max_safe": 0.2,
+            "median": 0.2
+          },
+          "typical_cell_count": 856,
+          "p90_elapsed_s": 566.0,
+          "closing_period": {
+            "min": 2.1722400000000004,
+            "p10": 2.1722400000000004,
+            "median": 2.1722400000000004,
+            "n": 3
+          },
+          "slack_deterioration": {
+            "d_fp_pl": {
+              "ns_p90": 0.02044000000000068,
+              "pct_p90": 0.002044000000000068
+            },
+            "d_pl_fin": {
+              "ns_p90": 0.07969999999999988,
+              "pct_p90": 0.007969999999999988
+            },
+            "n": 3
+          }
+        }
+      }
+    },
+    "twor": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 5,
+          "success_count": 5,
+          "success_rate": 1.0,
+          "core_utilization": {
+            "min_safe": 10.0,
+            "max_safe": 10.0,
+            "median": 10.0
+          },
+          "place_density_lb_addon": {
+            "min_safe": 0.2,
+            "max_safe": 0.2,
+            "median": 0.2
+          },
+          "typical_cell_count": 88,
+          "p90_elapsed_s": 528.0,
+          "closing_period": {
+            "min": 2.38973,
+            "p10": 2.38973,
+            "median": 2.43886,
+            "n": 2
+          },
+          "slack_deterioration": {
+            "d_fp_pl": {
+              "ns_p90": 0.3024300000000002,
+              "pct_p90": 0.03024300000000002
+            },
+            "d_pl_fin": {
+              "ns_p90": -0.11674000000000007,
+              "pct_p90": -0.011674000000000007
+            },
+            "n": 2
+          }
+        }
+      }
+    },
+    "usb": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 6,
+          "success_count": 6,
+          "success_rate": 1.0,
+          "core_utilization": {
+            "min_safe": 25.0,
+            "max_safe": 25.0,
+            "median": 25.0
+          },
+          "place_density_lb_addon": {
+            "min_safe": 0.2,
+            "max_safe": 0.2,
+            "median": 0.2
+          },
+          "typical_cell_count": 1927,
+          "p90_elapsed_s": 992.0,
+          "closing_period": {
+            "min": 2.3549499999999997,
+            "p10": 2.3549499999999997,
+            "median": 4.2263,
+            "n": 5
+          },
+          "slack_deterioration": {
+            "d_fp_pl": {
+              "ns_p90": 0.15287000000000006,
+              "pct_p90": 0.015287000000000005
+            },
+            "d_pl_fin": {
+              "ns_p90": 0.0361899999999995,
+              "pct_p90": 0.00361899999999995
+            },
+            "n": 5
+          }
+        }
+      }
+    },
+    "wbqspiflash": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 3,
+          "success_count": 3,
+          "success_rate": 1.0,
+          "core_utilization": {
+            "min_safe": 25.0,
+            "max_safe": 25.0,
+            "median": 25.0
+          },
+          "place_density_lb_addon": {
+            "min_safe": 0.2,
+            "max_safe": 0.2,
+            "median": 0.2
+          },
+          "typical_cell_count": 3215,
+          "p90_elapsed_s": 1020.0,
+          "closing_period": {
+            "min": 2.5347799999999996,
+            "p10": 2.5347799999999996,
+            "median": 2.5347799999999996,
+            "n": 3
+          },
+          "slack_deterioration": {
+            "d_fp_pl": {
+              "ns_p90": 0.22468999999999983,
+              "pct_p90": 0.022468999999999982
+            },
+            "d_pl_fin": {
+              "ns_p90": -0.1310500000000001,
+              "pct_p90": -0.01310500000000001
+            },
+            "n": 3
+          }
+        }
+      }
+    },
+    "sparc": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 8,
+          "success_count": 8,
+          "success_rate": 1.0,
+          "core_utilization": {
+            "min_safe": 25.0,
+            "max_safe": 25.0,
+            "median": 25.0
+          },
+          "place_density_lb_addon": {
+            "min_safe": 0.2,
+            "max_safe": 0.2,
+            "median": 0.2
+          },
+          "typical_cell_count": 243,
+          "p90_elapsed_s": 549.0,
+          "closing_period": {
+            "min": 2.17856,
+            "p10": 2.2020099999999996,
+            "median": 4.234305,
+            "n": 8
+          },
+          "slack_deterioration": {
+            "d_fp_pl": {
+              "ns_p90": 0.11570000000000036,
+              "pct_p90": 0.011570000000000035
+            },
+            "d_pl_fin": {
+              "ns_p90": -0.0035600000000002296,
+              "pct_p90": -0.00035600000000002296
+            },
+            "n": 8
+          }
+        }
+      }
+    },
+    "multiclock": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 3,
+          "success_count": 3,
+          "success_rate": 1.0,
+          "place_density_lb_addon": {
+            "min_safe": 0.2,
+            "max_safe": 0.2,
+            "median": 0.2
+          },
+          "typical_cell_count": 82,
+          "p90_elapsed_s": 529.0,
+          "closing_period": {
+            "min": 2.04819,
+            "p10": 2.04819,
+            "median": 2.04819,
+            "n": 1
+          },
+          "slack_deterioration": {
+            "d_fp_pl": {
+              "ns_p90": 0.031609999999999694,
+              "pct_p90": 0.0031609999999999694
+            },
+            "d_pl_fin": {
+              "ns_p90": -0.05879999999999974,
+              "pct_p90": -0.005879999999999974
+            },
+            "n": 1
+          }
+        }
+      }
+    },
+    "s953": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 3,
+          "success_count": 3,
+          "success_rate": 1.0,
+          "core_utilization": {
+            "min_safe": 20.0,
+            "max_safe": 20.0,
+            "median": 20.0
+          },
+          "place_density_lb_addon": {
+            "min_safe": 0.2,
+            "max_safe": 0.25,
+            "median": 0.2
+          },
+          "typical_cell_count": 516,
+          "p90_elapsed_s": 544.0,
+          "closing_period": {
+            "min": 2.2546799999999996,
+            "p10": 2.2546799999999996,
+            "median": 2.2546799999999996,
+            "n": 3
+          },
+          "slack_deterioration": {
+            "d_fp_pl": {
+              "ns_p90": 0.08882999999999974,
+              "pct_p90": 0.008882999999999974
+            },
+            "d_pl_fin": {
+              "ns_p90": -0.07167000000000012,
+              "pct_p90": -0.007167000000000012
+            },
+            "n": 3
+          }
+        }
+      }
+    },
+    "s9234": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 3,
+          "success_count": 3,
+          "success_rate": 1.0,
+          "core_utilization": {
+            "min_safe": 20.0,
+            "max_safe": 20.0,
+            "median": 20.0
+          },
+          "place_density_lb_addon": {
+            "min_safe": 0.2,
+            "max_safe": 0.2,
+            "median": 0.2
+          },
+          "typical_cell_count": 965,
+          "p90_elapsed_s": 576.0,
+          "closing_period": {
+            "min": 4.22956,
+            "p10": 4.22956,
+            "median": 4.22956,
+            "n": 3
+          },
+          "slack_deterioration": {
+            "d_fp_pl": {
+              "ns_p90": 0.0856400000000006,
+              "pct_p90": 0.008564000000000061
+            },
+            "d_pl_fin": {
+              "ns_p90": -0.0016300000000004644,
+              "pct_p90": -0.00016300000000004644
+            },
+            "n": 3
+          }
+        }
+      }
+    },
+    "s832": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 3,
+          "success_count": 3,
+          "success_rate": 1.0,
+          "core_utilization": {
+            "min_safe": 20.0,
+            "max_safe": 20.0,
+            "median": 20.0
+          },
+          "place_density_lb_addon": {
+            "min_safe": 0.2,
+            "max_safe": 0.25,
+            "median": 0.2
+          },
+          "typical_cell_count": 432,
+          "p90_elapsed_s": 547.0,
+          "closing_period": {
+            "min": 4.22454,
+            "p10": 4.22454,
+            "median": 4.24565,
+            "n": 3
+          },
+          "slack_deterioration": {
+            "d_fp_pl": {
+              "ns_p90": 0.12129000000000012,
+              "pct_p90": 0.012129000000000011
+            },
+            "d_pl_fin": {
+              "ns_p90": 4.999999999988347e-05,
+              "pct_p90": 4.999999999988347e-06
+            },
+            "n": 3
+          }
+        }
+      }
+    },
+    "s820": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 3,
+          "success_count": 3,
+          "success_rate": 1.0,
+          "core_utilization": {
+            "min_safe": 20.0,
+            "max_safe": 20.0,
+            "median": 20.0
+          },
+          "place_density_lb_addon": {
+            "min_safe": 0.2,
+            "max_safe": 0.25,
+            "median": 0.2
+          },
+          "typical_cell_count": 416,
+          "p90_elapsed_s": 568.0,
+          "closing_period": {
+            "min": 4.23756,
+            "p10": 4.23756,
+            "median": 4.26123,
+            "n": 3
+          },
+          "slack_deterioration": {
+            "d_fp_pl": {
+              "ns_p90": 0.11756999999999973,
+              "pct_p90": 0.011756999999999972
+            },
+            "d_pl_fin": {
+              "ns_p90": 0.0018700000000002603,
+              "pct_p90": 0.00018700000000002604
+            },
+            "n": 3
+          }
+        }
+      }
+    },
+    "s5378": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 3,
+          "success_count": 3,
+          "success_rate": 1.0,
+          "core_utilization": {
+            "min_safe": 25.0,
+            "max_safe": 25.0,
+            "median": 25.0
+          },
+          "place_density_lb_addon": {
+            "min_safe": 0.2,
+            "max_safe": 0.2,
+            "median": 0.2
+          },
+          "typical_cell_count": 1232,
+          "p90_elapsed_s": 695.0,
+          "closing_period": {
+            "min": 4.35498,
+            "p10": 4.35498,
+            "median": 4.35498,
+            "n": 3
+          },
+          "slack_deterioration": {
+            "d_fp_pl": {
+              "ns_p90": 0.12487000000000048,
+              "pct_p90": 0.012487000000000048
+            },
+            "d_pl_fin": {
+              "ns_p90": 0.000560000000000116,
+              "pct_p90": 5.600000000001159e-05
+            },
+            "n": 3
+          }
+        }
+      }
+    },
+    "s38584": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 3,
+          "success_count": 3,
+          "success_rate": 1.0,
+          "core_utilization": {
+            "min_safe": 20.0,
+            "max_safe": 20.0,
+            "median": 20.0
+          },
+          "place_density_lb_addon": {
+            "min_safe": 0.2,
+            "max_safe": 0.2,
+            "median": 0.2
+          },
+          "typical_cell_count": 360,
+          "p90_elapsed_s": 1680.0,
+          "closing_period": {
+            "min": 4.06049,
+            "p10": 4.06049,
+            "median": 4.06049,
+            "n": 3
+          },
+          "slack_deterioration": {
+            "d_fp_pl": {
+              "ns_p90": 0.25607999999999986,
+              "pct_p90": 0.025607999999999985
+            },
+            "d_pl_fin": {
+              "ns_p90": 1.0000000000509601e-05,
+              "pct_p90": 1.0000000000509602e-06
+            },
+            "n": 3
+          }
+        }
+      }
+    },
+    "s15850": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 3,
+          "success_count": 3,
+          "success_rate": 1.0,
+          "core_utilization": {
+            "min_safe": 20.0,
+            "max_safe": 20.0,
+            "median": 20.0
+          },
+          "place_density_lb_addon": {
+            "min_safe": 0.2,
+            "max_safe": 0.2,
+            "median": 0.2
+          },
+          "typical_cell_count": 3305,
+          "p90_elapsed_s": 876.0,
+          "closing_period": {
+            "min": 4.77704,
+            "p10": 4.77704,
+            "median": 4.82254,
+            "n": 3
+          },
+          "slack_deterioration": {
+            "d_fp_pl": {
+              "ns_p90": 0.2771499999999998,
+              "pct_p90": 0.02771499999999998
+            },
+            "d_pl_fin": {
+              "ns_p90": -0.0015799999999996928,
+              "pct_p90": -0.00015799999999996928
+            },
+            "n": 3
+          }
+        }
+      }
+    },
+    "s1423": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 3,
+          "success_count": 3,
+          "success_rate": 1.0,
+          "core_utilization": {
+            "min_safe": 25.0,
+            "max_safe": 25.0,
+            "median": 25.0
+          },
+          "place_density_lb_addon": {
+            "min_safe": 0.2,
+            "max_safe": 0.2,
+            "median": 0.2
+          },
+          "typical_cell_count": 527,
+          "p90_elapsed_s": 595.0,
+          "closing_period": {
+            "min": 5.39704,
+            "p10": 5.39704,
+            "median": 5.42806,
+            "n": 3
+          },
+          "slack_deterioration": {
+            "d_fp_pl": {
+              "ns_p90": 0.15071999999999974,
+              "pct_p90": 0.015071999999999974
+            },
+            "d_pl_fin": {
+              "ns_p90": -0.00527000000000033,
+              "pct_p90": -0.000527000000000033
+            },
+            "n": 3
+          }
+        }
+      }
+    },
+    "s13207": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 3,
+          "success_count": 3,
+          "success_rate": 1.0,
+          "core_utilization": {
+            "min_safe": 20.0,
+            "max_safe": 20.0,
+            "median": 20.0
+          },
+          "place_density_lb_addon": {
+            "min_safe": 0.2,
+            "max_safe": 0.2,
+            "median": 0.2
+          },
+          "typical_cell_count": 2761,
+          "p90_elapsed_s": 806.0,
+          "closing_period": {
+            "min": 4.64297,
+            "p10": 4.64297,
+            "median": 4.65142,
+            "n": 3
+          },
+          "slack_deterioration": {
+            "d_fp_pl": {
+              "ns_p90": 0.22933000000000003,
+              "pct_p90": 0.022933000000000002
+            },
+            "d_pl_fin": {
+              "ns_p90": -0.0041799999999998505,
+              "pct_p90": -0.00041799999999998506
+            },
+            "n": 3
+          }
+        }
+      }
+    },
+    "s1238": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 3,
+          "success_count": 3,
+          "success_rate": 1.0,
+          "core_utilization": {
+            "min_safe": 25.0,
+            "max_safe": 25.0,
+            "median": 25.0
+          },
+          "place_density_lb_addon": {
+            "min_safe": 0.2,
+            "max_safe": 0.2,
+            "median": 0.2
+          },
+          "typical_cell_count": 516,
+          "p90_elapsed_s": 606.0,
+          "closing_period": {
+            "min": 4.56069,
+            "p10": 4.56069,
+            "median": 4.57102,
+            "n": 3
+          },
+          "slack_deterioration": {
+            "d_fp_pl": {
+              "ns_p90": 0.1998300000000004,
+              "pct_p90": 0.01998300000000004
+            },
+            "d_pl_fin": {
+              "ns_p90": 0.003569999999999851,
+              "pct_p90": 0.0003569999999999851
+            },
+            "n": 3
+          }
+        }
+      }
+    },
+    "s1196": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 4,
+          "success_count": 4,
+          "success_rate": 1.0,
+          "core_utilization": {
+            "min_safe": 20.0,
+            "max_safe": 25.0,
+            "median": 25.0
+          },
+          "place_density_lb_addon": {
+            "min_safe": 0.2,
+            "max_safe": 0.25,
+            "median": 0.2
+          },
+          "typical_cell_count": 482,
+          "p90_elapsed_s": 581.0,
+          "closing_period": {
+            "min": 4.49604,
+            "p10": 4.49604,
+            "median": 4.49604,
+            "n": 4
+          },
+          "slack_deterioration": {
+            "d_fp_pl": {
+              "ns_p90": 0.13897000000000048,
+              "pct_p90": 0.013897000000000048
+            },
+            "d_pl_fin": {
+              "ns_p90": 0.0026199999999994006,
+              "pct_p90": 0.00026199999999994007
+            },
+            "n": 4
+          }
+        }
+      }
+    },
+    "test": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 28,
+          "success_count": 28,
+          "success_rate": 1.0,
+          "core_utilization": {
+            "min_safe": 20.0,
+            "max_safe": 20.0,
+            "median": 20.0
+          },
+          "place_density_lb_addon": {
+            "min_safe": 0.2,
+            "max_safe": 0.2,
+            "median": 0.2
+          },
+          "typical_cell_count": 13894,
+          "p90_elapsed_s": 3275.0,
+          "closing_period": {
+            "min": 5.91177,
+            "p10": 6.5602599999999995,
+            "median": 8.251795,
+            "n": 28
+          },
+          "slack_deterioration": {
+            "d_fp_pl": {
+              "ns_p90": 0.42788000000000004,
+              "pct_p90": 0.04278800000000001
+            },
+            "d_pl_fin": {
+              "ns_p90": -0.0023100000000000342,
+              "pct_p90": -0.00023100000000000342
+            },
+            "n": 28
+          }
+        }
+      }
+    }
+  }
+}
