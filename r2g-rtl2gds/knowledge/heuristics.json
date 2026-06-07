@@ -1,6 +1,6 @@
 {
-  "generated_at": "2026-06-06T13:20:09Z",
-  "source_run_count": 752,
+  "generated_at": "2026-06-07T02:52:45Z",
+  "source_run_count": 772,
   "min_successful_runs_required": 3,
   "families": {
     "execute": {
@@ -48,9 +48,9 @@
     "i2c": {
       "platforms": {
         "nangate45": {
-          "sample_size": 16,
+          "sample_size": 17,
           "success_count": 14,
-          "success_rate": 0.875,
+          "success_rate": 0.8235294117647058,
           "core_utilization": {
             "min_safe": 25.0,
             "max_safe": 25.0,
@@ -200,9 +200,9 @@
     "eth": {
       "platforms": {
         "nangate45": {
-          "sample_size": 17,
+          "sample_size": 19,
           "success_count": 9,
-          "success_rate": 0.5294117647058824,
+          "success_rate": 0.47368421052631576,
           "core_utilization": {
             "min_safe": 25.0,
             "max_safe": 25.0,
@@ -1651,8 +1651,8 @@
     "test": {
       "platforms": {
         "nangate45": {
-          "sample_size": 29,
-          "success_count": 29,
+          "sample_size": 31,
+          "success_count": 31,
           "success_rate": 1.0,
           "core_utilization": {
             "min_safe": 20.0,
@@ -1671,10 +1671,21 @@
               "severe": {
                 "strategies": {
                   "period_relax": {
-                    "attempts": 1,
-                    "successes": 0,
+                    "attempts": 2,
+                    "successes": 1,
                     "failures": 0,
-                    "median_reduction_pct": 0.6614961115473513
+                    "median_reduction_pct": 0.8198644816115581
+                  }
+                },
+                "n_sessions": 2
+              },
+              "minor": {
+                "strategies": {
+                  "period_relax": {
+                    "attempts": 1,
+                    "successes": 1,
+                    "failures": 0,
+                    "median_reduction_pct": 0.5933637786222975
                   }
                 },
                 "n_sessions": 1
@@ -3846,6 +3857,23 @@
       }
     },
     "axi2axilite": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 0,
+          "success_count": 0,
+          "success_rate": 0.0,
+          "fix_recipes": {
+            "lvs": {
+              "real_connectivity": {
+                "strategies": {},
+                "n_sessions": 1
+              }
+            }
+          }
+        }
+      }
+    },
+    "axilsingle": {
       "platforms": {
         "nangate45": {
           "sample_size": 0,

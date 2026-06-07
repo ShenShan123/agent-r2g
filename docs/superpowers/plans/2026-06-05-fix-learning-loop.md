@@ -1870,3 +1870,22 @@ Prove capture→learn→improved-suggestion end-to-end on one design per case ty
 - Family-inference granularity differs between backfill and live ingest (backfill maps `axi2axilite`→`axi`; live ingest keeps `axi2axilite`). Cosmetic now; tighten `infer_family` for consistency *before* the campaign aggregates recipes.
 - `run_violations.timing_tier` for the iccad2015 re-run reads a stale `timing_check.json` (`severe`) while `wns_ns` is fresh (−1.526). Snapshot-freshness nit; does not affect recipes (those derive from Tier-2 trajectories).
 - iccad2015 needs a longer period (or retiming) for full closure — a campaign action, not pilot scope.
+
+---
+
+## Implementation Log — 2026-06-06 (Part B: Task 19 targeted campaign — Phase E)
+
+**Status:** User approved **Task 19 (targeted) ONLY** at the Task 18 checkpoint, re-checkpoint before Phase F. Executed via dynamic workflows (Waves A+C, then Wave B 2-phase) + direct serial ingest. **Paused for go/no-go before Task 20 (Phase F full sweep).**
+
+**Store delta (pre-pilot baseline → end of Phase E):** fix_events 382→388 (**live 0→6**), run_violations **0→28**, runs 750→772, fix_trajectories 382→388.
+
+**Wave A — violations (the learning gold):**
+- Timing `period_relax`: `unit18_in1` **cleared** (WNS −3.32→+0.07, period 10→16), `unit10_in1` **cleared** (−0.88→+0.36, 10→12.4); `unit16_in1` (pilot) **win** (−4.51→−1.53). `unit19_in2` slow (3× 2400s timeouts at global route; resuming at 3600s — not blocking the milestone).
+- LVS: `wb2axip_axilsingle` **honest abandoned** (438 real_connectivity, no v1 lever) — joins `wb2axip_axi2axilite` (pilot).
+- **Warmed recipe (the payoff):** `test/nangate45 timing` now has `period_relax` evidence — severe: 2 att/1 succ, median WNS reduction **82%**; minor: 1/1, **59%**. The loop is producing an evidence-ranked suggestion from live episodes.
+
+**Wave C — PD-recovery:** `RISCyMCU_src_MCU_Toplevel` **completed** (fixed PDN-0185 small-die metal4 strap), `vtr…clog2_test` **completed** (degenerate 3-bit pass-through; enlarged floorplan). `i2c_master` **blocked** — TritonCTS SIGSEGV (`separateMacroRegSinks`) at 4_1_cts (OpenROAD 26Q1 bug; honest, recorded). 9 BOOMs + arm_core skipped (documented-intractable).
+
+**Wave B — #include header completions (2-phase: fetch/reconstruct + yosys-validate → fan-out backend): 18 of 22 completed.** Headers fetched from canonical upstreams (olgirard/openmsp430 `openMSP430_defines.v` 935L + `openGFX430_defines.v`; opencores `ethmac_defines.v` via the ORFS src mirror; kiclu/rv6 `config.vh`; SI-RISCV `e203_defines.v`) or reconstructed (ibex `prim_assert.sv` stub, RV32I `Def.v`, Riscy_SoC `opcodes.vh`). Every design elaboration-gated by standalone yosys before any backend run (no wasted backends). 4 incomplete (`openGFX430`, `rv6_pd`, `MS_DMAC`, `RV32I_ALU`) — session-limit casualties mid-route, resumable. **Cost note:** Wave B was token-heavy (32 agents, ~1.76M subagent tokens) and **hit the session limit** (resets 12:30pm ET); the remaining ingest/learn/commit were done with direct non-agent commands.
+
+**Carried forward (for Phase F or a follow-up):** 4 incomplete Wave B designs (resumable); `unit19_in2` (resuming); `i2c_master` CTS SIGSEGV (candidate `failure-patterns.md` entry — OpenROAD TritonCTS bug); family-inference granularity (backfill `axi` vs live `axi2axilite`) still open and should be unified before a full-corpus Phase F so recipes aggregate consistently.
