@@ -1955,3 +1955,28 @@ backfill + 7 live), **0 NULL platforms**, no numeric `violation_class`, no junk 
 composite-PK `fix_trajectories` correctly split by check (drc 269 / lvs 2 / orfs 142 / timing 4),
 recipes carry the `wins` counter. `runs.sqlite.pre-bugfix.bak` saved. Docs updated
 (`references/signoff-fixing.md` "Correctness invariants"; `schema.sql` comment retargeted).
+
+**Task 20 (Phase F) — full-corpus enrichment — DONE.** With the loop hardened, the corpus was
+enriched via a cheap re-ingest (the bulk of the corpus already had reports; SQLite is single-writer
+so this is a serial loop, not a subagent fan-out — `tools/reingest_corpus.py`).
+
+- **`run_violations` 33 → 715** (21.7×): the complete violation landscape — **708 of 723 design
+  dirs enriched (97.9%)**. 701 ingested in ~1s; **7 backend-finished stragglers recovered** via
+  `finalize_runs.sh`/`extract_ppa` (`RISC_V_RV32I_src_ALU` fully signed off; `rv6_core_csr`,
+  `rv6_core_pd`, `MS_DMAC`, `omsp_dbg`, `omsp_dbg_uart`, `openGFX430` extract+ingest — a hung
+  KLayout DRC on `rv6_core_csr` was killed; signoff for those 6 deferred, ppa ingested).
+- **Landscape:** DRC ~95% clean (410 clean + 264 clean_beol; 7 stuck, 1 fail), LVS ~89% clean
+  (607 clean; 44 incomplete, 19 fail, 1 crash, 3 unknown). nangate45 707 / sky130hd 1.
+- **Namespace unified at scale (resolves the open T19 loose-end):** re-ingest refreshed every run's
+  family through the fixed inference → distinct families in `runs` **309 → 133**; top-module-name
+  fragments (`axilsafety`, `aximm2s`, `axis2mm`, …) merged into source-repo parents (`wb2axip` 46,
+  `iccad2015` 44, `iccad2017` 40). 86 family/platform learn entries; **74 with fix_recipes, 57
+  warmed** (≥2 att / ≥1 success) — e.g. `iccad2015/nangate45 drc/beol beol_only_drc` 44/44,
+  `vtr orfs/full rerun_from_stage` 11/14, `udp` 6/10.
+- **fix_events 417** (410 backfill + 7 live) → **366 resolved + 51 abandoned** trajectories.
+- **Skipped + logged (no silent caps), 15 designs, all documented-intractable:** 9 BOOMs
+  (ChipTop-scale floorplan/route), `arm_core` (place repair_design hangs, 8h timeout), `faraday_dsp`
+  (synth error / no usable RTL), `koios_lenet` (no backend), `verilog_lfsr_{scramble,descramble}`
+  (synth timeout 4h), `PYGMY_V32I_rtl_core` (synth error). None are v1-recoverable.
+- Suite stays **395 passed / 8 skipped** (no code change since the fix commit — Phase F is data).
+  Store committed (`runs.sqlite` + `heuristics.json`); ships pre-trained (D14).
