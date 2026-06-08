@@ -246,11 +246,100 @@ def _build_provenance(conn: sqlite3.Connection) -> list[dict]:
     return provenance
 
 
+def _fix_effectiveness(conn: sqlite3.Connection) -> list[dict]:
+    """Per-(family, platform, check, violation_class) fix-strategy effectiveness.
+
+    Rolls up ``fix_trajectories`` per
+    (design_family, platform, check_type, violation_class, strategy). Resolved
+    (successes) and abandoned (failures) are attributed PER STRATEGY by parsing
+    each trajectory's path_json verdicts — exactly like
+    learn_heuristics._recipes_from_trajectories — NOT by the episode-level
+    ``winning_strategy`` column. That column is NULL for every abandoned episode,
+    so a GROUP BY winning_strategy would collapse all failures into a phantom
+    strategy=NULL bucket and make every named strategy report abandoned=0 /
+    clearance_rate=1.0. The clearance rate is successes / (successes + failures).
+
+    READ-ONLY safety: ``mode=ro`` cannot CREATE tables, so if a (legacy) DB lacks
+    the ``fix_trajectories`` table this MUST NOT crash. We probe sqlite_master
+    first and return an empty projection when the table is absent.
+    """
+    has_table = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='fix_trajectories'"
+    ).fetchone()
+    if not has_table:
+        return []
+
+    # ORDER BY keeps the projection deterministic regardless of insert order.
+    cur = conn.execute(
+        "SELECT design_family, platform, check_type, violation_class, path_json "
+        "FROM fix_trajectories "
+        "ORDER BY design_family, platform, check_type, violation_class, "
+        "         fix_session_id"
+    )
+
+    # (family, platform, check, class) -> strategy -> {resolved, abandoned}.
+    groups: dict[tuple, dict] = {}
+    for row in cur.fetchall():
+        key = (row["design_family"], row["platform"], row["check_type"],
+               row["violation_class"])
+        group = groups.get(key)
+        if group is None:
+            group = {
+                "design_family": row["design_family"],
+                "platform": row["platform"],
+                "check_type": row["check_type"],
+                "violation_class": row["violation_class"],
+                "_strategies": {},   # strategy -> {resolved, abandoned}
+            }
+            groups[key] = group
+        try:
+            steps = json.loads(row["path_json"] or "[]")
+        except (TypeError, ValueError):
+            steps = []
+        for step in steps:
+            sid = step.get("strategy")
+            if not sid or sid == "none":
+                continue
+            verdict = step.get("verdict")
+            if verdict not in ("cleared", "win", "no_change", "regression"):
+                continue
+            tally = group["_strategies"].setdefault(
+                sid, {"resolved": 0, "abandoned": 0}
+            )
+            if verdict in ("cleared", "win"):
+                tally["resolved"] += 1
+            else:
+                tally["abandoned"] += 1
+
+    result: list[dict] = []
+    for group in groups.values():
+        strat_tallies = group.pop("_strategies")
+        strategies = []
+        # Deterministic strategy order (None never appears now, but sort safely).
+        for sid in sorted(strat_tallies, key=lambda s: ("" if s is None else s)):
+            tally = strat_tallies[sid]
+            resolved = tally["resolved"]
+            abandoned = tally["abandoned"]
+            attempts = resolved + abandoned
+            clearance_rate = round(resolved / attempts, 4) if attempts else 0.0
+            strategies.append({
+                "strategy": sid,
+                "resolved": resolved,
+                "abandoned": abandoned,
+                "attempts": attempts,
+                "clearance_rate": clearance_rate,
+            })
+        group["strategies"] = strategies
+        result.append(group)
+    return result
+
+
 def build_view(db_path: Path | str, heuristics_path: Path | str | None = None) -> dict:
     """Pure, deterministic read-only projection over runs.sqlite + heuristics.json.
 
-    Returns exactly {"health": {...}, "provenance": [...]}. No timestamp — the
-    CLI stamps generated_at separately so this stays golden-testable.
+    Returns exactly {"health": {...}, "provenance": [...],
+    "fix_effectiveness": [...]}. No timestamp — the CLI stamps generated_at
+    separately so this stays golden-testable.
     """
     heuristics = _load_heuristics(heuristics_path)
     conn = _connect_ro(db_path)
@@ -260,9 +349,14 @@ def build_view(db_path: Path | str, heuristics_path: Path | str | None = None) -
         rows = [dict(zip(cols, r)) for r in cur.fetchall()]
         health = _build_health(rows, heuristics)
         provenance = _build_provenance(conn)
+        fix_effectiveness = _fix_effectiveness(conn)
     finally:
         conn.close()
-    return {"health": health, "provenance": provenance}
+    return {
+        "health": health,
+        "provenance": provenance,
+        "fix_effectiveness": fix_effectiveness,
+    }
 
 
 def main() -> int:

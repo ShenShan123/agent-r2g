@@ -48,7 +48,9 @@ diagnose_signoff_fix.py <project-dir> --check drc|lvs [--apply <strategy-id>]
 fix_signoff.sh <project-dir> [platform] [--check drc|lvs|both] [--max-iters N] [--resume]
 ```
 
-Default: `platform=nangate45`, `--check both`, `--max-iters 3`.
+Default: `platform=nangate45`, `--check both`. The iteration budget is **adaptive**: base
+3 iterations, hard cap 8, with early-stop after 2 consecutive non-improving iterations past
+the base (`--max-iters N` overrides the cap).
 
 **Loop per check (drc / lvs):**
 
@@ -63,18 +65,27 @@ Default: `platform=nangate45`, `--check both`, `--max-iters 3`.
 
 **Early-exit conditions:**
 
-- Violation count reaches 0 (`CLEAN`).
-- An iteration does not reduce the violation count (`no_improvement`).
+- Violation count reaches 0 (verdict flips to `cleared`).
+- 2 consecutive non-improving iterations past the base budget (adaptive early-stop).
 - `diagnose_signoff_fix.py --next` returns `STOP` (residual — no auto strategy left).
 - `run_orfs.sh` fails (rc ≠ 0) — aborts that check, does NOT re-read a stale report.
-- `max-iters` reached.
+- The hard cap (8, or `--max-iters`) is reached.
 
 **Outputs:**
 
 | File | Content |
 |------|---------|
-| `<project>/reports/fix_log.jsonl` | One JSON line per iteration: `{check, iter, strategy, before, after, verdict, ts}`. Flushed on-the-fly (not buffered to end). |
+| `<project>/reports/fix_log.jsonl` | One **session-keyed, lossless** JSON line per iteration: `fix_session_id`, `check`, `iter`, `strategy`, `from_stage`, before/after counts, the pre-fix `violation_class` + `before_categories` snapshot, `after_status`, `cumulative_config`, `verdict`, `ts`. Flushed on-the-fly (not buffered to end). This is the Tier-1 system of record; step-10 ingest reads it into `fix_events`. |
 | `<project>/reports/fix_summary.md` | Markdown table of all iterations, written once at end. |
+
+**Verdict vocabulary.** The canonical per-iteration verdict is one of
+`cleared | win | no_change | regression | inconclusive`. Two producers feed the log:
+`fix_signoff.sh` emits legacy strings (`applied`, `no_improvement`, `stop_*`, `apply_failed`,
+`rerun_failed_*`); `check_timing.py --journal` emits the **canonical** strings directly
+(`cleared`/`win`/`no_change`). The **ingester** (`_normalize_verdict`) maps both: legacy strings
+to canonical, and canonical strings pass through **idempotently**. (Regression note 2026-06-06:
+canonical `win`/`no_change` were previously falling through to `inconclusive`, silently dropping
+the learning signal from timing-journal episodes; fixed so a timing `period_relax` win is kept.)
 
 **Exit codes:** 0 = final status clean; 2 = residual violations remain.
 
@@ -211,6 +222,108 @@ klayout -b \
 block; its device-extraction body is identical to the bundled deck (re-sync if that changes).
 
 ---
+
+## Fix-Learning Loop
+
+Every fix iteration is captured losslessly and distilled into evidence that re-ranks the
+strategy catalog on the next similar violation. The data flows through **three tiers**
+(detailed schema in `knowledge/README.md`):
+
+| Tier | Store | Granularity | Archival |
+|------|-------|-------------|----------|
+| **1 — `fix_events`** | `runs.sqlite` (append-only) | raw, one row per iteration (the lossless system of record) | archivable past a size threshold into the sidecar `knowledge/fix_events_archive.sqlite` |
+| **2 — `fix_trajectories`** | `runs.sqlite` (materialized, idempotent rebuild) | per-episode path: `resolved`/`abandoned`, `winning_strategy`, `failed_strategies` | **never archived** — derived from Tier-1, so raw archival loses no learning signal |
+| **3 — `fix_recipes`** | `heuristics.json` sub-key | per-(family, platform) aggregate per check/violation_class: strategy attempts/successes/failures (+ `median_reduction_pct`), `n_sessions` | folded by `learn_heuristics.py` |
+
+**Recording** is done by `fix_signoff.sh` and `check_timing.py --journal` → `reports/fix_log.jsonl`
+(see Outputs above). **Step-10 ingest** (`knowledge/ingest_run.py`) reads `fix_log.jsonl` into
+Tier-1 `fix_events`, writes a `run_violations` snapshot for **every** run (clean or not), and
+auto-runs `fix_log_manager.manage()` (toggle `R2G_FIX_AUTOLEARN`, default on; failures warn,
+never break the ingest). **Learning** is `learn_heuristics.py`: it rebuilds Tier-2 then Tier-3
+in one idempotent pass.
+
+**Survivorship — failures count.** Abandoned episodes are folded in (so `n_sessions` includes
+failures) and the strategies that *didn't* clear are recorded. Negative evidence down-ranks a
+losing strategy; it is never blacklisted.
+
+**Correctness note.** `fix_recipes` derive from Tier-2 `fix_trajectories`, **not** from raw
+`fix_events`. That is precisely why archiving raw `fix_events` past the size threshold loses no
+learning signal — the distilled trajectory survives. The Tier-2 rebuild is **archive-aware**:
+it `ATTACH`es `fix_events_archive.sqlite` (when present) and rebuilds from the union of hot +
+archived rows, so an episode's trajectory is never destroyed after its raw rows are evicted.
+
+**Correctness invariants** (enforced after the 2026-06-07 review — see the Implementation Log in
+`docs/superpowers/plans/2026-06-05-fix-learning-loop.md`):
+
+- **One trajectory per `(fix_session_id, check_type)`.** A default `fix_signoff.sh <proj>` run
+  (`--check both`) shares one session id across its DRC and LVS passes; Tier-2 grouping keys on
+  `(session, check_type)` (and the `fix_trajectories` PK is composite) so LVS strategies are
+  never mis-filed under a DRC `violation_class` (and vice-versa).
+- **One family namespace for writers *and* readers.** `design_family` =
+  `_explicit_family(DESIGN_NAME)` else `infer_family(<project-dir basename>)`. Live ingest
+  (`ingest_run._project_family`), `backfill_fix_events`, and the recipe reader
+  (`diagnose_signoff_fix._load_recipes`) all use this identical rule, so backfilled and live
+  evidence aggregate together. Backfill also resolves each record's **platform** from the design
+  dir's `config.mk` (not a blanket default), so its recipes land in the live platform bucket.
+- **`win` earns partial credit.** A real partial improvement (`win`) is counted separately and
+  scored at half a success, so a strategy that reliably *improves* outranks an untried one
+  without being credited a full clearance (see the score formula below).
+- **Projections attribute per strategy.** `build_lineage_view.fix_effectiveness` and
+  `mine_rules.fix_candidates` tally resolved/abandoned **per strategy from `path_json`** (not by
+  the episode's single `winning_strategy`, which is null for abandoned episodes), so clearance
+  rates are honest and no phantom `strategy=null` bucket appears.
+
+### Ranked-candidate fall-through
+
+When a Tier-3 recipe exists for the design's family/platform/violation_class,
+`diagnose_signoff_fix.py` reorders the strategy list via `scripts/reports/fix_model.py` — a
+**Beta(1,1)-smoothed clearance score** `(successes + 0.5·wins + 1) / (attempts + 2)`:
+
+- Untried strategies get the neutral `0.5` prior.
+- Proven winners rank high; proven losers are down-ranked but **never zeroed or blacklisted**.
+
+There is **no hard gate** — *all* real-fix strategies are always proposed, priority-ordered, so
+the loop falls through to the next-best candidate if the top one fails. Inspect the full
+evidence-ranked candidate set with:
+
+```bash
+python3 r2g-rtl2gds/scripts/reports/diagnose_signoff_fix.py design_cases/my_design \
+  --check drc --list | python3 -m json.tool
+```
+
+Hard safety clamps are unchanged and absolute: ranking only reorders existing real-fix
+strategies, and no strategy ever edits `PLACE_DENSITY_LB_ADDON`.
+
+### Other consumers
+
+- `knowledge/analyze_execution.py::rank_proposals(ids, family=, platform=, stage=, heuristics_path=)`
+  ranks backend-stage proposals by `fix_recipes["orfs"][stage]`.
+- `build_lineage_view.py` adds a read-only **fix_effectiveness** projection (per
+  family/platform/check/violation_class strategy resolved/abandoned + clearance_rate) to the
+  dashboard.
+- `eval_heuristics.py summarize-fix --db <db>` A/B-scores ranked-vs-static fix ordering on
+  iters-to-resolve.
+
+### failure-patterns.md stays human-curated
+
+`mine_rules.py` emits a `fix_candidates` key into `failure_candidates.json` (≥3 resolved
+episodes per family/check/violation_class/winning_strategy) as a **human-review queue**.
+`failure-patterns.md` is **never auto-written** — an operator promotes a candidate by hand,
+exactly as for the existing `failure_candidates` review queue.
+
+### Backfill & repair (one-time / maintenance)
+
+- `knowledge/backfill_fix_events.py --batch-dir design_cases/_batch --db <db>` mines historical
+  batch logs (`antenna_fix_*`/`beol_drc_*` → `check=drc`; `retry_pass*`/`recover_pass*`/`orfs_retry`
+  → `check=orfs`, `violation_class` from the stage) into synthetic `fix_events` tagged with
+  provenance `backfill:<filestem>` (idempotent).
+- `knowledge/repair_run_status.py --db <db>` reconciles `orfs_status` from per-project backend
+  stage logs (backs up the DB to `<db>.bak` first; idempotent). On the current corpus it is
+  largely a no-op — stage logs store integer exit codes and `is_success` already credits
+  signoff-positive partials.
+
+The knowledge store (`runs.sqlite` + `heuristics.json`, plus `fix_events_archive.sqlite` once
+created) is tracked in git, so the skill ships **pre-trained** with this experience.
 
 ## Real-fixes-only policy
 

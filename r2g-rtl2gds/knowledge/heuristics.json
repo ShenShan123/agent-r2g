@@ -1,0 +1,2850 @@
+{
+  "generated_at": "2026-06-07T09:39:06Z",
+  "source_run_count": 780,
+  "min_successful_runs_required": 3,
+  "families": {
+    "rv32i": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 7,
+          "success_count": 6,
+          "success_rate": 0.8571428571428571,
+          "core_utilization": {
+            "min_safe": 20.0,
+            "max_safe": 20.0,
+            "median": 20.0
+          },
+          "place_density_lb_addon": {
+            "min_safe": 0.2,
+            "max_safe": 0.2,
+            "median": 0.2
+          },
+          "typical_cell_count": 643,
+          "p90_elapsed_s": 565.0
+        }
+      }
+    },
+    "i2c": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 22,
+          "success_count": 19,
+          "success_rate": 0.8636363636363636,
+          "core_utilization": {
+            "min_safe": 25.0,
+            "max_safe": 25.0,
+            "median": 25.0
+          },
+          "place_density_lb_addon": {
+            "min_safe": 0.2,
+            "max_safe": 0.2,
+            "median": 0.2
+          },
+          "typical_cell_count": 480,
+          "p90_elapsed_s": 636.0,
+          "fix_recipes": {
+            "drc": {
+              "beol": {
+                "strategies": {
+                  "beol_only_drc": {
+                    "attempts": 2,
+                    "successes": 2,
+                    "failures": 0,
+                    "wins": 0
+                  }
+                },
+                "n_sessions": 2
+              }
+            },
+            "orfs": {
+              "full": {
+                "strategies": {
+                  "rerun_from_stage": {
+                    "attempts": 1,
+                    "successes": 0,
+                    "failures": 1,
+                    "wins": 0,
+                    "median_reduction_pct": 0.0
+                  }
+                },
+                "n_sessions": 1
+              }
+            }
+          }
+        }
+      }
+    },
+    "spi": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 15,
+          "success_count": 13,
+          "success_rate": 0.8666666666666667,
+          "core_utilization": {
+            "min_safe": 20.0,
+            "max_safe": 25.0,
+            "median": 22.5
+          },
+          "place_density_lb_addon": {
+            "min_safe": 0.2,
+            "max_safe": 0.2,
+            "median": 0.2
+          },
+          "typical_cell_count": 377,
+          "p90_elapsed_s": 735.0
+        }
+      }
+    },
+    "riscv32i": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 14,
+          "success_count": 9,
+          "success_rate": 0.6428571428571429,
+          "core_utilization": {
+            "min_safe": 10.0,
+            "max_safe": 25.0,
+            "median": 15.0
+          },
+          "place_density_lb_addon": {
+            "min_safe": 0.2,
+            "max_safe": 0.2,
+            "median": 0.2
+          },
+          "typical_cell_count": 1536,
+          "p90_elapsed_s": 1062.0,
+          "fix_recipes": {
+            "drc": {
+              "beol": {
+                "strategies": {
+                  "beol_only_drc": {
+                    "attempts": 1,
+                    "successes": 1,
+                    "failures": 0,
+                    "wins": 0
+                  }
+                },
+                "n_sessions": 1
+              }
+            },
+            "orfs": {
+              "full": {
+                "strategies": {
+                  "rerun_from_stage": {
+                    "attempts": 2,
+                    "successes": 0,
+                    "failures": 2,
+                    "wins": 0,
+                    "median_reduction_pct": 0.0
+                  }
+                },
+                "n_sessions": 2
+              }
+            }
+          }
+        }
+      }
+    },
+    "can": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 12,
+          "success_count": 11,
+          "success_rate": 0.9166666666666666,
+          "core_utilization": {
+            "min_safe": 20.0,
+            "max_safe": 20.0,
+            "median": 20.0
+          },
+          "place_density_lb_addon": {
+            "min_safe": 0.2,
+            "max_safe": 0.2,
+            "median": 0.2
+          },
+          "typical_cell_count": 933,
+          "p90_elapsed_s": 948.0
+        }
+      }
+    },
+    "core": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 7,
+          "success_count": 6,
+          "success_rate": 0.8571428571428571,
+          "core_utilization": {
+            "min_safe": 25.0,
+            "max_safe": 25.0,
+            "median": 25.0
+          },
+          "place_density_lb_addon": {
+            "min_safe": 0.2,
+            "max_safe": 0.2,
+            "median": 0.2
+          },
+          "typical_cell_count": 2787,
+          "p90_elapsed_s": 1201.0,
+          "fix_recipes": {
+            "drc": {
+              "beol": {
+                "strategies": {
+                  "beol_only_drc": {
+                    "attempts": 4,
+                    "successes": 4,
+                    "failures": 0,
+                    "wins": 0
+                  }
+                },
+                "n_sessions": 4
+              }
+            }
+          }
+        }
+      }
+    },
+    "e203": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 5,
+          "success_count": 4,
+          "success_rate": 0.8,
+          "core_utilization": {
+            "min_safe": 25.0,
+            "max_safe": 25.0,
+            "median": 25.0
+          },
+          "place_density_lb_addon": {
+            "min_safe": 0.2,
+            "max_safe": 0.2,
+            "median": 0.2
+          },
+          "typical_cell_count": 2127,
+          "p90_elapsed_s": 1326.0,
+          "fix_recipes": {
+            "drc": {
+              "beol": {
+                "strategies": {
+                  "beol_only_drc": {
+                    "attempts": 2,
+                    "successes": 2,
+                    "failures": 0,
+                    "wins": 0
+                  }
+                },
+                "n_sessions": 2
+              }
+            }
+          }
+        }
+      }
+    },
+    "eth": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 19,
+          "success_count": 9,
+          "success_rate": 0.47368421052631576,
+          "core_utilization": {
+            "min_safe": 25.0,
+            "max_safe": 25.0,
+            "median": 25.0
+          },
+          "place_density_lb_addon": {
+            "min_safe": 0.2,
+            "max_safe": 0.25,
+            "median": 0.2
+          },
+          "typical_cell_count": 1778,
+          "p90_elapsed_s": 775.0,
+          "fix_recipes": {
+            "drc": {
+              "METAL5_ANTENNA": {
+                "strategies": {},
+                "n_sessions": 1
+              }
+            },
+            "orfs": {
+              "full": {
+                "strategies": {
+                  "rerun_from_stage": {
+                    "attempts": 8,
+                    "successes": 3,
+                    "failures": 5,
+                    "wins": 0,
+                    "median_reduction_pct": 0.0
+                  }
+                },
+                "n_sessions": 8
+              },
+              "place": {
+                "strategies": {
+                  "rerun_from_stage": {
+                    "attempts": 2,
+                    "successes": 0,
+                    "failures": 2,
+                    "wins": 0,
+                    "median_reduction_pct": 0.0
+                  }
+                },
+                "n_sessions": 2
+              }
+            }
+          }
+        }
+      }
+    },
+    "ip": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 11,
+          "success_count": 7,
+          "success_rate": 0.6363636363636364,
+          "core_utilization": {
+            "min_safe": 25.0,
+            "max_safe": 25.0,
+            "median": 25.0
+          },
+          "place_density_lb_addon": {
+            "min_safe": 0.2,
+            "max_safe": 0.2,
+            "median": 0.2
+          },
+          "typical_cell_count": 4211,
+          "p90_elapsed_s": 916.0,
+          "fix_recipes": {
+            "orfs": {
+              "full": {
+                "strategies": {
+                  "rerun_from_stage": {
+                    "attempts": 9,
+                    "successes": 7,
+                    "failures": 2,
+                    "wins": 0,
+                    "median_reduction_pct": 1.0
+                  }
+                },
+                "n_sessions": 9
+              }
+            }
+          }
+        }
+      }
+    },
+    "udp": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 11,
+          "success_count": 6,
+          "success_rate": 0.5454545454545454,
+          "core_utilization": {
+            "min_safe": 20.0,
+            "max_safe": 20.0,
+            "median": 20.0
+          },
+          "place_density_lb_addon": {
+            "min_safe": 0.2,
+            "max_safe": 0.25,
+            "median": 0.2
+          },
+          "typical_cell_count": 4280,
+          "p90_elapsed_s": 770.0,
+          "fix_recipes": {
+            "orfs": {
+              "full": {
+                "strategies": {
+                  "rerun_from_stage": {
+                    "attempts": 10,
+                    "successes": 6,
+                    "failures": 4,
+                    "wins": 0,
+                    "median_reduction_pct": 1.0
+                  }
+                },
+                "n_sessions": 10
+              }
+            }
+          }
+        }
+      }
+    },
+    "test": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 4,
+          "success_count": 4,
+          "success_rate": 1.0,
+          "core_utilization": {
+            "min_safe": 20.0,
+            "max_safe": 20.0,
+            "median": 20.0
+          },
+          "place_density_lb_addon": {
+            "min_safe": 0.2,
+            "max_safe": 0.2,
+            "median": 0.2
+          },
+          "typical_cell_count": 26346,
+          "p90_elapsed_s": 7701.0
+        }
+      }
+    },
+    "risc": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 14,
+          "success_count": 13,
+          "success_rate": 0.9285714285714286,
+          "core_utilization": {
+            "min_safe": 20.0,
+            "max_safe": 25.0,
+            "median": 20.0
+          },
+          "place_density_lb_addon": {
+            "min_safe": 0.2,
+            "max_safe": 0.2,
+            "median": 0.2
+          },
+          "typical_cell_count": 1547,
+          "p90_elapsed_s": 679.0,
+          "fix_recipes": {
+            "drc": {
+              "beol": {
+                "strategies": {
+                  "beol_only_drc": {
+                    "attempts": 2,
+                    "successes": 2,
+                    "failures": 0,
+                    "wins": 0
+                  }
+                },
+                "n_sessions": 2
+              }
+            }
+          }
+        }
+      }
+    },
+    "apb": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 7,
+          "success_count": 7,
+          "success_rate": 1.0,
+          "core_utilization": {
+            "min_safe": 10.0,
+            "max_safe": 20.0,
+            "median": 20.0
+          },
+          "place_density_lb_addon": {
+            "min_safe": 0.2,
+            "max_safe": 0.2,
+            "median": 0.2
+          },
+          "typical_cell_count": 517,
+          "p90_elapsed_s": 1676.0,
+          "fix_recipes": {
+            "drc": {
+              "beol": {
+                "strategies": {
+                  "beol_only_drc": {
+                    "attempts": 2,
+                    "successes": 2,
+                    "failures": 0,
+                    "wins": 0
+                  }
+                },
+                "n_sessions": 2
+              }
+            }
+          }
+        }
+      }
+    },
+    "arm9": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 4,
+          "success_count": 4,
+          "success_rate": 1.0,
+          "core_utilization": {
+            "min_safe": 25.0,
+            "max_safe": 25.0,
+            "median": 25.0
+          },
+          "place_density_lb_addon": {
+            "min_safe": 0.2,
+            "max_safe": 0.2,
+            "median": 0.2
+          },
+          "typical_cell_count": 19902,
+          "p90_elapsed_s": 3052.0,
+          "fix_recipes": {
+            "drc": {
+              "beol": {
+                "strategies": {
+                  "beol_only_drc": {
+                    "attempts": 4,
+                    "successes": 4,
+                    "failures": 0,
+                    "wins": 0
+                  }
+                },
+                "n_sessions": 4
+              }
+            }
+          }
+        }
+      }
+    },
+    "axi": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 24,
+          "success_count": 24,
+          "success_rate": 1.0,
+          "core_utilization": {
+            "min_safe": 10.0,
+            "max_safe": 25.0,
+            "median": 25.0
+          },
+          "place_density_lb_addon": {
+            "min_safe": 0.2,
+            "max_safe": 0.2,
+            "median": 0.2
+          },
+          "typical_cell_count": 2231,
+          "p90_elapsed_s": 1753.0,
+          "fix_recipes": {
+            "drc": {
+              "beol": {
+                "strategies": {
+                  "beol_only_drc": {
+                    "attempts": 1,
+                    "successes": 1,
+                    "failures": 0,
+                    "wins": 0
+                  }
+                },
+                "n_sessions": 1
+              }
+            },
+            "orfs": {
+              "full": {
+                "strategies": {
+                  "rerun_from_stage": {
+                    "attempts": 3,
+                    "successes": 3,
+                    "failures": 0,
+                    "wins": 0,
+                    "median_reduction_pct": 1.0
+                  }
+                },
+                "n_sessions": 3
+              }
+            }
+          }
+        }
+      }
+    },
+    "canakari": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 5,
+          "success_count": 5,
+          "success_rate": 1.0,
+          "core_utilization": {
+            "min_safe": 20.0,
+            "max_safe": 20.0,
+            "median": 20.0
+          },
+          "place_density_lb_addon": {
+            "min_safe": 0.2,
+            "max_safe": 0.2,
+            "median": 0.2
+          },
+          "typical_cell_count": 499,
+          "p90_elapsed_s": 867.0
+        }
+      }
+    },
+    "dma": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 4,
+          "success_count": 4,
+          "success_rate": 1.0,
+          "core_utilization": {
+            "min_safe": 20.0,
+            "max_safe": 20.0,
+            "median": 20.0
+          },
+          "place_density_lb_addon": {
+            "min_safe": 0.2,
+            "max_safe": 0.2,
+            "median": 0.2
+          },
+          "typical_cell_count": 559,
+          "p90_elapsed_s": 830.0
+        }
+      }
+    },
+    "fpga": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 6,
+          "success_count": 4,
+          "success_rate": 0.6666666666666666,
+          "core_utilization": {
+            "min_safe": 15.0,
+            "max_safe": 25.0,
+            "median": 20.0
+          },
+          "place_density_lb_addon": {
+            "min_safe": 0.2,
+            "max_safe": 0.2,
+            "median": 0.2
+          },
+          "typical_cell_count": 1880,
+          "p90_elapsed_s": 3063.0,
+          "fix_recipes": {
+            "drc": {
+              "beol": {
+                "strategies": {
+                  "beol_only_drc": {
+                    "attempts": 3,
+                    "successes": 3,
+                    "failures": 0,
+                    "wins": 0
+                  }
+                },
+                "n_sessions": 3
+              }
+            }
+          }
+        }
+      }
+    },
+    "uart": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 15,
+          "success_count": 15,
+          "success_rate": 1.0,
+          "core_utilization": {
+            "min_safe": 25.0,
+            "max_safe": 25.0,
+            "median": 25.0
+          },
+          "place_density_lb_addon": {
+            "min_safe": 0.2,
+            "max_safe": 0.2,
+            "median": 0.2
+          },
+          "typical_cell_count": 514,
+          "p90_elapsed_s": 779.0
+        }
+      }
+    },
+    "pygmy": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 5,
+          "success_count": 5,
+          "success_rate": 1.0,
+          "core_utilization": {
+            "min_safe": 20.0,
+            "max_safe": 20.0,
+            "median": 20.0
+          },
+          "place_density_lb_addon": {
+            "min_safe": 0.2,
+            "max_safe": 0.2,
+            "median": 0.2
+          },
+          "typical_cell_count": 2543,
+          "p90_elapsed_s": 814.0,
+          "fix_recipes": {
+            "drc": {
+              "beol": {
+                "strategies": {
+                  "beol_only_drc": {
+                    "attempts": 1,
+                    "successes": 1,
+                    "failures": 0,
+                    "wins": 0
+                  }
+                },
+                "n_sessions": 1
+              }
+            }
+          }
+        }
+      }
+    },
+    "picorv32": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 8,
+          "success_count": 8,
+          "success_rate": 1.0,
+          "core_utilization": {
+            "min_safe": 10.0,
+            "max_safe": 25.0,
+            "median": 25.0
+          },
+          "place_density_lb_addon": {
+            "min_safe": 0.2,
+            "max_safe": 0.2,
+            "median": 0.2
+          },
+          "typical_cell_count": 6922,
+          "p90_elapsed_s": 1784.0,
+          "fix_recipes": {
+            "drc": {
+              "beol": {
+                "strategies": {
+                  "beol_only_drc": {
+                    "attempts": 4,
+                    "successes": 4,
+                    "failures": 0,
+                    "wins": 0
+                  }
+                },
+                "n_sessions": 4
+              }
+            }
+          }
+        }
+      }
+    },
+    "riscy": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 4,
+          "success_count": 3,
+          "success_rate": 0.75,
+          "core_utilization": {
+            "min_safe": 15.0,
+            "max_safe": 20.0,
+            "median": 15.0
+          },
+          "place_density_lb_addon": {
+            "min_safe": 0.2,
+            "max_safe": 0.2,
+            "median": 0.2
+          },
+          "typical_cell_count": 3781,
+          "p90_elapsed_s": 875.0,
+          "fix_recipes": {
+            "drc": {
+              "beol": {
+                "strategies": {
+                  "beol_only_drc": {
+                    "attempts": 1,
+                    "successes": 1,
+                    "failures": 0,
+                    "wins": 0
+                  }
+                },
+                "n_sessions": 1
+              }
+            }
+          }
+        }
+      }
+    },
+    "verilog": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 17,
+          "success_count": 15,
+          "success_rate": 0.8823529411764706,
+          "core_utilization": {
+            "min_safe": 25.0,
+            "max_safe": 25.0,
+            "median": 25.0
+          },
+          "place_density_lb_addon": {
+            "min_safe": 0.2,
+            "max_safe": 0.2,
+            "median": 0.2
+          },
+          "typical_cell_count": 823,
+          "p90_elapsed_s": 1438.0,
+          "fix_recipes": {
+            "drc": {
+              "antenna": {
+                "strategies": {
+                  "antenna_diode_repair": {
+                    "attempts": 2,
+                    "successes": 1,
+                    "failures": 0,
+                    "wins": 1,
+                    "median_reduction_pct": 0.9897959183673469
+                  }
+                },
+                "n_sessions": 2
+              },
+              "beol": {
+                "strategies": {
+                  "beol_only_drc": {
+                    "attempts": 43,
+                    "successes": 43,
+                    "failures": 0,
+                    "wins": 0
+                  }
+                },
+                "n_sessions": 43
+              }
+            },
+            "orfs": {
+              "full": {
+                "strategies": {
+                  "rerun_from_stage": {
+                    "attempts": 5,
+                    "successes": 4,
+                    "failures": 1,
+                    "wins": 0,
+                    "median_reduction_pct": 1.0
+                  }
+                },
+                "n_sessions": 5
+              },
+              "route": {
+                "strategies": {
+                  "rerun_from_stage": {
+                    "attempts": 5,
+                    "successes": 5,
+                    "failures": 0,
+                    "wins": 0,
+                    "median_reduction_pct": 1.0
+                  }
+                },
+                "n_sessions": 5
+              }
+            }
+          }
+        }
+      }
+    },
+    "aes_xcrypt": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 7,
+          "success_count": 7,
+          "success_rate": 1.0,
+          "core_utilization": {
+            "min_safe": 15.0,
+            "max_safe": 25.0,
+            "median": 15.0
+          },
+          "place_density_lb_addon": {
+            "min_safe": 0.2,
+            "max_safe": 0.2,
+            "median": 0.2
+          },
+          "typical_cell_count": 8297,
+          "p90_elapsed_s": 1633.0,
+          "fix_recipes": {
+            "drc": {
+              "beol": {
+                "strategies": {
+                  "beol_only_drc": {
+                    "attempts": 1,
+                    "successes": 1,
+                    "failures": 0,
+                    "wins": 0
+                  }
+                },
+                "n_sessions": 1
+              }
+            }
+          }
+        }
+      }
+    },
+    "bm": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 3,
+          "success_count": 3,
+          "success_rate": 1.0,
+          "place_density_lb_addon": {
+            "min_safe": 0.2,
+            "max_safe": 0.2,
+            "median": 0.2
+          },
+          "typical_cell_count": 496,
+          "p90_elapsed_s": 599.0
+        }
+      }
+    },
+    "catena": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 3,
+          "success_count": 3,
+          "success_rate": 1.0,
+          "place_density_lb_addon": {
+            "min_safe": 0.2,
+            "max_safe": 0.2,
+            "median": 0.2
+          },
+          "typical_cell_count": 589,
+          "p90_elapsed_s": 632.0
+        }
+      }
+    },
+    "cf": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 5,
+          "success_count": 5,
+          "success_rate": 1.0,
+          "core_utilization": {
+            "min_safe": 20.0,
+            "max_safe": 25.0,
+            "median": 25.0
+          },
+          "place_density_lb_addon": {
+            "min_safe": 0.2,
+            "max_safe": 0.2,
+            "median": 0.2
+          },
+          "typical_cell_count": 20925,
+          "p90_elapsed_s": 3011.0,
+          "fix_recipes": {
+            "drc": {
+              "beol": {
+                "strategies": {
+                  "beol_only_drc": {
+                    "attempts": 4,
+                    "successes": 4,
+                    "failures": 0,
+                    "wins": 0
+                  }
+                },
+                "n_sessions": 4
+              }
+            }
+          }
+        }
+      }
+    },
+    "cv32e40p": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 3,
+          "success_count": 3,
+          "success_rate": 1.0,
+          "core_utilization": {
+            "min_safe": 20.0,
+            "max_safe": 20.0,
+            "median": 20.0
+          },
+          "place_density_lb_addon": {
+            "min_safe": 0.2,
+            "max_safe": 0.2,
+            "median": 0.2
+          },
+          "typical_cell_count": 399,
+          "p90_elapsed_s": 692.0
+        }
+      }
+    },
+    "hdl": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 21,
+          "success_count": 21,
+          "success_rate": 1.0,
+          "core_utilization": {
+            "min_safe": 20.0,
+            "max_safe": 25.0,
+            "median": 25.0
+          },
+          "place_density_lb_addon": {
+            "min_safe": 0.2,
+            "max_safe": 0.2,
+            "median": 0.2
+          },
+          "typical_cell_count": 382,
+          "p90_elapsed_s": 690.0,
+          "fix_recipes": {
+            "drc": {
+              "beol": {
+                "strategies": {
+                  "beol_only_drc": {
+                    "attempts": 2,
+                    "successes": 2,
+                    "failures": 0,
+                    "wins": 0
+                  }
+                },
+                "n_sessions": 2
+              }
+            },
+            "orfs": {
+              "full": {
+                "strategies": {
+                  "rerun_from_stage": {
+                    "attempts": 1,
+                    "successes": 1,
+                    "failures": 0,
+                    "wins": 0,
+                    "median_reduction_pct": 1.0
+                  }
+                },
+                "n_sessions": 1
+              }
+            }
+          }
+        }
+      }
+    },
+    "iccad2015": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 44,
+          "success_count": 36,
+          "success_rate": 0.8181818181818182,
+          "core_utilization": {
+            "min_safe": 20.0,
+            "max_safe": 20.0,
+            "median": 20.0
+          },
+          "place_density_lb_addon": {
+            "min_safe": 0.2,
+            "max_safe": 0.2,
+            "median": 0.2
+          },
+          "typical_cell_count": 12719,
+          "p90_elapsed_s": 2978.0,
+          "fix_recipes": {
+            "timing": {
+              "severe": {
+                "strategies": {
+                  "period_relax": {
+                    "attempts": 3,
+                    "successes": 2,
+                    "failures": 0,
+                    "wins": 1,
+                    "median_reduction_pct": 0.975156855174411
+                  }
+                },
+                "n_sessions": 3
+              },
+              "minor": {
+                "strategies": {
+                  "period_relax": {
+                    "attempts": 1,
+                    "successes": 1,
+                    "failures": 0,
+                    "wins": 0,
+                    "median_reduction_pct": 0.5933637786222975
+                  }
+                },
+                "n_sessions": 1
+              }
+            },
+            "drc": {
+              "beol": {
+                "strategies": {
+                  "beol_only_drc": {
+                    "attempts": 44,
+                    "successes": 44,
+                    "failures": 0,
+                    "wins": 0
+                  }
+                },
+                "n_sessions": 44
+              }
+            },
+            "orfs": {
+              "full": {
+                "strategies": {
+                  "rerun_from_stage": {
+                    "attempts": 14,
+                    "successes": 14,
+                    "failures": 0,
+                    "wins": 0,
+                    "median_reduction_pct": 1.0
+                  }
+                },
+                "n_sessions": 14
+              }
+            }
+          }
+        }
+      }
+    },
+    "iccad2017": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 40,
+          "success_count": 38,
+          "success_rate": 0.95,
+          "core_utilization": {
+            "min_safe": 10.0,
+            "max_safe": 25.0,
+            "median": 25.0
+          },
+          "place_density_lb_addon": {
+            "min_safe": 0.2,
+            "max_safe": 0.2,
+            "median": 0.2
+          },
+          "typical_cell_count": 1451,
+          "p90_elapsed_s": 1085.0,
+          "fix_recipes": {
+            "drc": {
+              "antenna": {
+                "strategies": {
+                  "antenna_diode_repair": {
+                    "attempts": 2,
+                    "successes": 2,
+                    "failures": 0,
+                    "wins": 0,
+                    "median_reduction_pct": 1.0
+                  }
+                },
+                "n_sessions": 2
+              },
+              "beol": {
+                "strategies": {
+                  "beol_only_drc": {
+                    "attempts": 11,
+                    "successes": 11,
+                    "failures": 0,
+                    "wins": 0
+                  }
+                },
+                "n_sessions": 11
+              }
+            },
+            "orfs": {
+              "full": {
+                "strategies": {
+                  "rerun_from_stage": {
+                    "attempts": 8,
+                    "successes": 8,
+                    "failures": 0,
+                    "wins": 0,
+                    "median_reduction_pct": 1.0
+                  }
+                },
+                "n_sessions": 8
+              }
+            }
+          }
+        }
+      }
+    },
+    "iscas85": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 11,
+          "success_count": 11,
+          "success_rate": 1.0,
+          "core_utilization": {
+            "min_safe": 25.0,
+            "max_safe": 25.0,
+            "median": 25.0
+          },
+          "place_density_lb_addon": {
+            "min_safe": 0.2,
+            "max_safe": 0.2,
+            "median": 0.2
+          },
+          "typical_cell_count": 676,
+          "p90_elapsed_s": 655.0,
+          "fix_recipes": {
+            "orfs": {
+              "full": {
+                "strategies": {
+                  "rerun_from_stage": {
+                    "attempts": 1,
+                    "successes": 1,
+                    "failures": 0,
+                    "wins": 0,
+                    "median_reduction_pct": 1.0
+                  }
+                },
+                "n_sessions": 1
+              }
+            }
+          }
+        }
+      }
+    },
+    "iscas89": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 41,
+          "success_count": 41,
+          "success_rate": 1.0,
+          "core_utilization": {
+            "min_safe": 20.0,
+            "max_safe": 25.0,
+            "median": 20.0
+          },
+          "place_density_lb_addon": {
+            "min_safe": 0.2,
+            "max_safe": 0.25,
+            "median": 0.2
+          },
+          "typical_cell_count": 432,
+          "p90_elapsed_s": 827.0,
+          "fix_recipes": {
+            "drc": {
+              "beol": {
+                "strategies": {
+                  "beol_only_drc": {
+                    "attempts": 7,
+                    "successes": 7,
+                    "failures": 0,
+                    "wins": 0
+                  }
+                },
+                "n_sessions": 7
+              }
+            },
+            "orfs": {
+              "full": {
+                "strategies": {
+                  "rerun_from_stage": {
+                    "attempts": 9,
+                    "successes": 5,
+                    "failures": 4,
+                    "wins": 0,
+                    "median_reduction_pct": 1.0
+                  }
+                },
+                "n_sessions": 9
+              }
+            }
+          }
+        }
+      }
+    },
+    "koios": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 6,
+          "success_count": 5,
+          "success_rate": 0.8333333333333334,
+          "core_utilization": {
+            "min_safe": 15.0,
+            "max_safe": 25.0,
+            "median": 20.0
+          },
+          "place_density_lb_addon": {
+            "min_safe": 0.2,
+            "max_safe": 0.2,
+            "median": 0.2
+          },
+          "typical_cell_count": 3939,
+          "p90_elapsed_s": 7066.0,
+          "fix_recipes": {
+            "drc": {
+              "beol": {
+                "strategies": {
+                  "beol_only_drc": {
+                    "attempts": 3,
+                    "successes": 3,
+                    "failures": 0,
+                    "wins": 0
+                  }
+                },
+                "n_sessions": 3
+              }
+            },
+            "orfs": {
+              "full": {
+                "strategies": {
+                  "rerun_from_stage": {
+                    "attempts": 6,
+                    "successes": 3,
+                    "failures": 3,
+                    "wins": 0,
+                    "median_reduction_pct": 0.5
+                  }
+                },
+                "n_sessions": 6
+              },
+              "place": {
+                "strategies": {
+                  "rerun_from_stage": {
+                    "attempts": 1,
+                    "successes": 1,
+                    "failures": 0,
+                    "wins": 0,
+                    "median_reduction_pct": 1.0
+                  }
+                },
+                "n_sessions": 1
+              }
+            }
+          }
+        }
+      }
+    },
+    "multiclock": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 3,
+          "success_count": 3,
+          "success_rate": 1.0,
+          "place_density_lb_addon": {
+            "min_safe": 0.2,
+            "max_safe": 0.2,
+            "median": 0.2
+          },
+          "typical_cell_count": 82,
+          "p90_elapsed_s": 529.0
+        }
+      }
+    },
+    "opdb": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 11,
+          "success_count": 11,
+          "success_rate": 1.0,
+          "core_utilization": {
+            "min_safe": 25.0,
+            "max_safe": 25.0,
+            "median": 25.0
+          },
+          "place_density_lb_addon": {
+            "min_safe": 0.2,
+            "max_safe": 0.2,
+            "median": 0.2
+          },
+          "typical_cell_count": 290,
+          "p90_elapsed_s": 2115.0,
+          "fix_recipes": {
+            "drc": {
+              "beol": {
+                "strategies": {
+                  "beol_only_drc": {
+                    "attempts": 4,
+                    "successes": 4,
+                    "failures": 0,
+                    "wins": 0
+                  }
+                },
+                "n_sessions": 4
+              }
+            }
+          }
+        }
+      }
+    },
+    "axis": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 29,
+          "success_count": 24,
+          "success_rate": 0.8275862068965517,
+          "core_utilization": {
+            "min_safe": 25.0,
+            "max_safe": 25.0,
+            "median": 25.0
+          },
+          "place_density_lb_addon": {
+            "min_safe": 0.2,
+            "max_safe": 0.25,
+            "median": 0.2
+          },
+          "typical_cell_count": 578,
+          "p90_elapsed_s": 669.0,
+          "fix_recipes": {
+            "orfs": {
+              "full": {
+                "strategies": {
+                  "rerun_from_stage": {
+                    "attempts": 12,
+                    "successes": 3,
+                    "failures": 9,
+                    "wins": 0,
+                    "median_reduction_pct": 0.0
+                  }
+                },
+                "n_sessions": 12
+              },
+              "route": {
+                "strategies": {
+                  "rerun_from_stage": {
+                    "attempts": 4,
+                    "successes": 4,
+                    "failures": 0,
+                    "wins": 0,
+                    "median_reduction_pct": 1.0
+                  }
+                },
+                "n_sessions": 4
+              },
+              "place": {
+                "strategies": {
+                  "rerun_from_stage": {
+                    "attempts": 1,
+                    "successes": 0,
+                    "failures": 1,
+                    "wins": 0,
+                    "median_reduction_pct": 0.0
+                  }
+                },
+                "n_sessions": 1
+              }
+            }
+          }
+        }
+      }
+    },
+    "pyocdriscv32": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 3,
+          "success_count": 3,
+          "success_rate": 1.0,
+          "place_density_lb_addon": {
+            "min_safe": 0.2,
+            "max_safe": 0.2,
+            "median": 0.2
+          },
+          "typical_cell_count": 399,
+          "p90_elapsed_s": 558.0,
+          "fix_recipes": {
+            "drc": {
+              "antenna": {
+                "strategies": {
+                  "antenna_diode_repair": {
+                    "attempts": 1,
+                    "successes": 1,
+                    "failures": 0,
+                    "wins": 0,
+                    "median_reduction_pct": 1.0
+                  }
+                },
+                "n_sessions": 1
+              }
+            }
+          }
+        }
+      }
+    },
+    "qspiflash": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 9,
+          "success_count": 9,
+          "success_rate": 1.0,
+          "core_utilization": {
+            "min_safe": 25.0,
+            "max_safe": 25.0,
+            "median": 25.0
+          },
+          "place_density_lb_addon": {
+            "min_safe": 0.2,
+            "max_safe": 0.2,
+            "median": 0.2
+          },
+          "typical_cell_count": 1249,
+          "p90_elapsed_s": 1002.0,
+          "fix_recipes": {
+            "drc": {
+              "beol": {
+                "strategies": {
+                  "beol_only_drc": {
+                    "attempts": 3,
+                    "successes": 3,
+                    "failures": 0,
+                    "wins": 0
+                  }
+                },
+                "n_sessions": 3
+              }
+            }
+          }
+        }
+      }
+    },
+    "sha256": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 8,
+          "success_count": 8,
+          "success_rate": 1.0,
+          "core_utilization": {
+            "min_safe": 15.0,
+            "max_safe": 25.0,
+            "median": 25.0
+          },
+          "place_density_lb_addon": {
+            "min_safe": 0.2,
+            "max_safe": 0.2,
+            "median": 0.2
+          },
+          "typical_cell_count": 12396,
+          "p90_elapsed_s": 1907.0,
+          "fix_recipes": {
+            "drc": {
+              "beol": {
+                "strategies": {
+                  "beol_only_drc": {
+                    "attempts": 3,
+                    "successes": 3,
+                    "failures": 0,
+                    "wins": 0
+                  }
+                },
+                "n_sessions": 3
+              }
+            }
+          }
+        }
+      }
+    },
+    "ultraembedded": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 4,
+          "success_count": 3,
+          "success_rate": 0.75,
+          "place_density_lb_addon": {
+            "min_safe": 0.2,
+            "max_safe": 0.2,
+            "median": 0.2
+          },
+          "typical_cell_count": 536,
+          "p90_elapsed_s": 670.0,
+          "fix_recipes": {
+            "drc": {
+              "beol": {
+                "strategies": {
+                  "beol_only_drc": {
+                    "attempts": 2,
+                    "successes": 2,
+                    "failures": 0,
+                    "wins": 0
+                  }
+                },
+                "n_sessions": 2
+              }
+            }
+          }
+        }
+      }
+    },
+    "untitled": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 3,
+          "success_count": 3,
+          "success_rate": 1.0,
+          "core_utilization": {
+            "min_safe": 25.0,
+            "max_safe": 25.0,
+            "median": 25.0
+          },
+          "place_density_lb_addon": {
+            "min_safe": 0.2,
+            "max_safe": 0.2,
+            "median": 0.2
+          },
+          "typical_cell_count": 674,
+          "p90_elapsed_s": 600.0,
+          "fix_recipes": {
+            "drc": {
+              "antenna": {
+                "strategies": {
+                  "antenna_diode_repair": {
+                    "attempts": 1,
+                    "successes": 1,
+                    "failures": 0,
+                    "wins": 0,
+                    "median_reduction_pct": 1.0
+                  }
+                },
+                "n_sessions": 1
+              }
+            }
+          }
+        }
+      }
+    },
+    "usbcorev": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 3,
+          "success_count": 3,
+          "success_rate": 1.0,
+          "core_utilization": {
+            "min_safe": 25.0,
+            "max_safe": 25.0,
+            "median": 25.0
+          },
+          "place_density_lb_addon": {
+            "min_safe": 0.2,
+            "max_safe": 0.2,
+            "median": 0.2
+          },
+          "typical_cell_count": 440,
+          "p90_elapsed_s": 685.0
+        }
+      }
+    },
+    "axil": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 16,
+          "success_count": 16,
+          "success_rate": 1.0,
+          "core_utilization": {
+            "min_safe": 25.0,
+            "max_safe": 25.0,
+            "median": 25.0
+          },
+          "place_density_lb_addon": {
+            "min_safe": 0.2,
+            "max_safe": 0.2,
+            "median": 0.2
+          },
+          "typical_cell_count": 802,
+          "p90_elapsed_s": 1738.0,
+          "fix_recipes": {
+            "orfs": {
+              "full": {
+                "strategies": {
+                  "rerun_from_stage": {
+                    "attempts": 1,
+                    "successes": 1,
+                    "failures": 0,
+                    "wins": 0,
+                    "median_reduction_pct": 1.0
+                  }
+                },
+                "n_sessions": 1
+              }
+            }
+          }
+        }
+      }
+    },
+    "vtr": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 65,
+          "success_count": 61,
+          "success_rate": 0.9384615384615385,
+          "core_utilization": {
+            "min_safe": 10.0,
+            "max_safe": 25.0,
+            "median": 25.0
+          },
+          "place_density_lb_addon": {
+            "min_safe": 0.2,
+            "max_safe": 0.2,
+            "median": 0.2
+          },
+          "typical_cell_count": 93,
+          "p90_elapsed_s": 1901.0,
+          "fix_recipes": {
+            "drc": {
+              "beol": {
+                "strategies": {
+                  "beol_only_drc": {
+                    "attempts": 21,
+                    "successes": 21,
+                    "failures": 0,
+                    "wins": 0
+                  }
+                },
+                "n_sessions": 21
+              }
+            },
+            "orfs": {
+              "full": {
+                "strategies": {
+                  "rerun_from_stage": {
+                    "attempts": 14,
+                    "successes": 11,
+                    "failures": 3,
+                    "wins": 0,
+                    "median_reduction_pct": 1.0
+                  }
+                },
+                "n_sessions": 14
+              }
+            }
+          }
+        }
+      }
+    },
+    "wb2axip": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 46,
+          "success_count": 38,
+          "success_rate": 0.8260869565217391,
+          "core_utilization": {
+            "min_safe": 25.0,
+            "max_safe": 25.0,
+            "median": 25.0
+          },
+          "place_density_lb_addon": {
+            "min_safe": 0.2,
+            "max_safe": 0.2,
+            "median": 0.2
+          },
+          "typical_cell_count": 2111,
+          "p90_elapsed_s": 1292.0,
+          "fix_recipes": {
+            "lvs": {
+              "real_connectivity": {
+                "strategies": {},
+                "n_sessions": 2
+              }
+            },
+            "drc": {
+              "beol": {
+                "strategies": {
+                  "beol_only_drc": {
+                    "attempts": 25,
+                    "successes": 25,
+                    "failures": 0,
+                    "wins": 0
+                  }
+                },
+                "n_sessions": 25
+              }
+            },
+            "orfs": {
+              "full": {
+                "strategies": {
+                  "rerun_from_stage": {
+                    "attempts": 6,
+                    "successes": 6,
+                    "failures": 0,
+                    "wins": 0,
+                    "median_reduction_pct": 1.0
+                  }
+                },
+                "n_sessions": 6
+              }
+            }
+          }
+        }
+      }
+    },
+    "wbi2c": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 3,
+          "success_count": 3,
+          "success_rate": 1.0,
+          "core_utilization": {
+            "min_safe": 10.0,
+            "max_safe": 25.0,
+            "median": 17.5
+          },
+          "place_density_lb_addon": {
+            "min_safe": 0.2,
+            "max_safe": 0.2,
+            "median": 0.2
+          },
+          "typical_cell_count": 1026,
+          "p90_elapsed_s": 795.0,
+          "fix_recipes": {
+            "drc": {
+              "beol": {
+                "strategies": {
+                  "beol_only_drc": {
+                    "attempts": 1,
+                    "successes": 1,
+                    "failures": 0,
+                    "wins": 0
+                  }
+                },
+                "n_sessions": 1
+              }
+            }
+          }
+        }
+      }
+    },
+    "ulixxe": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 0,
+          "success_count": 0,
+          "success_rate": 0.0,
+          "fix_recipes": {
+            "drc": {
+              "beol": {
+                "strategies": {
+                  "beol_only_drc": {
+                    "attempts": 2,
+                    "successes": 2,
+                    "failures": 0,
+                    "wins": 0
+                  }
+                },
+                "n_sessions": 2
+              }
+            }
+          }
+        }
+      }
+    },
+    "usb": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 0,
+          "success_count": 0,
+          "success_rate": 0.0,
+          "fix_recipes": {
+            "drc": {
+              "beol": {
+                "strategies": {
+                  "beol_only_drc": {
+                    "attempts": 2,
+                    "successes": 2,
+                    "failures": 0,
+                    "wins": 0
+                  }
+                },
+                "n_sessions": 2
+              }
+            }
+          }
+        }
+      }
+    },
+    "paj": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 0,
+          "success_count": 0,
+          "success_rate": 0.0,
+          "fix_recipes": {
+            "drc": {
+              "beol": {
+                "strategies": {
+                  "beol_only_drc": {
+                    "attempts": 1,
+                    "successes": 1,
+                    "failures": 0,
+                    "wins": 0
+                  }
+                },
+                "n_sessions": 1
+              }
+            }
+          }
+        }
+      }
+    },
+    "fpu": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 0,
+          "success_count": 0,
+          "success_rate": 0.0,
+          "fix_recipes": {
+            "drc": {
+              "beol": {
+                "strategies": {
+                  "beol_only_drc": {
+                    "attempts": 1,
+                    "successes": 1,
+                    "failures": 0,
+                    "wins": 0
+                  }
+                },
+                "n_sessions": 1
+              }
+            },
+            "orfs": {
+              "full": {
+                "strategies": {
+                  "rerun_from_stage": {
+                    "attempts": 1,
+                    "successes": 1,
+                    "failures": 0,
+                    "wins": 0,
+                    "median_reduction_pct": 1.0
+                  }
+                },
+                "n_sessions": 1
+              }
+            }
+          }
+        }
+      }
+    },
+    "secworks": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 0,
+          "success_count": 0,
+          "success_rate": 0.0,
+          "fix_recipes": {
+            "drc": {
+              "beol": {
+                "strategies": {
+                  "beol_only_drc": {
+                    "attempts": 9,
+                    "successes": 9,
+                    "failures": 0,
+                    "wins": 0
+                  }
+                },
+                "n_sessions": 9
+              }
+            }
+          }
+        }
+      }
+    },
+    "i2srv32": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 0,
+          "success_count": 0,
+          "success_rate": 0.0,
+          "fix_recipes": {
+            "drc": {
+              "beol": {
+                "strategies": {
+                  "beol_only_drc": {
+                    "attempts": 1,
+                    "successes": 1,
+                    "failures": 0,
+                    "wins": 0
+                  }
+                },
+                "n_sessions": 1
+              }
+            }
+          }
+        }
+      }
+    },
+    "des": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 0,
+          "success_count": 0,
+          "success_rate": 0.0,
+          "fix_recipes": {
+            "drc": {
+              "beol": {
+                "strategies": {
+                  "beol_only_drc": {
+                    "attempts": 2,
+                    "successes": 2,
+                    "failures": 0,
+                    "wins": 0
+                  }
+                },
+                "n_sessions": 2
+              }
+            }
+          }
+        }
+      }
+    },
+    "uart16550": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 0,
+          "success_count": 0,
+          "success_rate": 0.0,
+          "fix_recipes": {
+            "drc": {
+              "beol": {
+                "strategies": {
+                  "beol_only_drc": {
+                    "attempts": 1,
+                    "successes": 1,
+                    "failures": 0,
+                    "wins": 0
+                  }
+                },
+                "n_sessions": 1
+              }
+            }
+          }
+        }
+      }
+    },
+    "fir": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 0,
+          "success_count": 0,
+          "success_rate": 0.0,
+          "fix_recipes": {
+            "drc": {
+              "beol": {
+                "strategies": {
+                  "beol_only_drc": {
+                    "attempts": 1,
+                    "successes": 1,
+                    "failures": 0,
+                    "wins": 0
+                  }
+                },
+                "n_sessions": 1
+              }
+            }
+          }
+        }
+      }
+    },
+    "wbuart32": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 0,
+          "success_count": 0,
+          "success_rate": 0.0,
+          "fix_recipes": {
+            "drc": {
+              "beol": {
+                "strategies": {
+                  "beol_only_drc": {
+                    "attempts": 1,
+                    "successes": 1,
+                    "failures": 0,
+                    "wins": 0
+                  }
+                },
+                "n_sessions": 1
+              }
+            }
+          }
+        }
+      }
+    },
+    "wbuart": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 0,
+          "success_count": 0,
+          "success_rate": 0.0,
+          "fix_recipes": {
+            "drc": {
+              "beol": {
+                "strategies": {
+                  "beol_only_drc": {
+                    "attempts": 1,
+                    "successes": 1,
+                    "failures": 0,
+                    "wins": 0
+                  }
+                },
+                "n_sessions": 1
+              }
+            }
+          }
+        }
+      }
+    },
+    "iir": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 0,
+          "success_count": 0,
+          "success_rate": 0.0,
+          "fix_recipes": {
+            "drc": {
+              "beol": {
+                "strategies": {
+                  "beol_only_drc": {
+                    "attempts": 1,
+                    "successes": 1,
+                    "failures": 0,
+                    "wins": 0
+                  }
+                },
+                "n_sessions": 1
+              }
+            }
+          }
+        }
+      }
+    },
+    "sha1": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 0,
+          "success_count": 0,
+          "success_rate": 0.0,
+          "fix_recipes": {
+            "drc": {
+              "beol": {
+                "strategies": {
+                  "beol_only_drc": {
+                    "attempts": 2,
+                    "successes": 2,
+                    "failures": 0,
+                    "wins": 0
+                  }
+                },
+                "n_sessions": 2
+              }
+            },
+            "orfs": {
+              "full": {
+                "strategies": {
+                  "rerun_from_stage": {
+                    "attempts": 1,
+                    "successes": 1,
+                    "failures": 0,
+                    "wins": 0,
+                    "median_reduction_pct": 1.0
+                  }
+                },
+                "n_sessions": 1
+              }
+            }
+          }
+        }
+      }
+    },
+    "libellula": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 0,
+          "success_count": 0,
+          "success_rate": 0.0,
+          "fix_recipes": {
+            "drc": {
+              "beol": {
+                "strategies": {
+                  "beol_only_drc": {
+                    "attempts": 2,
+                    "successes": 2,
+                    "failures": 0,
+                    "wins": 0
+                  }
+                },
+                "n_sessions": 2
+              }
+            }
+          }
+        }
+      }
+    },
+    "sha": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 0,
+          "success_count": 0,
+          "success_rate": 0.0,
+          "fix_recipes": {
+            "drc": {
+              "beol": {
+                "strategies": {
+                  "beol_only_drc": {
+                    "attempts": 1,
+                    "successes": 1,
+                    "failures": 0,
+                    "wins": 0
+                  }
+                },
+                "n_sessions": 1
+              }
+            }
+          }
+        }
+      }
+    },
+    "diffeq1": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 0,
+          "success_count": 0,
+          "success_rate": 0.0,
+          "fix_recipes": {
+            "drc": {
+              "beol": {
+                "strategies": {
+                  "beol_only_drc": {
+                    "attempts": 1,
+                    "successes": 1,
+                    "failures": 0,
+                    "wins": 0
+                  }
+                },
+                "n_sessions": 1
+              }
+            },
+            "orfs": {
+              "full": {
+                "strategies": {
+                  "rerun_from_stage": {
+                    "attempts": 1,
+                    "successes": 1,
+                    "failures": 0,
+                    "wins": 0,
+                    "median_reduction_pct": 1.0
+                  }
+                },
+                "n_sessions": 1
+              }
+            }
+          }
+        }
+      }
+    },
+    "oc54": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 0,
+          "success_count": 0,
+          "success_rate": 0.0,
+          "fix_recipes": {
+            "drc": {
+              "beol": {
+                "strategies": {
+                  "beol_only_drc": {
+                    "attempts": 1,
+                    "successes": 1,
+                    "failures": 0,
+                    "wins": 0
+                  }
+                },
+                "n_sessions": 1
+              }
+            }
+          }
+        }
+      }
+    },
+    "diffeq2": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 0,
+          "success_count": 0,
+          "success_rate": 0.0,
+          "fix_recipes": {
+            "drc": {
+              "beol": {
+                "strategies": {
+                  "beol_only_drc": {
+                    "attempts": 1,
+                    "successes": 1,
+                    "failures": 0,
+                    "wins": 0
+                  }
+                },
+                "n_sessions": 1
+              }
+            },
+            "orfs": {
+              "full": {
+                "strategies": {
+                  "rerun_from_stage": {
+                    "attempts": 1,
+                    "successes": 1,
+                    "failures": 0,
+                    "wins": 0,
+                    "median_reduction_pct": 1.0
+                  }
+                },
+                "n_sessions": 1
+              }
+            }
+          }
+        }
+      }
+    },
+    "dsp": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 0,
+          "success_count": 0,
+          "success_rate": 0.0,
+          "fix_recipes": {
+            "drc": {
+              "beol": {
+                "strategies": {
+                  "beol_only_drc": {
+                    "attempts": 2,
+                    "successes": 2,
+                    "failures": 0,
+                    "wins": 0
+                  }
+                },
+                "n_sessions": 2
+              }
+            }
+          }
+        }
+      }
+    },
+    "faraday": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 0,
+          "success_count": 0,
+          "success_rate": 0.0,
+          "fix_recipes": {
+            "drc": {
+              "beol": {
+                "strategies": {
+                  "beol_only_drc": {
+                    "attempts": 2,
+                    "successes": 2,
+                    "failures": 0,
+                    "wins": 0
+                  }
+                },
+                "n_sessions": 2
+              }
+            }
+          }
+        }
+      }
+    },
+    "prince": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 0,
+          "success_count": 0,
+          "success_rate": 0.0,
+          "fix_recipes": {
+            "drc": {
+              "beol": {
+                "strategies": {
+                  "beol_only_drc": {
+                    "attempts": 2,
+                    "successes": 2,
+                    "failures": 0,
+                    "wins": 0
+                  }
+                },
+                "n_sessions": 2
+              }
+            },
+            "orfs": {
+              "full": {
+                "strategies": {
+                  "rerun_from_stage": {
+                    "attempts": 2,
+                    "successes": 0,
+                    "failures": 2,
+                    "wins": 0,
+                    "median_reduction_pct": 0.0
+                  }
+                },
+                "n_sessions": 2
+              }
+            }
+          }
+        }
+      }
+    },
+    "opencores": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 0,
+          "success_count": 0,
+          "success_rate": 0.0,
+          "fix_recipes": {
+            "drc": {
+              "beol": {
+                "strategies": {
+                  "beol_only_drc": {
+                    "attempts": 1,
+                    "successes": 1,
+                    "failures": 0,
+                    "wins": 0
+                  }
+                },
+                "n_sessions": 1
+              }
+            }
+          }
+        }
+      }
+    },
+    "kleine": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 0,
+          "success_count": 0,
+          "success_rate": 0.0,
+          "fix_recipes": {
+            "drc": {
+              "beol": {
+                "strategies": {
+                  "beol_only_drc": {
+                    "attempts": 1,
+                    "successes": 1,
+                    "failures": 0,
+                    "wins": 0
+                  }
+                },
+                "n_sessions": 1
+              }
+            }
+          }
+        }
+      }
+    },
+    "chacha": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 0,
+          "success_count": 0,
+          "success_rate": 0.0,
+          "fix_recipes": {
+            "drc": {
+              "beol": {
+                "strategies": {
+                  "beol_only_drc": {
+                    "attempts": 2,
+                    "successes": 2,
+                    "failures": 0,
+                    "wins": 0
+                  }
+                },
+                "n_sessions": 2
+              }
+            }
+          }
+        }
+      }
+    },
+    "blake2s": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 0,
+          "success_count": 0,
+          "success_rate": 0.0,
+          "fix_recipes": {
+            "drc": {
+              "beol": {
+                "strategies": {
+                  "beol_only_drc": {
+                    "attempts": 2,
+                    "successes": 2,
+                    "failures": 0,
+                    "wins": 0
+                  }
+                },
+                "n_sessions": 2
+              }
+            }
+          }
+        }
+      }
+    },
+    "uriscv": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 0,
+          "success_count": 0,
+          "success_rate": 0.0,
+          "fix_recipes": {
+            "drc": {
+              "beol": {
+                "strategies": {
+                  "beol_only_drc": {
+                    "attempts": 1,
+                    "successes": 1,
+                    "failures": 0,
+                    "wins": 0
+                  }
+                },
+                "n_sessions": 1
+              }
+            }
+          }
+        }
+      }
+    },
+    "pipelined": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 0,
+          "success_count": 0,
+          "success_rate": 0.0,
+          "fix_recipes": {
+            "drc": {
+              "beol": {
+                "strategies": {
+                  "beol_only_drc": {
+                    "attempts": 1,
+                    "successes": 1,
+                    "failures": 0,
+                    "wins": 0
+                  }
+                },
+                "n_sessions": 1
+              }
+            }
+          }
+        }
+      }
+    },
+    "cmac": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 0,
+          "success_count": 0,
+          "success_rate": 0.0,
+          "fix_recipes": {
+            "drc": {
+              "beol": {
+                "strategies": {
+                  "beol_only_drc": {
+                    "attempts": 2,
+                    "successes": 2,
+                    "failures": 0,
+                    "wins": 0
+                  }
+                },
+                "n_sessions": 2
+              }
+            }
+          }
+        }
+      }
+    },
+    "blob": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 0,
+          "success_count": 0,
+          "success_rate": 0.0,
+          "fix_recipes": {
+            "drc": {
+              "beol": {
+                "strategies": {
+                  "beol_only_drc": {
+                    "attempts": 1,
+                    "successes": 1,
+                    "failures": 0,
+                    "wins": 0
+                  }
+                },
+                "n_sessions": 1
+              }
+            }
+          }
+        }
+      }
+    },
+    "poly1305": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 0,
+          "success_count": 0,
+          "success_rate": 0.0,
+          "fix_recipes": {
+            "drc": {
+              "beol": {
+                "strategies": {
+                  "beol_only_drc": {
+                    "attempts": 2,
+                    "successes": 2,
+                    "failures": 0,
+                    "wins": 0
+                  }
+                },
+                "n_sessions": 2
+              }
+            }
+          }
+        }
+      }
+    },
+    "sdspi": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 0,
+          "success_count": 0,
+          "success_rate": 0.0,
+          "fix_recipes": {
+            "drc": {
+              "beol": {
+                "strategies": {
+                  "beol_only_drc": {
+                    "attempts": 1,
+                    "successes": 1,
+                    "failures": 0,
+                    "wins": 0
+                  }
+                },
+                "n_sessions": 1
+              }
+            }
+          }
+        }
+      }
+    },
+    "biriscv": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 0,
+          "success_count": 0,
+          "success_rate": 0.0,
+          "fix_recipes": {
+            "drc": {
+              "beol": {
+                "strategies": {
+                  "beol_only_drc": {
+                    "attempts": 1,
+                    "successes": 1,
+                    "failures": 0,
+                    "wins": 0
+                  }
+                },
+                "n_sessions": 1
+              }
+            }
+          }
+        }
+      }
+    },
+    "nanocore": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 0,
+          "success_count": 0,
+          "success_rate": 0.0,
+          "fix_recipes": {
+            "drc": {
+              "beol": {
+                "strategies": {
+                  "beol_only_drc": {
+                    "attempts": 1,
+                    "successes": 1,
+                    "failures": 0,
+                    "wins": 0
+                  }
+                },
+                "n_sessions": 1
+              }
+            }
+          }
+        }
+      }
+    },
+    "zipcpu": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 0,
+          "success_count": 0,
+          "success_rate": 0.0,
+          "fix_recipes": {
+            "drc": {
+              "beol": {
+                "strategies": {
+                  "beol_only_drc": {
+                    "attempts": 3,
+                    "successes": 3,
+                    "failures": 0,
+                    "wins": 0
+                  }
+                },
+                "n_sessions": 3
+              }
+            },
+            "orfs": {
+              "full": {
+                "strategies": {
+                  "rerun_from_stage": {
+                    "attempts": 2,
+                    "successes": 1,
+                    "failures": 1,
+                    "wins": 0,
+                    "median_reduction_pct": 0.5
+                  }
+                },
+                "n_sessions": 2
+              },
+              "route": {
+                "strategies": {
+                  "rerun_from_stage": {
+                    "attempts": 1,
+                    "successes": 1,
+                    "failures": 0,
+                    "wins": 0,
+                    "median_reduction_pct": 1.0
+                  }
+                },
+                "n_sessions": 1
+              }
+            }
+          }
+        }
+      }
+    },
+    "bgm": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 0,
+          "success_count": 0,
+          "success_rate": 0.0,
+          "fix_recipes": {
+            "drc": {
+              "beol": {
+                "strategies": {
+                  "beol_only_drc": {
+                    "attempts": 1,
+                    "successes": 1,
+                    "failures": 0,
+                    "wins": 0
+                  }
+                },
+                "n_sessions": 1
+              }
+            }
+          }
+        }
+      }
+    },
+    "md5core": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 0,
+          "success_count": 0,
+          "success_rate": 0.0,
+          "fix_recipes": {
+            "drc": {
+              "beol": {
+                "strategies": {
+                  "beol_only_drc": {
+                    "attempts": 1,
+                    "successes": 1,
+                    "failures": 0,
+                    "wins": 0
+                  }
+                },
+                "n_sessions": 1
+              }
+            }
+          }
+        }
+      }
+    },
+    "wbscope": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 0,
+          "success_count": 0,
+          "success_rate": 0.0,
+          "fix_recipes": {
+            "drc": {
+              "beol": {
+                "strategies": {
+                  "beol_only_drc": {
+                    "attempts": 3,
+                    "successes": 3,
+                    "failures": 0,
+                    "wins": 0
+                  }
+                },
+                "n_sessions": 3
+              }
+            },
+            "orfs": {
+              "full": {
+                "strategies": {
+                  "rerun_from_stage": {
+                    "attempts": 3,
+                    "successes": 1,
+                    "failures": 2,
+                    "wins": 0,
+                    "median_reduction_pct": 0.0
+                  }
+                },
+                "n_sessions": 3
+              },
+              "route": {
+                "strategies": {
+                  "rerun_from_stage": {
+                    "attempts": 2,
+                    "successes": 2,
+                    "failures": 0,
+                    "wins": 0,
+                    "median_reduction_pct": 1.0
+                  }
+                },
+                "n_sessions": 2
+              }
+            }
+          }
+        }
+      }
+    },
+    "arm": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 0,
+          "success_count": 0,
+          "success_rate": 0.0,
+          "fix_recipes": {
+            "orfs": {
+              "full": {
+                "strategies": {
+                  "rerun_from_stage": {
+                    "attempts": 3,
+                    "successes": 1,
+                    "failures": 2,
+                    "wins": 0,
+                    "median_reduction_pct": 0.0
+                  }
+                },
+                "n_sessions": 3
+              },
+              "place": {
+                "strategies": {
+                  "rerun_from_stage": {
+                    "attempts": 1,
+                    "successes": 0,
+                    "failures": 1,
+                    "wins": 0,
+                    "median_reduction_pct": 0.0
+                  }
+                },
+                "n_sessions": 1
+              }
+            }
+          }
+        }
+      }
+    },
+    "r8051": {
+      "platforms": {
+        "nangate45": {
+          "sample_size": 0,
+          "success_count": 0,
+          "success_rate": 0.0,
+          "fix_recipes": {
+            "orfs": {
+              "full": {
+                "strategies": {
+                  "rerun_from_stage": {
+                    "attempts": 1,
+                    "successes": 0,
+                    "failures": 1,
+                    "wins": 0,
+                    "median_reduction_pct": 0.0
+                  }
+                },
+                "n_sessions": 1
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

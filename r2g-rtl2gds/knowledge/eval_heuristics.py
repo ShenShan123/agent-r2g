@@ -30,6 +30,7 @@ from __future__ import annotations
 import argparse
 import json
 import shutil
+import sqlite3
 import sys
 import tempfile
 from pathlib import Path
@@ -655,6 +656,190 @@ def cmd_summarize(args: argparse.Namespace) -> int:
 
 
 # --------------------------------------------------------------------------- #
+# fix-loop A/B arm: empirical (ranked) vs static catalog ordering
+# --------------------------------------------------------------------------- #
+# The fix loop records each fixing episode as a fix_trajectories row. To A/B the
+# empirically-ranked strategy order (fix_model.rank_strategies) against the static
+# catalog order, it tags the episode with an arm: "ranked" or "static". There is
+# NO eval_arm column on fix_trajectories (it is re-derivable from fix_events and we
+# do not widen the schema). The tag is encoded INSIDE the trajectory's existing
+# winning_config_json JSON string under key "eval_arm".
+FIX_ARMS = ("ranked", "static")
+
+
+def _trajectory_arm(winning_config_json: str | None) -> str | None:
+    """Decode the A/B arm from a trajectory's winning_config_json string.
+    Returns 'ranked'|'static' or None if absent/unparseable."""
+    if not winning_config_json:
+        return None
+    try:
+        cfg = json.loads(winning_config_json)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    if not isinstance(cfg, dict):
+        return None
+    arm = cfg.get("eval_arm")
+    return arm if arm in FIX_ARMS else None
+
+
+def _score_fix_pair(ranked: dict[str, Any] | None,
+                    static: dict[str, Any] | None) -> str | None:
+    """Winner for one (family, check) pair on payoff = (iters-to-resolve,
+    total_elapsed_s). Only an arm that REACHED outcome 'resolved' can win, and a
+    winner requires BOTH arms present to compare. The ranked arm wins when it
+    resolves in fewer iterations (ties broken by lower total_elapsed_s). None
+    when there is no comparable pair or neither arm resolved."""
+    if ranked is None or static is None:
+        return None
+    r_resolved = ranked.get("outcome") == "resolved"
+    s_resolved = static.get("outcome") == "resolved"
+    if not r_resolved and not s_resolved:
+        return None
+    if r_resolved and not s_resolved:
+        return "ranked"
+    if s_resolved and not r_resolved:
+        return "static"
+
+    # Both resolved — compare iters-to-resolve, then wall-clock.
+    def _payoff(t: dict[str, Any]) -> tuple[float, float]:
+        n = t.get("n_iters")
+        el = t.get("total_elapsed_s")
+        n_f = float(n) if n is not None else float("inf")
+        el_f = float(el) if el is not None else float("inf")
+        return (n_f, el_f)
+
+    rp, sp = _payoff(ranked), _payoff(static)
+    if rp < sp:
+        return "ranked"
+    if sp < rp:
+        return "static"
+    return None  # genuine tie — no win for either arm
+
+
+def summarize_fix_arms(db_path: Path | str,
+                       out_path: Path | str | None = None) -> dict[str, Any]:
+    """Compare fix_trajectories tagged 'ranked' vs 'static' (the arm is read from
+    winning_config_json["eval_arm"]) on payoff = (iters-to-resolve, elapsed).
+
+    Groups by (design_family, platform, check_type, violation_class), picks the
+    best (fewest-iter resolved) trajectory per arm, scores a winner per pair, and
+    writes fix_eval_summary.json (next to the DB by default, or to out_path).
+    """
+    db_path = Path(db_path)
+    if out_path is None:
+        out_path = db_path.parent / "fix_eval_summary.json"
+    out_path = Path(out_path)
+
+    conn = sqlite3.connect(str(db_path))
+    conn.row_factory = sqlite3.Row
+    try:
+        rows = conn.execute(
+            "SELECT fix_session_id, design_family, platform, check_type, "
+            "       violation_class, n_iters, outcome, total_elapsed_s, "
+            "       winning_config_json "
+            "FROM fix_trajectories"
+        ).fetchall()
+    finally:
+        conn.close()
+
+    # group key -> arm -> best trajectory (fewest iters among resolved, else any)
+    groups: dict[tuple[str, str, str, str], dict[str, dict[str, Any]]] = {}
+    for r in rows:
+        arm = _trajectory_arm(r["winning_config_json"])
+        if arm is None:
+            continue
+        key = (r["design_family"], r["platform"], r["check_type"],
+               r["violation_class"])
+        traj = {
+            "fix_session_id": r["fix_session_id"],
+            "n_iters": r["n_iters"],
+            "outcome": r["outcome"],
+            "total_elapsed_s": r["total_elapsed_s"],
+        }
+        by_arm = groups.setdefault(key, {})
+        prev = by_arm.get(arm)
+        if prev is None or _better_episode(traj, prev):
+            by_arm[arm] = traj
+
+    pairs: list[dict[str, Any]] = []
+    n_ranked_wins = 0
+    n_static_wins = 0
+    for key in sorted(groups):
+        fam, plat, check, vclass = key
+        by_arm = groups[key]
+        ranked = by_arm.get("ranked")
+        static = by_arm.get("static")
+        winner = _score_fix_pair(ranked, static)
+        if winner == "ranked":
+            n_ranked_wins += 1
+        elif winner == "static":
+            n_static_wins += 1
+        pairs.append({
+            "design_family": fam,
+            "platform": plat,
+            "check_type": check,
+            "violation_class": vclass,
+            "winner": winner,
+            "ranked_session": ranked["fix_session_id"] if ranked else None,
+            "ranked_outcome": ranked["outcome"] if ranked else None,
+            "ranked_n_iters": ranked["n_iters"] if ranked else None,
+            "ranked_elapsed_s": ranked["total_elapsed_s"] if ranked else None,
+            "static_session": static["fix_session_id"] if static else None,
+            "static_outcome": static["outcome"] if static else None,
+            "static_n_iters": static["n_iters"] if static else None,
+            "static_elapsed_s": static["total_elapsed_s"] if static else None,
+        })
+
+    summary = {
+        "version": 1,
+        "arms": list(FIX_ARMS),
+        "payoff": "iters_to_resolve_then_total_elapsed_s",
+        "n_pairs": len(pairs),
+        "n_ranked_wins": n_ranked_wins,
+        "n_static_wins": n_static_wins,
+        "pairs": pairs,
+    }
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n",
+                        encoding="utf-8")
+    return summary
+
+
+def _better_episode(cand: dict[str, Any], cur: dict[str, Any]) -> bool:
+    """Prefer the better trajectory per arm: a resolved episode beats a
+    non-resolved one; among same-outcome episodes, fewer iters (then lower
+    elapsed) wins."""
+    cand_resolved = cand.get("outcome") == "resolved"
+    cur_resolved = cur.get("outcome") == "resolved"
+    if cand_resolved != cur_resolved:
+        return cand_resolved  # resolved beats not-resolved
+
+    def _payoff(t: dict[str, Any]) -> tuple[float, float]:
+        n = t.get("n_iters")
+        el = t.get("total_elapsed_s")
+        return (float(n) if n is not None else float("inf"),
+                float(el) if el is not None else float("inf"))
+
+    return _payoff(cand) < _payoff(cur)
+
+
+def cmd_summarize_fix(args: argparse.Namespace) -> int:
+    summary = summarize_fix_arms(args.db, out_path=args.out)
+    out_path = (Path(args.out) if args.out
+                else Path(args.db).parent / "fix_eval_summary.json")
+    print(f"n_pairs={summary['n_pairs']} "
+          f"n_ranked_wins={summary['n_ranked_wins']} "
+          f"n_static_wins={summary['n_static_wins']}")
+    for p in summary["pairs"]:
+        print(f"  {p['design_family']}/{p['platform']}/{p['check_type']}/"
+              f"{p['violation_class']}: winner={p['winner']} "
+              f"(ranked n_iters={p['ranked_n_iters']}, "
+              f"static n_iters={p['static_n_iters']})")
+    print(f"\nSummary: {out_path}")
+    return 0
+
+
+# --------------------------------------------------------------------------- #
 # main
 # --------------------------------------------------------------------------- #
 def main() -> int:
@@ -684,6 +869,16 @@ def main() -> int:
                     help="Skip re-reading arm dirs; just re-aggregate "
                          "eval_summary.json from the existing eval_results.jsonl.")
     ps.set_defaults(func=cmd_summarize)
+
+    pf = sub.add_parser("summarize-fix",
+                        help="A/B the fix loop's ranked vs static strategy "
+                             "ordering on payoff (iters-to-resolve, elapsed)")
+    pf.add_argument("--db", required=True,
+                    help="Path to runs.sqlite (reads fix_trajectories)")
+    pf.add_argument("--out", default=None,
+                    help="Output path for fix_eval_summary.json "
+                         "(default: next to the DB)")
+    pf.set_defaults(func=cmd_summarize_fix)
 
     args = p.parse_args()
     return args.func(args)
