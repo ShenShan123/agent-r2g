@@ -22,6 +22,12 @@ except ImportError:                       # script run outside the test sys.path
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     import fix_model
 
+try:
+    import symptom                         # symptom-indexed memory (spec 2026-06-09)
+except ImportError:                       # knowledge/ not yet on the path
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "knowledge"))
+    import symptom
+
 BLOCK_START = "# >>> r2g signoff-fix (auto) >>>"
 BLOCK_END = "# <<< r2g signoff-fix (auto) <<<"
 KLAYOUT_CPP_CRASH = re.compile(r"sort_circuit|gen_log_entry|segmentation|sigsegv", re.I)
@@ -236,12 +242,16 @@ def _lvs_plan(lvs: dict, cfg: dict, exclude: set) -> dict:
     return plan
 
 
-def _rank_plan_strategies(plan: dict, recipes: dict | None) -> dict:
-    """Reorder plan['strategies'] by fix_model and attach the full ranking."""
+def _rank_plan_strategies(plan: dict, recipes: dict | None,
+                          pooled: dict | None = None) -> dict:
+    """Reorder plan['strategies'] by fix_model and attach the full ranking.
+    `pooled` (symptom-indexed memory, spec 2026-06-09) is the cross-platform prior
+    used for strategies the local recipe has no data for; None preserves legacy
+    behavior (build_plan's internal call passes None)."""
     if not plan.get("strategies"):
         return plan
     static_order = [s["id"] for s in plan["strategies"]]
-    ranking = fix_model.rank_strategies(recipes, static_order)
+    ranking = fix_model.rank_strategies(recipes, static_order, pooled=pooled)
     by_id = {s["id"]: s for s in plan["strategies"]}
     plan["strategies"] = [by_id[r["strategy"]] for r in ranking if r["strategy"] in by_id]
     plan["ranking"] = ranking
@@ -327,6 +337,44 @@ def _load_recipes(proj: Path, *, check: str, drc: dict, lvs: dict,
     return by_check.get(vclass)
 
 
+def load_symptom_recipe(*, check: str, platform: str, drc: dict, lvs: dict,
+                        heuristics: Path | None = None):
+    """Return (recipe_entry, pooled_prior) for the current symptom, indexed by
+    symptom_id (NOT family). recipe_entry = the current platform's by_platform
+    stats (same-platform evidence preferred); pooled_prior = the cross-platform
+    pooled stats for untried strategies, excluding platform_specific ones
+    (symptom-indexed memory, spec 2026-06-09)."""
+    # NOTE: parents[2] = the skill root (r2g-rtl2gds); knowledge/ is its child.
+    hp = heuristics or (Path(__file__).resolve().parents[2] / "knowledge" / "heuristics.json")
+    if not hp.exists():
+        return None, {}
+    data = json.loads(hp.read_text(encoding="utf-8"))
+    symptoms = data.get("symptoms") or {}
+    if check == "drc":
+        cats = drc.get("categories") or {}
+        vclass = max(cats, key=lambda k: cats[k].get("count") or 0) if cats else None
+        report = drc
+    elif check == "lvs":
+        vclass, report = lvs.get("mismatch_class"), lvs
+    else:
+        vclass, report = None, {}
+    sig = symptom.canonical_signature(check, vclass, symptom.predicates_for(check, report))
+    bucket = symptoms.get(symptom.symptom_id(sig))
+    if not bucket:
+        return None, {}
+    strategies = bucket.get("strategies") or {}
+    # Same-platform recipe: the by_platform slice for THIS platform.
+    recipe = {"strategies": {}, "n_sessions": bucket.get("n_sessions", 0)}
+    for stratid, s in strategies.items():
+        bp = (s.get("by_platform") or {}).get(platform)
+        if bp:
+            recipe["strategies"][stratid] = bp
+    # Pooled prior: cross-platform totals, minus platform_specific strategies.
+    pooled = {stratid: {k: s.get(k, 0) for k in ("attempts", "successes", "wins", "failures")}
+              for stratid, s in strategies.items() if not s.get("platform_specific")}
+    return (recipe if recipe["strategies"] else None), pooled
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="Diagnose DRC/LVS violations → real-fix plan.")
     ap.add_argument("project_dir")
@@ -345,8 +393,14 @@ def main(argv=None) -> int:
     cfg_text = cfg_path.read_text(encoding="utf-8") if cfg_path.exists() else ""
     cfg = parse_config(cfg_text)
     exclude = [x for x in args.exclude.split(",") if x]
-    recipes = _load_recipes(proj, check=args.check, drc=drc, lvs=lvs)
+    # Symptom-first lookup (spec 2026-06-09): prefer the symptom-indexed recipe +
+    # pooled cross-platform prior; fall back to the legacy family/platform recipe.
+    plat = cfg.get("PLATFORM", "nangate45")
+    sym_recipe, pooled = load_symptom_recipe(check=args.check, platform=plat, drc=drc, lvs=lvs)
+    recipes = sym_recipe if sym_recipe is not None else _load_recipes(
+        proj, check=args.check, drc=drc, lvs=lvs)
     plan = build_plan(drc, lvs, cfg, check=args.check, exclude=exclude, recipes=recipes)
+    _rank_plan_strategies(plan, recipes, pooled=pooled)
 
     if args.apply:
         strat = next((s for s in plan["strategies"] if s["id"] == args.apply), None)
