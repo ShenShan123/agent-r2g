@@ -118,7 +118,12 @@ def test_lineage_recorded_when_config_changes(tmp_knowledge_dir, tmp_path):
     assert "CORE_UTILIZATION" in diff["changed"]
     assert diff["changed"]["CORE_UTILIZATION"]["old"] == "30"
     assert diff["changed"]["CORE_UTILIZATION"]["new"] == "25"
-    assert outcome == "pass"
+    # current_outcome is structured JSON since Phase 0.2 (was the bare orfs_status).
+    outcome_obj = json.loads(outcome)
+    assert outcome_obj["orfs_status"] == "pass"
+    assert outcome_obj["is_success"] is True
+    assert set(outcome_obj) >= {"is_success", "orfs_status", "wns_ns",
+                                "drc_violations", "total_elapsed_s"}
     conn.close()
 
 
