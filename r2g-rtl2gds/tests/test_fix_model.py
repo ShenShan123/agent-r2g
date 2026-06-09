@@ -84,3 +84,16 @@ def test_never_drops_a_static_strategy():
              "n_sessions": 2}
     ranked = fxm.rank_strategies(entry, STATIC)
     assert set(r["strategy"] for r in ranked) == set(STATIC)
+
+
+def test_informed_prior_lifts_untried_strategy_toward_pooled_rate():
+    # Local recipe has NO data for diode_repair; pooled symptom evidence says it
+    # clears ~90%. Informed prior must rank it above the flat-0.5 untried prior.
+    STATIC = ["antenna_diode_repair", "antenna_density_relief"]
+    pooled = {"antenna_diode_repair": {"successes": 9, "attempts": 10, "wins": 0}}
+    ranked = fxm.rank_strategies(None, STATIC, pooled=pooled)
+    diode = next(r for r in ranked if r["strategy"] == "antenna_diode_repair")
+    relief = next(r for r in ranked if r["strategy"] == "antenna_density_relief")
+    assert diode["score"] > 0.7           # ~ (9+1)/(10+2)
+    assert relief["score"] == 0.5         # no pooled evidence -> neutral
+    assert diode["provenance"].startswith("prior")

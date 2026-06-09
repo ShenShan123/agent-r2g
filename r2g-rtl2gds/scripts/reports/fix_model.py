@@ -25,15 +25,22 @@ def _score(successes: int, attempts: int, wins: int = 0) -> float:
     return (successes + 0.5 * wins + 1) / (attempts + 2)
 
 
-def rank_strategies(recipe_entry: dict | None, static_order: list[str]) -> list[dict]:
+def rank_strategies(recipe_entry: dict | None, static_order: list[str],
+                    pooled: dict | None = None) -> list[dict]:
     """Rank `static_order` strategies by smoothed historical clearance.
 
-    recipe_entry: Tier-3 aggregate for this (check, violation_class), or None
-                  (cold start). static_order: catalog order (the deterministic
-                  tiebreaker and the full set that must always be returned).
+    recipe_entry: Tier-3 aggregate for this (check, violation_class) — or, in the
+                  symptom-indexed path, the current platform's by_platform slice —
+                  or None (cold start). static_order: catalog order (the
+                  deterministic tiebreaker and the full set that must always be
+                  returned). pooled: optional cross-platform symptom-level stats
+                  (spec 2026-06-09) used as an INFORMED prior for strategies the
+                  local recipe has no data for — lifts a transfer-worthy strategy
+                  above the flat-0.5 untried prior. pooled=None -> legacy behavior.
     """
     stats = (recipe_entry or {}).get("strategies", {})
     n_sessions = (recipe_entry or {}).get("n_sessions", 0)
+    pooled = pooled or {}
     ranked: list[dict] = []
     for pos, sid in enumerate(static_order):
         s = stats.get(sid)
@@ -44,6 +51,14 @@ def rank_strategies(recipe_entry: dict | None, static_order: list[str]) -> list[
             failures = int(s.get("failures", max(0, attempts - successes)))
             score = _score(successes, attempts, wins)
             prov = f"learned(n={n_sessions},tried={attempts})"
+        elif sid in pooled:
+            ps = pooled[sid]
+            attempts = int(ps.get("attempts", 0))
+            successes = int(ps.get("successes", 0))
+            wins = int(ps.get("wins", 0))
+            failures = int(ps.get("failures", max(0, attempts - successes)))
+            score = _score(successes, attempts, wins)
+            prov = f"prior(pooled,tried={attempts})"
         else:
             attempts = successes = failures = wins = 0
             score = _score(0, 0)  # 0.5 neutral prior
