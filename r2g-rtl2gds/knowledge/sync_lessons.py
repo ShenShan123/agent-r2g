@@ -16,7 +16,9 @@ from pathlib import Path
 import knowledge_db
 import symptom
 
-_SECTION_RE = re.compile(r"^## (.+)$", re.MULTILINE)
+# Match h2-h4 headings: lessons usually live at the granular ###/#### sub-section
+# (e.g. "### LVS symmetric-matcher residual"), not only top-level ## sections.
+_SECTION_RE = re.compile(r"^#{2,4} (.+)$", re.MULTILINE)
 _FRONT_RE = re.compile(r"<!--\s*r2g-lesson:(.*?)-->", re.DOTALL)
 
 _DEFAULT_DOCS = [

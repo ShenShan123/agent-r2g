@@ -121,6 +121,14 @@ def manage(db_path, *, out_path=None, autolearn=True) -> dict:
     if autolearn:
         import learn_heuristics
         learn_heuristics.learn(db_path, out_path)   # builds trajectories+recipes FIRST
+        try:                                        # one-way prose->lessons sync
+            import sync_lessons
+            conn = knowledge_db.connect(db_path)
+            sync_lessons.sync(conn)
+            conn.close()
+        except Exception as e:                      # sync must never break ingest
+            import sys
+            print(f"[fix_log_manager] lesson sync skipped: {e}", file=sys.stderr)
     archived = archive_old_raw(db_path)             # safe: trajectories already built
     conn = knowledge_db.connect(db_path)
     try:

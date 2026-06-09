@@ -426,6 +426,13 @@ When klayout DRC is stuck on a polygon op and gets SIGKILL'd by something **othe
 
 ### LVS symmetric-matcher residual (KLayout `Netlists don't match`, layout actually correct)
 
+<!-- r2g-lesson:
+id: lesson-lvs-symmetric-matcher
+status: active
+trigger: {check: lvs, class: symmetric_matcher, platform: "*"}
+strategy_ids: [lvs_same_nets_seed]
+-->
+
 - **Symptom:** `6_lvs.log` ends with `ERROR : Netlists don't match`, but the `.lvsdb` failure is
   **only** instance/net assignment ambiguity, not a real delta. The precise, validated signature
   (`extract_lvs.py::classify_lvs_mismatch`, refined 2026-06-03) is:
@@ -1188,6 +1195,13 @@ DESIGNS_LIST=design_cases/_batch/failed_cases.txt \
 Empirical fix yield (from the 93-failure retry): memory/place-density/io-pin fixes each converge in one retry; 6 missing-include designs require real header files and cannot be stub-fixed.
 
 ### Antenna DRC Violations
+
+<!-- r2g-lesson:
+id: lesson-nangate45-antenna-diode
+status: active
+trigger: {check: drc, class: METAL1_ANTENNA, platform: nangate45}
+strategy_ids: [antenna_diode_repair]
+-->
 
 **Symptoms:**
 - DRC report shows METAL*_ANTENNA violations (e.g., METAL4_ANTENNA, METAL5_ANTENNA)

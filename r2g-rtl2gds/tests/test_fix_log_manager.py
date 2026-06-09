@@ -101,3 +101,20 @@ def test_recipes_survive_a_second_relearn_after_archive(tmp_knowledge_dir, monke
     assert conn.execute("SELECT COUNT(*) FROM fix_trajectories "
                         "WHERE fix_session_id='s1'").fetchone()[0] == 1
     conn.close()
+
+
+def test_manage_runs_lesson_sync(tmp_path, tmp_knowledge_dir, monkeypatch):
+    import knowledge_db
+    db = tmp_knowledge_dir / "runs.sqlite"
+    conn = knowledge_db.connect(db)
+    knowledge_db.ensure_schema(conn, schema_path=tmp_knowledge_dir / "schema.sql")
+    conn.commit(); conn.close()
+    md = tmp_path / "failure-patterns.md"
+    md.write_text("# F\n\n## Sym\n<!-- r2g-lesson:\nid: l-sym\nstatus: active\n"
+                  'trigger: {check: lvs, class: symmetric_matcher, platform: "*"}\n-->\nx\n')
+    import sync_lessons
+    monkeypatch.setattr(sync_lessons, "_DEFAULT_DOCS", [md])
+    flm.manage(db, out_path=tmp_knowledge_dir / "heuristics.json")
+    conn = knowledge_db.connect(db)
+    assert conn.execute("SELECT COUNT(*) FROM lessons").fetchone()[0] == 1
+    conn.close()
