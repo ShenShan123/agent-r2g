@@ -97,3 +97,30 @@ def test_search_end_to_end(tmp_path):
     assert len(results) >= 1
     assert results[0]["id"] == "PDN Grid Error"
     assert results[0]["score"] > 0
+
+
+def test_search_prefilters_by_symptom_trigger(tmp_path):
+    md = tmp_path / "failure-patterns.md"
+    md.write_text(
+        "# F\n\n"
+        "## Antenna (nangate45)\n"
+        "<!-- r2g-lesson:\nid: l-ant\nstatus: active\n"
+        'trigger: {check: drc, class: METAL1_ANTENNA, platform: nangate45}\n-->\n'
+        "Force diodes on nangate45.\n\n"
+        "## LVS symmetric (any platform)\n"
+        "<!-- r2g-lesson:\nid: l-sym\nstatus: active\n"
+        'trigger: {check: lvs, class: symmetric_matcher, platform: "*"}\n-->\n'
+        "Tool artifact; stop re-running.\n\n"
+        "## Retired note\n"
+        "<!-- r2g-lesson:\nid: l-old\nstatus: retired\n"
+        'trigger: {check: lvs, class: symmetric_matcher, platform: "*"}\n-->\n'
+        "Old advice.\n")
+    # LVS symmetric on sky130hd -> the "*" lesson matches; the nangate45 antenna
+    # lesson does NOT; the retired lesson is excluded.
+    hits = search_failures.lessons_for_symptom(
+        check="lvs", vclass="symmetric_matcher", platform="sky130hd",
+        patterns_path=md)
+    ids = [h["id"] for h in hits]
+    assert "l-sym" in ids
+    assert "l-ant" not in ids
+    assert "l-old" not in ids

@@ -21,6 +21,7 @@ from collections import Counter
 from pathlib import Path
 
 import knowledge_db
+import sync_lessons  # reuse the front-matter parser + section iterator (spec 2026-06-09 §4.4)
 
 _PATTERNS_PATH = knowledge_db.DEFAULT_KNOWLEDGE_DIR.parent / "references" / "failure-patterns.md"
 _CANDIDATES_PATH = knowledge_db.DEFAULT_KNOWLEDGE_DIR / "failure_candidates.json"
@@ -139,6 +140,36 @@ def search(query: str,
         return []
     index = BM25Index(docs)
     return index.search(query, top_k=top_k)
+
+
+def lessons_for_symptom(*, check: str, vclass: str | None, platform: str,
+                        patterns_path: Path = _PATTERNS_PATH) -> list[dict]:
+    """Return ACTIVE lessons whose trigger matches this symptom (+ platform, with
+    '*' wildcard). Each: {id, status, trigger, strategy_ids, prose}
+    (symptom-indexed memory, spec 2026-06-09 §4.4)."""
+    p = Path(patterns_path)
+    if not p.exists():
+        return []
+    out = []
+    for title, body in sync_lessons._iter_sections(p.read_text(encoding="utf-8")):
+        fm = sync_lessons._FRONT_RE.search(body)
+        if not fm:
+            continue
+        meta = sync_lessons._parse_frontmatter(fm.group(1))
+        if meta.get("status", "active") != "active":
+            continue
+        trig = meta.get("trigger") or {}
+        if trig.get("check") and trig["check"] != check:
+            continue
+        if trig.get("class") and vclass is not None and trig["class"] != vclass:
+            continue
+        tp = trig.get("platform", "*")
+        if tp not in ("*", None) and tp != platform:
+            continue
+        out.append({"id": meta.get("id"), "status": "active", "trigger": trig,
+                    "strategy_ids": meta.get("strategy_ids") or [],
+                    "prose": sync_lessons._FRONT_RE.sub("", body).strip()[:400]})
+    return out
 
 
 def main() -> int:
