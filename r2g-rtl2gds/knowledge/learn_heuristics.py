@@ -105,6 +105,16 @@ def _build_trajectory(events: list[dict]) -> dict:
     failed = sorted({e.get("strategy") for e in events
                      if e.get("verdict") in ("no_change", "regression")
                      and e.get("strategy")})
+    # Symptom of the episode: first event's stored symptom, else coarse backfill
+    # from (check_type, violation_class) so legacy/backfilled events still index by
+    # symptom (symptom-indexed memory, spec 2026-06-09).
+    import symptom as _symptom
+    sid = first.get("symptom_id")
+    sigj = first.get("signature_json")
+    if not sid:
+        sig = _symptom.canonical_signature(first.get("check_type"),
+                                           first.get("violation_class"), None)
+        sid, sigj = _symptom.symptom_id(sig), json.dumps(sig, sort_keys=True)
     return {
         "fix_session_id": first.get("fix_session_id"),
         "project_path": first.get("project_path"),
@@ -122,6 +132,8 @@ def _build_trajectory(events: list[dict]) -> dict:
         "initial_count": first.get("before_count"),
         "final_count": events[-1].get("after_count"),
         "total_elapsed_s": sum(e.get("elapsed_s") or 0.0 for e in events) or None,
+        "symptom_id": sid,
+        "signature_json": sigj,
     }
 
 

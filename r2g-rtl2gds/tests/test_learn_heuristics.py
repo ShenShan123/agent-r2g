@@ -231,3 +231,25 @@ def test_learn_skips_family_with_no_successful_runs(tmp_knowledge_dir):
     learn_heuristics.learn(db_path, out)
     data = json.loads(out.read_text())
     assert "aes_xcrypt" not in data["families"]
+
+
+def test_trajectories_carry_symptom(tmp_knowledge_dir):
+    db = tmp_knowledge_dir / "runs.sqlite"
+    conn = knowledge_db.connect(db)
+    knowledge_db.ensure_schema(conn, schema_path=tmp_knowledge_dir / "schema.sql")
+    # Insert two raw fix_events for one episode, both tagged with a symptom.
+    sig = '{"check": "lvs", "class": "symmetric_matcher", "predicates": {}}'
+    for it, verdict in ((1, "no_change"), (2, "cleared")):
+        conn.execute(
+            "INSERT INTO fix_events (fix_session_id, check_type, violation_class, "
+            " iter, strategy, verdict, symptom_id, signature_json, ts) "
+            "VALUES ('e1','lvs','symmetric_matcher',?,?,?,?,?,?)",
+            (it, "lvs_same_nets_seed", verdict, "abc123def4560000", sig,
+             f"2026-06-09T00:0{it}:00Z"))
+    conn.commit()
+    learn_heuristics._rebuild_fix_trajectories(conn)
+    row = conn.execute(
+        "SELECT symptom_id, signature_json FROM fix_trajectories").fetchone()
+    assert row[0] == "abc123def4560000"
+    assert json.loads(row[1])["class"] == "symmetric_matcher"
+    conn.close()
