@@ -101,6 +101,8 @@ CREATE TABLE IF NOT EXISTS fix_events (
     elapsed_s               REAL,
     ts                      TEXT,
     provenance              TEXT,                    -- live | backfill:<source>
+    symptom_id              TEXT,
+    signature_json          TEXT,
     UNIQUE(fix_session_id, iter, strategy)
 );
 CREATE INDEX IF NOT EXISTS idx_fix_events_session ON fix_events(fix_session_id);
@@ -129,6 +131,8 @@ CREATE TABLE IF NOT EXISTS fix_trajectories (
     initial_count           REAL,
     final_count             REAL,
     total_elapsed_s         REAL,
+    symptom_id              TEXT,
+    signature_json          TEXT,
     PRIMARY KEY (fix_session_id, check_type)
 );
 CREATE INDEX IF NOT EXISTS idx_fix_traj_fam
@@ -145,6 +149,8 @@ CREATE TABLE IF NOT EXISTS run_violations (
     lvs_mismatch_class      TEXT,
     timing_tier             TEXT,
     wns_ns                  REAL,
+    symptom_id              TEXT,
+    signature_json          TEXT,
     snapshot_ts             TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_run_violations_fam ON run_violations(design_family, platform);
@@ -161,3 +167,23 @@ CREATE TABLE IF NOT EXISTS fix_events_archive (
     cumulative_config_json TEXT, env_flags_json TEXT, tool_versions_json TEXT,
     stage_metrics_json TEXT, stacked INTEGER, elapsed_s REAL, ts TEXT, provenance TEXT
 );
+
+-- ── Symptom-indexed memory (spec 2026-06-09) ─────────────────────────────
+-- Raw symptom catalog: one row per distinct symptom_id. The symptom is the
+-- universal index for learned repair experience; design-family/name is NEVER
+-- a key (only evidence_designs provenance in the derived heuristics.json).
+CREATE TABLE IF NOT EXISTS symptoms (
+    symptom_id              TEXT PRIMARY KEY,        -- sha1(check, class, sorted true predicates)[:16]
+    check_type              TEXT,                    -- drc | lvs | timing | synth | orfs_stage
+    class                   TEXT,                    -- dominant DRC cat | lvs mismatch_class | timing tier | ...
+    predicates_json         TEXT,                    -- {"nets_balanced": true, ...} (sparse, true-only)
+    symptom_schema_version  INTEGER,                 -- bump when the predicate set / hashing changes
+    first_seen              TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_symptoms_check_class ON symptoms(check_type, class);
+
+-- Fast symptom lookups on the raw tiers (symptom_id/signature_json columns are
+-- added by knowledge_db._migrate_add_columns for legacy DBs; created here for new).
+CREATE INDEX IF NOT EXISTS idx_fix_events_symptom    ON fix_events(symptom_id);
+CREATE INDEX IF NOT EXISTS idx_run_violations_symptom ON run_violations(symptom_id);
+CREATE INDEX IF NOT EXISTS idx_fix_traj_symptom      ON fix_trajectories(symptom_id);
