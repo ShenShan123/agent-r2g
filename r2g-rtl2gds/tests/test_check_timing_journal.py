@@ -42,6 +42,19 @@ def test_journal_cleared_when_after_clean(tmp_path):
     assert r["fix_session_id"]
 
 
+def test_journal_emits_predicates_and_config_delta(tmp_path):
+    # Symptom-indexed memory parity: timing fix_events carry config_delta + predicates.
+    rows = _journal(
+        tmp_path,
+        {"tier": "minor", "wns": -0.5, "clock_period": 10},
+        {"tier": "clean", "wns": 0.1, "clock_period": 11},
+    )
+    assert len(rows) == 1
+    r = rows[0]
+    assert "predicates" in r and isinstance(r["predicates"], dict)
+    assert json.loads(r["config_delta"]) == {"clock_period_ns": 11}
+
+
 def test_journal_minor_is_win_not_cleared(tmp_path):
     # moderate (wns -3.0) -> minor (wns -1.0): improved but NOT closed (wns<0).
     rows = _journal(

@@ -244,6 +244,11 @@ def _journal(project, before_path, after_path, strategy):
         "violation_class": before_tier, "after_status": after_tier,
         "before_categories": json.dumps({"tier": before_tier}),
         "cumulative_config": json.dumps({"clock_period_ns": clock}),
+        # Parity with fix_signoff.sh fix_log rows (symptom-indexed memory, spec 2026-06-09):
+        # config_delta is the knob this fix moved; timing has no curated boolean
+        # predicates in symptom v1 (the tier is carried as violation_class), so {}.
+        "config_delta": json.dumps({"clock_period_ns": clock}),
+        "predicates": {},
         "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
     }
     log = Path(project) / "reports" / "fix_log.jsonl"
