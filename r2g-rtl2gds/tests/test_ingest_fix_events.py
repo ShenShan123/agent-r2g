@@ -172,7 +172,11 @@ def test_fix_events_get_symptom_id_and_symptoms_table(tmp_path, tmp_knowledge_di
     srow = conn.execute("SELECT check_type, class FROM symptoms "
                         "WHERE symptom_id = ?", (sid_row[0],)).fetchone()
     assert srow == ("lvs", "symmetric_matcher")
+    # ingest also writes a per-run run_violations symptom (the landscape symptom for
+    # this clean project), so >1 symptom can exist; idempotency means re-ingest adds
+    # NO new symptom and NO duplicate fix_event.
+    n_symptoms = conn.execute("SELECT COUNT(*) FROM symptoms").fetchone()[0]
     ingest_run.ingest(proj, conn, families_path=tmp_knowledge_dir / "families.json")
     assert conn.execute("SELECT COUNT(*) FROM fix_events").fetchone()[0] == 1
-    assert conn.execute("SELECT COUNT(*) FROM symptoms").fetchone()[0] == 1
+    assert conn.execute("SELECT COUNT(*) FROM symptoms").fetchone()[0] == n_symptoms
     conn.close()
