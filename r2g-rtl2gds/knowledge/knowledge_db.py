@@ -26,11 +26,24 @@ def connect(db_path: Path | str = DEFAULT_DB_PATH) -> sqlite3.Connection:
     return conn
 
 
+# Indexes on columns added by _migrate_add_columns. They MUST be created after the
+# migration (a legacy DB's raw tables lack symptom_id until then; creating them inside
+# schema.sql's executescript — which runs before the migration — fails with "no such
+# column"). Idempotent.
+_POST_MIGRATION_INDEXES = (
+    "CREATE INDEX IF NOT EXISTS idx_fix_events_symptom     ON fix_events(symptom_id)",
+    "CREATE INDEX IF NOT EXISTS idx_run_violations_symptom ON run_violations(symptom_id)",
+    "CREATE INDEX IF NOT EXISTS idx_fix_traj_symptom       ON fix_trajectories(symptom_id)",
+)
+
+
 def ensure_schema(conn: sqlite3.Connection,
                   schema_path: Path | str = DEFAULT_SCHEMA_PATH) -> None:
     ddl = Path(schema_path).read_text(encoding="utf-8")
     conn.executescript(ddl)
     _migrate_add_columns(conn)
+    for stmt in _POST_MIGRATION_INDEXES:
+        conn.execute(stmt)
     conn.commit()
 
 

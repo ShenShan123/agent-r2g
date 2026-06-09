@@ -183,11 +183,12 @@ CREATE TABLE IF NOT EXISTS symptoms (
 );
 CREATE INDEX IF NOT EXISTS idx_symptoms_check_class ON symptoms(check_type, class);
 
--- Fast symptom lookups on the raw tiers (symptom_id/signature_json columns are
--- added by knowledge_db._migrate_add_columns for legacy DBs; created here for new).
-CREATE INDEX IF NOT EXISTS idx_fix_events_symptom    ON fix_events(symptom_id);
-CREATE INDEX IF NOT EXISTS idx_run_violations_symptom ON run_violations(symptom_id);
-CREATE INDEX IF NOT EXISTS idx_fix_traj_symptom      ON fix_trajectories(symptom_id);
+-- NOTE: the symptom-lookup indexes on the RAW tiers (fix_events / run_violations /
+-- fix_trajectories) are NOT created here. On a legacy DB those tables already exist
+-- WITHOUT the symptom_id column (CREATE TABLE IF NOT EXISTS no-ops), and this script
+-- runs BEFORE knowledge_db._migrate_add_columns adds the column — so a CREATE INDEX
+-- on symptom_id here would fail with "no such column". knowledge_db.ensure_schema
+-- creates them in Python AFTER the migration (idx_fix_events_symptom etc.).
 
 -- Prose<->struct link (spec 2026-06-09 §4.4): one row per ## section that carries
 -- an r2g-lesson front-matter block. Prose stays the human-editable source of truth;
