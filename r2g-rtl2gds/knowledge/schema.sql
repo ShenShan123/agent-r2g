@@ -188,3 +188,19 @@ CREATE INDEX IF NOT EXISTS idx_symptoms_check_class ON symptoms(check_type, clas
 CREATE INDEX IF NOT EXISTS idx_fix_events_symptom    ON fix_events(symptom_id);
 CREATE INDEX IF NOT EXISTS idx_run_violations_symptom ON run_violations(symptom_id);
 CREATE INDEX IF NOT EXISTS idx_fix_traj_symptom      ON fix_trajectories(symptom_id);
+
+-- Prose<->struct link (spec 2026-06-09 §4.4): one row per ## section that carries
+-- an r2g-lesson front-matter block. Prose stays the human-editable source of truth;
+-- this is a one-way derived index (sync_lessons.py). Never auto-writes prose.
+CREATE TABLE IF NOT EXISTS lessons (
+    lesson_id             TEXT PRIMARY KEY,
+    source_doc            TEXT,
+    section_title         TEXT,
+    status                TEXT,                  -- active | retired
+    symptom_trigger_json  TEXT,                  -- {check, class?, predicates?, platform}
+    strategy_ids_json     TEXT,
+    prose_excerpt         TEXT,
+    evidence_runs_json    TEXT,                  -- AUTO back-filled; do not hand-edit
+    content_hash          TEXT,
+    synced_at             TEXT
+);
