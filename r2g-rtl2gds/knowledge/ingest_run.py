@@ -196,14 +196,29 @@ def _write_run_violations(conn: sqlite3.Connection, run_id: str,
                           design_family: str, platform: str,
                           drc: dict[str, Any], lvs: dict[str, Any],
                           tcheck: dict[str, Any], wns: Any) -> None:
+    # Per-run symptom: prefer the failing check (LVS fail -> mismatch_class symptom,
+    # else DRC -> dominant category, else timing tier). Family is NOT part of it.
+    if lvs.get("status") == "fail":
+        check, vclass, report = "lvs", lvs.get("mismatch_class"), lvs
+    elif drc.get("status") == "fail":
+        cats = drc.get("categories") or {}
+        vclass = max(cats, key=lambda k: cats[k].get("count") or 0) if cats else None
+        check, report = "drc", drc
+    else:
+        check, vclass, report = "timing", tcheck.get("tier"), {}
+    sig = symptom.canonical_signature(check, vclass, symptom.predicates_for(check, report))
+    sid = symptom.symptom_id(sig)
+    _upsert_symptom(conn, sig, sid)
     conn.execute(
         "INSERT OR REPLACE INTO run_violations "
         "(run_id, design_family, platform, drc_status, drc_categories_json, "
-        " lvs_status, lvs_mismatch_class, timing_tier, wns_ns, snapshot_ts) "
-        "VALUES (?,?,?,?,?,?,?,?,?,?)",
+        " lvs_status, lvs_mismatch_class, timing_tier, wns_ns, symptom_id, "
+        " signature_json, snapshot_ts) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
         (run_id, design_family, platform, drc.get("status"),
          json.dumps(drc.get("categories") or {}, sort_keys=True),
          lvs.get("status"), lvs.get("mismatch_class"), tcheck.get("tier"), wns,
+         sid, json.dumps(sig, sort_keys=True),
          _dt.datetime.utcnow().isoformat(timespec="seconds") + "Z"))
 
 

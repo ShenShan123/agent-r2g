@@ -137,3 +137,26 @@ def test_lineage_outcome_is_structured(tmp_path, tmp_knowledge_dir):
     ingest_run.ingest(p2, conn, families_path=fam)
     assert conn.execute("SELECT COUNT(*) FROM config_lineage").fetchone()[0] == 1
     conn.close()
+
+
+def test_run_violations_get_symptom(tmp_path, tmp_knowledge_dir):
+    proj = tmp_path / "rv"
+    (proj / "constraints").mkdir(parents=True); (proj / "reports").mkdir()
+    (proj / "constraints" / "config.mk").write_text(
+        "export DESIGN_NAME = rv\nexport PLATFORM = nangate45\n")
+    (proj / "reports" / "ppa.json").write_text(json.dumps({"summary": {}, "geometry": {}}))
+    (proj / "reports" / "lvs.json").write_text(json.dumps({
+        "status": "fail", "mismatch_class": "symmetric_matcher",
+        "net_mismatches_schematic_only": 2, "net_mismatches_layout_only": 2,
+        "device_mismatches": 0}))
+    (proj / "reports" / "drc.json").write_text(json.dumps(
+        {"status": "clean", "total_violations": 0, "categories": {}}))
+    conn = knowledge_db.connect(tmp_knowledge_dir / "runs.sqlite")
+    knowledge_db.ensure_schema(conn, schema_path=tmp_knowledge_dir / "schema.sql")
+    ingest_run.ingest(proj, conn, families_path=tmp_knowledge_dir / "families.json")
+    sid, sig = conn.execute(
+        "SELECT symptom_id, signature_json FROM run_violations").fetchone()
+    assert sid and len(sid) == 16
+    assert json.loads(sig)["class"] == "symmetric_matcher"
+    assert json.loads(sig)["predicates"]["nets_balanced"] is True
+    conn.close()
