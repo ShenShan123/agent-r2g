@@ -66,7 +66,9 @@ failure_candidates.json ─┘
 |---|---|---|
 | `config_lineage` table | `ingest_run.py` (on config diff between runs) | `analyze_execution.py`, agent |
 | `monitor_health.py` | reads `runs.sqlite` | agent (degradation alerts) |
-| `search_failures.py` | indexes `failure-patterns.md` + `failure_candidates.json` | `analyze_execution.py` |
+| `search_failures.py` | indexes `failure-patterns.md` + `failure_candidates.json`; `lessons_for_symptom()` parses `r2g-lesson` front-matter | `analyze_execution.py`; **`diagnose_signoff_fix.py` decision path** (surfaces the matching active prose lesson at fix time) |
+| `symptom.py` | pure `{check,class,predicates}` → `symptom_id` | `ingest_run.py`, `learn_heuristics.py`, `diagnose_signoff_fix.py` (the universal repair-experience index; family-name is never a key) |
+| `sync_lessons.py` | one-way prose → `lessons` table (front-matter + evidence backfill) | `fix_log_manager.manage()` post-ingest; dashboard/agent |
 | `analyze_execution.py` | reads project artifacts + search results | agent (fix proposal review queue) |
 | `build_lineage_view.py` | read-only (`mode=ro`) projection over `runs.sqlite` + `config_lineage` + `heuristics.json` | dashboard "Knowledge health" + "Tuning provenance" panels |
 | `eval_set.json` + `eval_heuristics.py` | frozen eval set; `emit` writes paired naive/learned arms via `suggest_config --no-learned`, `summarize` → `eval_results.jsonl` / `eval_summary.json` | operator (payoff A/B verdict) |

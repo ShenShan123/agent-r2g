@@ -196,6 +196,16 @@ evidence-ranked order on the next similar violation.
   hard gate**, all real-fix strategies are always proposed, priority-ordered.
   `diagnose_signoff_fix.py <proj> --check drc --list` prints the evidence-ranked candidate
   set as JSON. Hard safety clamps are unchanged.
+- **Symptom index.** Learned repair experience is keyed by a **symptom signature**
+  (`knowledge/symptom.py`: `{check, class, predicates}` → a stable `symptom_id`), NOT the
+  design-family name. `learn_heuristics.py` emits a top-level `symptoms[symptom_id]`
+  projection in `heuristics.json` (pooled across families/platforms, with `by_platform` +
+  `evidence_designs` provenance); `diagnose_signoff_fix.py` looks recipes up by symptom and
+  seeds an informed cross-platform prior for untried strategies (so a fix learned on
+  nangate45 transfers to e.g. sky130hd). It also surfaces the matching active prose lesson
+  (via `search_failures.lessons_for_symptom`) at the fix-decision point. `monitor_health.py`
+  (degradation alerts) and `analyze_execution.py` (fix-proposal triage) are operator-invoked
+  CLIs over the same store.
 
 See `references/signoff-fixing.md` ("Fix-Learning Loop") and `knowledge/README.md`.
 
