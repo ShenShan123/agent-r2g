@@ -143,11 +143,14 @@ def search(query: str,
 
 
 def lessons_for_symptom(*, check: str, vclass: str | None, platform: str,
-                        patterns_path: Path = _PATTERNS_PATH) -> list[dict]:
+                        patterns_path: Path | None = None) -> list[dict]:
     """Return ACTIVE lessons whose trigger matches this symptom (+ platform, with
     '*' wildcard). Each: {id, status, trigger, strategy_ids, prose}
-    (symptom-indexed memory, spec 2026-06-09 §4.4)."""
-    p = Path(patterns_path)
+    (symptom-indexed memory, spec 2026-06-09 §4.4).
+
+    patterns_path defaults to the module-level _PATTERNS_PATH resolved AT CALL TIME
+    (not bound as a default arg) so tests can monkeypatch it."""
+    p = Path(patterns_path or _PATTERNS_PATH)
     if not p.exists():
         return []
     out = []

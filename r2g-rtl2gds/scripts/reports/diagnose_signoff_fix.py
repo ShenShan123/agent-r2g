@@ -375,6 +375,29 @@ def load_symptom_recipe(*, check: str, platform: str, drc: dict, lvs: dict,
     return (recipe if recipe["strategies"] else None), pooled
 
 
+def _current_vclass(check: str, drc: dict, lvs: dict) -> str | None:
+    """The dominant violation_class for the current symptom (same rule as
+    load_symptom_recipe): DRC dominant category, else LVS mismatch_class."""
+    if check == "drc":
+        cats = drc.get("categories") or {}
+        return max(cats, key=lambda k: cats[k].get("count") or 0) if cats else None
+    if check == "lvs":
+        return lvs.get("mismatch_class")
+    return None
+
+
+def attach_lessons(plan: dict, *, check: str, vclass: str | None, platform: str) -> dict:
+    """Attach matching ACTIVE prose lessons so the agent sees the human rationale
+    in-context at the fix-decision point (symptom-indexed memory, spec 2026-06-09)."""
+    try:
+        import search_failures
+        plan["lessons"] = search_failures.lessons_for_symptom(
+            check=check, vclass=vclass, platform=platform)
+    except Exception:
+        plan["lessons"] = []
+    return plan
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="Diagnose DRC/LVS violations → real-fix plan.")
     ap.add_argument("project_dir")
@@ -401,6 +424,8 @@ def main(argv=None) -> int:
         proj, check=args.check, drc=drc, lvs=lvs)
     plan = build_plan(drc, lvs, cfg, check=args.check, exclude=exclude, recipes=recipes)
     _rank_plan_strategies(plan, recipes, pooled=pooled)
+    attach_lessons(plan, check=args.check,
+                   vclass=_current_vclass(args.check, drc, lvs), platform=plat)
 
     if args.apply:
         strat = next((s for s in plan["strategies"] if s["id"] == args.apply), None)
@@ -422,7 +447,10 @@ def main(argv=None) -> int:
         return 0
 
     if args.list:
-        print(json.dumps(plan.get("ranking", []), indent=2))
+        # Print the FULL plan (ranking + attached lessons + strategies), so
+        # consumers get the priority-ranked candidates AND the matching prose
+        # rationale in one JSON object (spec 2026-06-09 §4.4).
+        print(json.dumps(plan, indent=2))
         return 0
 
     if args.next:
