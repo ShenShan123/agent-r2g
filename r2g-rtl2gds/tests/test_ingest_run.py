@@ -1,6 +1,7 @@
 """Tests for ingest_run.py: read artifacts → SQLite row."""
 from __future__ import annotations
 
+import json
 import shutil
 import sqlite3
 from pathlib import Path
@@ -102,4 +103,37 @@ def test_ingest_is_idempotent(fixtures_dir, tmp_knowledge_dir, tmp_path):
     assert id1 == id2
     (count,) = conn.execute("SELECT COUNT(*) FROM runs").fetchone()
     assert count == 1
+    conn.close()
+
+
+def _mk_lineage_project(tmp_path, name, cu="20", drc="clean", subdir=None):
+    base = tmp_path / (subdir or name)
+    (base / "constraints").mkdir(parents=True, exist_ok=True)
+    (base / "reports").mkdir(exist_ok=True)
+    (base / "constraints" / "config.mk").write_text(
+        f"export DESIGN_NAME = {name}\nexport PLATFORM = nangate45\n"
+        f"export CORE_UTILIZATION = {cu}\n")
+    (base / "reports" / "ppa.json").write_text(json.dumps({"summary": {}, "geometry": {}}))
+    (base / "reports" / "drc.json").write_text(
+        json.dumps({"status": drc, "total_violations": 0, "categories": {}}))
+    (base / "reports" / "lvs.json").write_text(json.dumps({"status": "clean"}))
+    return base
+
+
+def test_lineage_outcome_is_structured(tmp_path, tmp_knowledge_dir):
+    conn = knowledge_db.connect(tmp_knowledge_dir / "runs.sqlite")
+    knowledge_db.ensure_schema(conn, schema_path=tmp_knowledge_dir / "schema.sql")
+    fam = tmp_knowledge_dir / "families.json"
+    p1 = _mk_lineage_project(tmp_path, "d1", cu="20", drc="clean")
+    ingest_run.ingest(p1, conn, families_path=fam)
+    p2 = _mk_lineage_project(tmp_path, "d1", cu="25", drc="clean", subdir="run2")
+    ingest_run.ingest(p2, conn, families_path=fam)
+    row = conn.execute("SELECT current_outcome FROM config_lineage").fetchone()
+    assert row is not None
+    outcome = json.loads(row[0])
+    assert set(outcome) >= {"is_success", "wns_ns", "drc_violations", "total_elapsed_s"}
+    assert outcome["is_success"] is True   # clean DRC -> relaxed success
+    # idempotent: re-ingest must NOT add a second lineage row
+    ingest_run.ingest(p2, conn, families_path=fam)
+    assert conn.execute("SELECT COUNT(*) FROM config_lineage").fetchone()[0] == 1
     conn.close()

@@ -245,7 +245,8 @@ def _coerce_bool_int(s: str | None) -> int | None:
 
 def _record_lineage(conn: sqlite3.Connection, run_id: str,
                     design_name: str, platform: str,
-                    cfg: dict[str, str], orfs_status: str) -> None:
+                    cfg: dict[str, str], orfs_status: str,
+                    outcome_fields: dict) -> None:
     """If a previous run exists for this design/platform, record the config diff."""
     prev = conn.execute(
         "SELECT run_id, extra_config_json, core_utilization, "
@@ -310,13 +311,27 @@ def _record_lineage(conn: sqlite3.Connection, run_id: str,
     if not diff["changed"] and not diff["added"] and not diff["removed"]:
         return
 
+    current_outcome = json.dumps({
+        "is_success": knowledge_db.is_success({
+            "orfs_status": orfs_status,
+            "drc_status": outcome_fields.get("drc_status"),
+            "lvs_status": outcome_fields.get("lvs_status"),
+            "rcx_status": outcome_fields.get("rcx_status"),
+            "lvs_mismatch_class": outcome_fields.get("lvs_mismatch_class"),
+        }),
+        "orfs_status": orfs_status,
+        "wns_ns": outcome_fields.get("wns_ns"),
+        "drc_violations": outcome_fields.get("drc_violations"),
+        "total_elapsed_s": outcome_fields.get("total_elapsed_s"),
+    }, sort_keys=True)
+
     conn.execute(
         "INSERT INTO config_lineage "
         "(design_name, platform, current_run_id, previous_run_id, "
         " diff_json, current_outcome, created_at) "
         "VALUES (?, ?, ?, ?, ?, ?, ?)",
         (design_name, platform, run_id, prev_run_id,
-         json.dumps(diff, sort_keys=True), orfs_status,
+         json.dumps(diff, sort_keys=True), current_outcome,
          _dt.datetime.utcnow().isoformat(timespec="seconds") + "Z"),
     )
 
@@ -455,7 +470,16 @@ def ingest(project: Path,
     _ingest_fix_events(conn, project, design_name, design_family, platform)
     _write_run_violations(conn, run_id, design_family, platform, drc, lvs, tcheck,
                           _to_float(timing.get("setup_wns")))
-    _record_lineage(conn, run_id, design_name, platform, cfg, orfs_status)
+    _record_lineage(conn, run_id, design_name, platform, cfg, orfs_status,
+                    outcome_fields={
+                        "drc_status": drc.get("status"),
+                        "lvs_status": lvs.get("status"),
+                        "rcx_status": rcx.get("status"),
+                        "lvs_mismatch_class": lvs.get("mismatch_class"),
+                        "wns_ns": _to_float(timing.get("setup_wns")),
+                        "drc_violations": _to_int(drc.get("total_violations")),
+                        "total_elapsed_s": total_elapsed,
+                    })
     conn.commit()
     return run_id
 
