@@ -48,11 +48,15 @@ def _jsonify(val: str) -> str:
     # Turn {check: lvs, platform: "*"} and [lvs_same_nets_seed, b] into strict JSON.
     if val.startswith("{") or val.startswith("["):
         v = re.sub(r"([{\[,]\s*)([A-Za-z_][\w]*)(\s*):", r'\1"\2"\3:', val)  # quote keys
-        v = re.sub(r":(\s*)([A-Za-z_][\w/.*-]*)(\s*[,}\]])", r':\1"\2"\3', v)  # quote dict scalars
-        # quote bare-word LIST elements (preceded by [ or , ; followed by , or ]).
-        # lookbehind/lookahead don't consume the separators, so consecutive
-        # elements each match (e.g. [a, b] -> ["a", "b"]).
-        v = re.sub(r"(?<=[\[,])(\s*)([A-Za-z_][\w/.*-]*)(\s*)(?=[,\]])", r'\1"\2"\3', v)
+        # quote bare-word dict scalars, but NOT the JSON literals true/false/null
+        # (a `\b` after the literal lets `nullable`/`trueish` still be quoted).
+        v = re.sub(r":(\s*)(?!(?:true|false|null)\b)([A-Za-z_][\w/.*-]*)(\s*[,}\]])",
+                   r':\1"\2"\3', v)
+        # quote bare-word LIST elements (preceded by [ or , ; followed by , or ]),
+        # again excluding the JSON literals. lookbehind/lookahead don't consume the
+        # separators, so consecutive elements each match (e.g. [a, b] -> ["a", "b"]).
+        v = re.sub(r"(?<=[\[,])(\s*)(?!(?:true|false|null)\b)([A-Za-z_][\w/.*-]*)(\s*)(?=[,\]])",
+                   r'\1"\2"\3', v)
         return v
     if val in ("true", "false", "null") or re.fullmatch(r"-?\d+(\.\d+)?", val):
         return val

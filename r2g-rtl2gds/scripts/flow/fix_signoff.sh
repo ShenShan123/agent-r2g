@@ -83,6 +83,23 @@ else:
     "$1" "$PROJECT_DIR"
 }
 
+_predicates_snapshot() {  # $1 = drc|lvs : symptom predicates JSON from the CURRENT
+  # (pre-fix) report, captured by fix_one BEFORE apply/extract overwrites it, so the
+  # logged symptom describes the violation being fixed (not the post-fix state).
+  python3 -c 'import json,sys,os
+check=sys.argv[1]; proj=sys.argv[2]
+rep=os.path.join(proj,"reports",check+".json")
+try: report=json.load(open(rep))
+except Exception: report={}
+preds={}
+try:
+    sys.path.insert(0, os.environ.get("R2G_KNOWLEDGE_DIR",""))
+    import symptom
+    preds=symptom.predicates_for(check, report)
+except Exception: preds={}
+print(json.dumps(preds))' "$1" "$PROJECT_DIR"
+}
+
 _log_iter() {  # check iter strategy before after verdict from_stage vclass before_cats config_delta
   python3 -c 'import json,sys,os
 check,it,strategy,before,after,verdict,from_stage=sys.argv[1:8]
@@ -93,13 +110,22 @@ rep=os.path.join(proj,"reports",check+".json")
 try: report=json.load(open(rep))
 except Exception: report={}
 status=report.get("status")
-# symptom predicates from the current report (knowledge/ is on sys.path via R2G_KNOWLEDGE_DIR).
+# Symptom predicates describe the BEFORE-fix violation we set out to repair, so
+# prefer the snapshot fix_one captured from the pre-fix report (R2G_LOG_PREDICATES).
+# Only fall back to deriving from the CURRENT report (post-fix at log time) when the
+# snapshot is absent — otherwise an applied fix that shifts e.g. net balance would
+# mis-tag this iteration symptom_id. knowledge/ is on sys.path via R2G_KNOWLEDGE_DIR.
 preds={}
-try:
-    sys.path.insert(0, os.environ.get("R2G_KNOWLEDGE_DIR",""))
-    import symptom
-    preds=symptom.predicates_for(check, report)
-except Exception: preds={}
+_pre=os.environ.get("R2G_LOG_PREDICATES")
+if _pre:
+    try: preds=json.loads(_pre)
+    except Exception: preds={}
+else:
+    try:
+        sys.path.insert(0, os.environ.get("R2G_KNOWLEDGE_DIR",""))
+        import symptom
+        preds=symptom.predicates_for(check, report)
+    except Exception: preds={}
 env_keys=("PLACE_FAST","ROUTE_FAST","SKIP_ANTENNA_REPAIR","ROUTE_FAST_DRT_ITERS")
 env_flags={k:os.environ[k] for k in env_keys if k in os.environ}
 cum={}
@@ -137,6 +163,10 @@ fix_one() {  # $1 = drc|lvs
     # applied iteration's extract clobbers it with the post-fix result).
     snap="$(_snapshot "$check")"
     before_vclass="${snap%%$'\t'*}"; before_cats="${snap#*$'\t'}"
+    # Snapshot the BEFORE-fix symptom predicates too (same pre-fix report); _log_iter
+    # reads them via R2G_LOG_PREDICATES so the symptom_id reflects the violation we
+    # set out to fix, not the post-fix report it would otherwise re-read at log time.
+    export R2G_LOG_PREDICATES="$(_predicates_snapshot "$check")"
     line="$("$DIAGNOSE" "$PROJECT_DIR" --check "$check" --exclude "$tried" --next)"
     # Split on tab WITHOUT collapsing empty middle fields. `read` with a
     # whitespace IFS (tab) would merge consecutive tabs, dropping an empty
