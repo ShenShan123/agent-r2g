@@ -64,6 +64,11 @@ contract; the model **re-orders** candidate strategies and **surfaces** prose le
    tests cross-platform symptom transfer and platform-specific gating (§6).
 8. **Phasing.** Phase 0 (honesty gate) → Phase 1 (symptom-indexed core) → Phase 2 (deferred,
    trigger-gated). Phase 0 + Phase 1 are the committed scope of the eventual plan.
+9. **Raw is the system of record.** Raw actions (`fix_events`), trajectories
+   (`fix_trajectories`), and symptoms (a new `symptoms` table + `symptom_id`/`signature_json`
+   on every raw row) are kept in the database losslessly. The symptom-indexed recipes in
+   `heuristics.json` are a **derived projection**, rebuildable from raw at any time — never the
+   source of truth.
 
 ## 3. Background (verified against the code & live DB)
 
@@ -147,15 +152,27 @@ discarded:
 `shape_band` (Phase 2), `env_regime` (PLACE_FAST/ROUTE_FAST). **Provenance** (NOT a key):
 `evidence_designs` (design names / `fix_session_id`s).
 
-**Capture point.** `run_violations` and `fix_trajectories` each gain a `signature_json`
-column. The extractors (`extract_lvs.py::classify_lvs_mismatch`, the synth-timeout classifier,
-`extract_drc.py`) emit the predicate booleans; `fix_signoff.sh::_log_iter` / `check_timing.py
---journal` write them into `fix_log.jsonl`; `ingest_run.py` stores them.
+**Capture point — symptoms are raw, first-class records.** A new **`symptoms`** dimension
+table holds one row per distinct `symptom_id` (the canonical `{check, class, predicates}` +
+`symptom_schema_version` + `first_seen`). Every raw row that observes a symptom carries a
+denormalized **`symptom_id`** column (FK → `symptoms`) plus its `signature_json`: on
+**`fix_events`** (Tier-1, raw actions), **`fix_trajectories`** (Tier-2, raw episodes), and
+**`run_violations`** (per-run snapshot). The extractors
+(`extract_lvs.py::classify_lvs_mismatch`, the synth-timeout classifier, `extract_drc.py`) emit
+the predicate booleans; `fix_signoff.sh::_log_iter` / `check_timing.py --journal` write them
+into `fix_log.jsonl`; `ingest_run.py` computes `symptom_id` and stores both the hash and the
+raw `signature_json` — so `symptom_id` can be re-derived if the hashing/predicate scheme
+changes (the predicates are never lost). Raw `fix_events` may still archive to the
+`fix_events_archive.sqlite` sidecar past the size threshold (moved, never deleted); the
+`symptoms` table and Tier-2 trajectories are **never archived**, so every symptom stays
+queryable.
 
 ### 4.2 Re-keyed fix recipes (symptom buckets)
 
-`heuristics.json` gains a top-level **`symptoms`** map (the `families[…]fix_recipes` subtree is
-demoted — see §8 migration):
+`heuristics.json` gains a top-level **`symptoms`** map — a **derived projection** of the raw
+`symptoms` table + symptom-tagged `fix_trajectories`, rebuildable at any time and never the
+source of truth. The agent reads this JSON in-context; the SQLite tables are the raw store. The
+`families[…]fix_recipes` subtree is demoted (see §8 migration):
 
 ```
 symptoms[symptom_id] = {
@@ -174,9 +191,11 @@ symptoms[symptom_id] = {
 }
 ```
 
-- `learn_heuristics.py` aggregates `fix_trajectories` **by `symptom_id`**, pooled across all
-  families and platforms. `by_platform` retains the per-platform breakdown so gating still
-  works.
+- `learn_heuristics.py` aggregates the symptom-tagged `fix_trajectories` (and archived
+  `fix_events` via the existing ATTACH+UNION) **by `symptom_id`**, pooled across all families
+  and platforms, into the derived `symptoms[…]` projection. `by_platform` retains the
+  per-platform breakdown so gating still works. Because the aggregate is derived, re-learning
+  after a predicate-set or hashing change is a full rebuild from raw — no data loss.
 - `platform_specific` is set when a strategy's clearances are concentrated on one platform AND
   it is declared platform-specific by a linked lesson (e.g. `antenna_diode_repair` on
   nangate45). Platform-specific strategies do **not** transfer their prior to other platforms.
@@ -337,18 +356,32 @@ Per the repo's "When You Fix a Bug" workflow: add/adjust the relevant
 5. **No auto-promotion of prose** — `failure_candidates.json`/`mine_rules.py` stay
    human-review-only; `sync_lessons.py` only *links* curated prose to evidence, never writes
    prose.
-6. **Tier-2 `fix_trajectories` never archived; Tier-3 derives from it** — archival stays
-   lossless; `signature_json` lives on the never-archived tier.
+6. **Raw is the system of record; aggregates are derived.** Raw actions (`fix_events`),
+   trajectories (`fix_trajectories`), and symptoms (`symptoms` table +
+   `symptom_id`/`signature_json` on the raw rows) are retained losslessly — Tier-2 and the
+   `symptoms` table are **never archived**; Tier-1 `fix_events` archives to the sidecar (moved,
+   not deleted). The `heuristics.json["symptoms"]` projection must be fully rebuildable from
+   raw. A test asserts a from-scratch re-learn reproduces the aggregate.
 7. **New invariant:** family/design-name must not reappear as a learning or lookup key — only
    as `evidence_designs` provenance. A test asserts `symptoms[…]` keys are symptom hashes and
    that lookup never consults `design_family`.
 
 ## 8. Data-model changes & migration
 
-- **Schema additions:** `run_violations.signature_json`, `fix_trajectories.signature_json`,
-  `lessons` table (§4.4), populate `fix_events.config_delta_json` / `env_flags_json`,
-  `config_lineage.current_outcome` (structured). `heuristics.json` gains `symptoms` (and
-  `by_shape`) and a `schema_version` bump.
+- **New `symptoms` dimension table** (raw symptom catalog): `symptom_id` PK, `check`, `class`,
+  `predicates_json`, `symptom_schema_version`, `first_seen`. Plus a denormalized **`symptom_id`**
+  column + `signature_json` on `fix_events`, `fix_trajectories`, and `run_violations`
+  (FK → `symptoms`).
+- **Raw primary keys are unchanged** — `fix_events UNIQUE(fix_session_id, iter, strategy)`,
+  `fix_trajectories PK(fix_session_id, check_type)`, `run_violations PK(run_id)` all stay; we
+  only *add* the `symptom_id` attribute, so the raw grain is preserved.
+- **Indexes:** ADD a SQL index on `symptom_id` for `fix_events`, `fix_trajectories`, and
+  `run_violations`, and on `symptoms(check, class)`, so symptom lookups are fast. KEEP the
+  existing `runs(design_family, platform)` indexes (now provenance/human-query only, no longer
+  the learning path).
+- **Other schema additions:** `lessons` table (§4.4); populate `fix_events.config_delta_json` /
+  `env_flags_json`; structured `config_lineage.current_outcome`. `heuristics.json` gains the
+  derived `symptoms` (and `by_shape`) maps and a `schema_version` bump.
 - **One-time rebuild:** derive `symptoms[…]` from existing `fix_trajectories`. Historical
   trajectories lack the new predicate booleans, so backfilled signatures use `class` +
   whatever predicates are recoverable from `before_categories_json` / `lvs_mismatch_class` /
