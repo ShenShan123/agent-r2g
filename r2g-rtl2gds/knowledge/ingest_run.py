@@ -32,6 +32,7 @@ from pathlib import Path
 from typing import Any
 
 import knowledge_db
+import symptom
 
 
 _CONFIG_LINE_RE = re.compile(r"(?:export\s+)?(\w+)\s*=\s*(.*)")
@@ -136,9 +137,25 @@ def _read_fix_log(project: Path) -> list[dict[str, Any]]:
     return _read_stage_log(project / "reports" / "fix_log.jsonl")
 
 
+def _upsert_symptom(conn: sqlite3.Connection, sig: dict, sid: str) -> None:
+    conn.execute(
+        "INSERT OR IGNORE INTO symptoms "
+        "(symptom_id, check_type, class, predicates_json, symptom_schema_version, first_seen) "
+        "VALUES (?,?,?,?,?,?)",
+        (sid, sig.get("check"), sig.get("class"),
+         json.dumps(sig.get("predicates") or {}, sort_keys=True),
+         symptom.SYMPTOM_SCHEMA_VERSION,
+         _dt.datetime.utcnow().isoformat(timespec="seconds") + "Z"))
+
+
 def _ingest_fix_events(conn: sqlite3.Connection, project: Path,
                        design_name: str, design_family: str, platform: str) -> int:
-    """Read reports/fix_log.jsonl into fix_events (idempotent via UNIQUE)."""
+    """Read reports/fix_log.jsonl into fix_events (idempotent via UNIQUE).
+
+    On re-ingest, the ON CONFLICT clause backfills the enrichment columns
+    (config_delta_json, env_flags_json, symptom_id, signature_json) WITHOUT
+    clobbering provenance or other stable fields.
+    """
     rows = _read_fix_log(project)
     n = 0
     for r in rows:
@@ -147,20 +164,30 @@ def _ingest_fix_events(conn: sqlite3.Connection, project: Path,
             continue
         before = _to_float(r.get("before"))
         after = _to_float(r.get("after"))
+        sig, symptom_id_ = symptom.from_fix_log_row(r)
+        _upsert_symptom(conn, sig, symptom_id_)
         conn.execute(
-            "INSERT OR IGNORE INTO fix_events "
+            "INSERT INTO fix_events "
             "(fix_session_id, project_path, design_name, design_family, platform, "
             " check_type, violation_class, iter, strategy, from_stage, "
             " before_count, after_count, before_categories_json, after_categories_json, "
-            " before_status, after_status, verdict, cumulative_config_json, ts, provenance) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            " before_status, after_status, verdict, cumulative_config_json, "
+            " config_delta_json, env_flags_json, symptom_id, signature_json, ts, provenance) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
+            "ON CONFLICT(fix_session_id, iter, strategy) DO UPDATE SET "
+            "  config_delta_json=excluded.config_delta_json, "
+            "  env_flags_json=excluded.env_flags_json, "
+            "  symptom_id=excluded.symptom_id, "
+            "  signature_json=excluded.signature_json",
             (sid, str(project.resolve()), design_name, design_family, platform,
              r.get("check"), r.get("violation_class"), _to_int(r.get("iter")),
              r.get("strategy"), r.get("from_stage"), before, after,
              r.get("before_categories"), r.get("after_categories"),
              r.get("before_status"), r.get("after_status"),
              _normalize_verdict(r.get("verdict"), before, after),
-             r.get("cumulative_config"), r.get("ts"), "live"))
+             r.get("cumulative_config"), r.get("config_delta"), r.get("env_flags"),
+             symptom_id_, json.dumps(sig, sort_keys=True),
+             r.get("ts"), "live"))
         n += 1
     return n
 

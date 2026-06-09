@@ -1,6 +1,7 @@
 """Tests for fix-event ingestion + the three new knowledge tables."""
 from __future__ import annotations
 
+import json
 import json as _json
 
 import ingest_run
@@ -142,4 +143,36 @@ def test_ingest_writes_run_violations_snapshot(tmp_path, tmp_knowledge_dir):
     rv = conn.execute("SELECT run_id, drc_status, design_family FROM run_violations "
                       "WHERE run_id=?", (run_id,)).fetchone()
     assert rv is not None and rv[1] == "clean" and rv[2] == "demo"
+    conn.close()
+
+
+def test_fix_events_get_symptom_id_and_symptoms_table(tmp_path, tmp_knowledge_dir):
+    fix_log = [
+        {"check": "lvs", "iter": 1, "strategy": "lvs_same_nets_seed",
+         "before": "8", "after": "8", "verdict": "no_improvement",
+         "fix_session_id": "sX", "violation_class": "symmetric_matcher",
+         "predicates": {"nets_balanced": True},
+         "cumulative_config": "{}", "config_delta": '{"LVS_SEED":"1"}',
+         "env_flags": '{"ROUTE_FAST":"1"}', "ts": "2026-06-09T00:00:00Z"},
+    ]
+    proj = _mk_project(tmp_path, fix_log=fix_log)
+    conn = knowledge_db.connect(tmp_knowledge_dir / "runs.sqlite")
+    knowledge_db.ensure_schema(conn, schema_path=tmp_knowledge_dir / "schema.sql")
+    ingest_run.ingest(proj, conn, families_path=tmp_knowledge_dir / "families.json")
+
+    sid_row = conn.execute(
+        "SELECT symptom_id, signature_json, config_delta_json, env_flags_json "
+        "FROM fix_events").fetchone()
+    assert sid_row[0] and len(sid_row[0]) == 16
+    sig = json.loads(sid_row[1])
+    assert sig["check"] == "lvs" and sig["class"] == "symmetric_matcher"
+    assert sig["predicates"] == {"nets_balanced": True}
+    assert json.loads(sid_row[2]) == {"LVS_SEED": "1"}
+    assert json.loads(sid_row[3]) == {"ROUTE_FAST": "1"}
+    srow = conn.execute("SELECT check_type, class FROM symptoms "
+                        "WHERE symptom_id = ?", (sid_row[0],)).fetchone()
+    assert srow == ("lvs", "symmetric_matcher")
+    ingest_run.ingest(proj, conn, families_path=tmp_knowledge_dir / "families.json")
+    assert conn.execute("SELECT COUNT(*) FROM fix_events").fetchone()[0] == 1
+    assert conn.execute("SELECT COUNT(*) FROM symptoms").fetchone()[0] == 1
     conn.close()
