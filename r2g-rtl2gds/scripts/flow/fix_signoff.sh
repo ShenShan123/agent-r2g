@@ -14,6 +14,30 @@ set -euo pipefail
 # Command seams are overridable for testing:
 #   R2G_RUN_ORFS R2G_RUN_DRC R2G_RUN_LVS R2G_EXTRACT_DRC R2G_EXTRACT_LVS R2G_DIAGNOSE
 
+# --- Tier-0 journal hooks (engineer-loop spec §5.2) — never break the flow ---
+KNOWLEDGE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../knowledge" && pwd)"
+export R2G_KNOWLEDGE_DIR="$KNOWLEDGE_DIR"
+
+_journal_knob_deltas() {  # config_edits_json strategy_id — one action per knob
+  python3 - "$1" "$2" "$PROJECT_DIR" "$FIX_SESSION_ID" <<'PYEOF' 2>/dev/null || true
+import json, os, subprocess, sys
+edits, strat, proj, sess = json.loads(sys.argv[1] or "{}"), sys.argv[2], sys.argv[3], sys.argv[4]
+cli = os.path.join(os.environ.get("R2G_KNOWLEDGE_DIR", ""), "journal_action.py")
+for knob, new in edits.items():
+    args = [sys.executable, cli, "action", "--project", proj, "--actor", "loop",
+            "--type", "config_knob_delta", "--session", sess,
+            "--payload", json.dumps({"knob": knob, "new": str(new), "strategy": strat})]
+    db = os.environ.get("R2G_JOURNAL_DB")
+    if db:
+        args += ["--db", db]
+    subprocess.run(args, check=False)
+PYEOF
+}
+
+# Test seam: allow sourcing helpers without executing the flow/arg-parse/exit.
+[[ "${R2G_SOURCE_ONLY:-0}" == "1" ]] && return 0 2>/dev/null
+# --- end Tier-0 journal hooks ---
+
 PROJECT_DIR=""; PLATFORM="nangate45"; CHECK="both"; MAX_ITERS=8; BASE_ITERS=3; RESUME=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -187,6 +211,7 @@ fix_one() {  # $1 = drc|lvs
     cfg_delta="$(python3 -c 'import json,sys
 try: print(json.dumps(json.loads(sys.stdin.read()).get("config_edits") or {}))
 except Exception: print("{}")' <<<"$apply_out")"
+    _journal_knob_deltas "$cfg_delta" "$sid"
     tried="${tried:+$tried,}$sid"
     if [[ -n "$rerun" ]]; then
       local rc=0

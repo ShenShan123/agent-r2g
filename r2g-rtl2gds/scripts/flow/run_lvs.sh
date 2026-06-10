@@ -31,6 +31,7 @@ if [[ -z "$PROJECT_DIR" ]]; then
 fi
 
 PROJECT_DIR="$(cd "$PROJECT_DIR" && pwd)"
+KNOWLEDGE_DIR_J="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../knowledge" && pwd)"
 CONFIG_MK="$PROJECT_DIR/constraints/config.mk"
 
 if [[ ! -f "$CONFIG_MK" ]]; then
@@ -286,4 +287,13 @@ else
 fi
 
 echo "Results: $LVS_DIR"
+
+# Tier-0 journal: digest this check's tool log + extracted report (never breaks the flow).
+[[ -f "$LVS_DIR/lvs_run.log" ]] && python3 "$KNOWLEDGE_DIR_J/journal_action.py" summarize \
+  --project "$PROJECT_DIR" --stage lvs --tool klayout --log "$LVS_DIR/lvs_run.log" \
+  ${R2G_JOURNAL_DB:+--db "$R2G_JOURNAL_DB"} 2>/dev/null || true
+[[ -f "$PROJECT_DIR/reports/lvs.json" ]] && python3 "$KNOWLEDGE_DIR_J/journal_action.py" report \
+  --project "$PROJECT_DIR" --kind lvs --file "$PROJECT_DIR/reports/lvs.json" \
+  ${R2G_JOURNAL_DB:+--db "$R2G_JOURNAL_DB"} 2>/dev/null || true
+
 exit $LVS_STATUS

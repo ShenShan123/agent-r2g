@@ -23,6 +23,25 @@ else
 fi
 FROM_STAGE="${FROM_STAGE:-}"
 
+# --- Tier-0 journal hooks (engineer-loop spec §5.2) — never break the flow ---
+KNOWLEDGE_DIR_J="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../knowledge" && pwd)"
+JOURNAL="${R2G_JOURNAL_CLI:-$KNOWLEDGE_DIR_J/journal_action.py}"
+
+_journal_stage() {  # stage status elapsed_s log_file — never breaks the flow
+  local stage="$1" status="$2" elapsed="$3" log="$4"
+  python3 "$JOURNAL" action --project "$PROJECT_DIR" --actor loop \
+    --type tool_invoke --platform "${PLATFORM:-}" \
+    --payload "{\"stage\":\"$stage\",\"status\":\"$status\",\"elapsed_s\":$elapsed,\"log\":\"$log\",\"cmd\":\"make $stage\"}" \
+    ${R2G_JOURNAL_DB:+--db "$R2G_JOURNAL_DB"} 2>/dev/null || true
+  [[ -f "$log" ]] && python3 "$JOURNAL" summarize --project "$PROJECT_DIR" \
+    --stage "$stage" --tool openroad --log "$log" --status "$status" \
+    ${R2G_JOURNAL_DB:+--db "$R2G_JOURNAL_DB"} 2>/dev/null || true
+}
+
+# Test seam: allow sourcing helpers without executing the flow.
+[[ "${R2G_SOURCE_ONLY:-0}" == "1" ]] && return 0 2>/dev/null
+# --- end Tier-0 journal hooks ---
+
 # Auto-detect ORFS + tools (honors ORFS_ROOT / *_EXE env overrides)
 # shellcheck source=/dev/null
 source "$(dirname "${BASH_SOURCE[0]}")/_env.sh"
@@ -226,6 +245,7 @@ run_stage() {
   stage_end=$(date +%s)
   local stage_elapsed=$((stage_end - stage_start))
   echo "{\"stage\": \"$stage\", \"status\": $STAGE_STATUS, \"elapsed_s\": $stage_elapsed}" >> "$BACKEND_DIR/stage_log.jsonl"
+  _journal_stage "$stage" "$([[ "$STAGE_STATUS" -eq 0 ]] && echo pass || echo fail)" "$stage_elapsed" "$BACKEND_DIR/flow.log"
 
   if [[ $STAGE_STATUS -ne 0 ]]; then
     echo "ERROR: Stage '$stage' failed (exit code $STAGE_STATUS) after ${stage_elapsed}s" | tee -a "$BACKEND_DIR/flow.log"

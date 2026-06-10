@@ -55,6 +55,7 @@ if [[ -z "$PROJECT_DIR" ]]; then
 fi
 
 PROJECT_DIR="$(cd "$PROJECT_DIR" && pwd)"
+KNOWLEDGE_DIR_J="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../knowledge" && pwd)"
 CONFIG_MK="$PROJECT_DIR/constraints/config.mk"
 
 if [[ ! -f "$CONFIG_MK" ]]; then
@@ -310,4 +311,13 @@ if [[ -f "$DRC_DIR/drc_result.json" && -d "$BACKEND_DIR" ]]; then
 fi
 
 echo "Results: $DRC_DIR"
+
+# Tier-0 journal: digest this check's tool log + extracted report (never breaks the flow).
+[[ -f "$DRC_DIR/drc_run.log" ]] && python3 "$KNOWLEDGE_DIR_J/journal_action.py" summarize \
+  --project "$PROJECT_DIR" --stage drc --tool klayout --log "$DRC_DIR/drc_run.log" \
+  ${R2G_JOURNAL_DB:+--db "$R2G_JOURNAL_DB"} 2>/dev/null || true
+[[ -f "$PROJECT_DIR/reports/drc.json" ]] && python3 "$KNOWLEDGE_DIR_J/journal_action.py" report \
+  --project "$PROJECT_DIR" --kind drc --file "$PROJECT_DIR/reports/drc.json" \
+  ${R2G_JOURNAL_DB:+--db "$R2G_JOURNAL_DB"} 2>/dev/null || true
+
 exit $DRC_STATUS
