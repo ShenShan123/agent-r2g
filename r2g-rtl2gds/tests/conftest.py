@@ -40,6 +40,11 @@ FLOW_DIR_SCRIPTS = SKILL_ROOT / "scripts" / "flow"
 if str(FLOW_DIR_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(FLOW_DIR_SCRIPTS))
 
+# Make scripts/loop/ importable for engineer-loop orchestrator tests.
+LOOP_DIR_SCRIPTS = SKILL_ROOT / "scripts" / "loop"
+if str(LOOP_DIR_SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(LOOP_DIR_SCRIPTS))
+
 
 @pytest.fixture
 def tmp_knowledge_dir(tmp_path: Path) -> Path:
