@@ -1,0 +1,250 @@
+# Engineer Loop — Runbook
+
+## 1. Loop Overview
+
+The engineer loop is a deterministic, resumable campaign orchestrator
+(`scripts/loop/engineer_loop.py`) that drives the full PD flow unattended across a queue of
+designs. Its core cycle is: pull the next design from a JSONL ledger → run the flow scripts
+(`run_orfs.sh`, `run_drc.sh`, `run_lvs.sh`, `run_rcx.sh`) → ingest results into the
+knowledge store (`ingest_run.py`) → auto-learn (`learn_heuristics.py`) → diff the new recipe
+generation against the prior one (`recipe_lifecycle.diff_and_enqueue`) → enqueue new or
+changed recipes as A/B candidates → the same loop executes matched-design A/B arms
+(`ab_runner.record_trial`) → a win promotes the recipe to live ranking; a loss or
+inconclusive verdict demotes it back to shadow. The loop never blocks: when the deterministic
+core cannot handle a design (unknown symptom, exhausted catalog, unseen crash, or repeated
+regression), it opens an escalation record and moves on. The agent tier drains escalations by
+diagnosing the root cause and authoring new shadow strategies, which then re-enter the same
+A/B lifecycle before affecting live ranking.
+
+```
+                    ┌─────────────────── deterministic core ────────────────────┐
+ design queue ──► engineer_loop.py ──► flow scripts ──► reports/*.json
+ (resumable          │    ▲                                   │
+  ledger)            │    │                              ingest_run.py
+                     │    │                                   │
+                     │    │      journal.sqlite (Tier-0: commands, log/report
+                     │    │        summaries, tool bugs — gitignored, evidence)
+                     │    │              knowledge.sqlite (fix_events,
+                     │    │                trajectories — git-tracked, conclusions)
+                     │    │                                   │
+                     │    │                            learn_heuristics.py
+                     │    │                                   │
+                     │    │                       recipe diff → recipe_lifecycle.py
+                     │    │                                   │ (shadow→candidate)
+                     │    └── ab_runner: matched-design A/B ──┘
+                     │            win → promote (machine gate, no human)
+                     │
+                     └─► escalations queue ──► agent tier (drains, authors NEW
+                          (unknown symptom,     shadow strategies + predicates,
+                           catalog exhausted,   journals actions) ──► back into
+                           unseen crash)        the same A/B lifecycle
+```
+
+## 2. Running a Campaign
+
+### CLI Commands
+
+```bash
+# Add one project to the campaign ledger
+python3 scripts/loop/engineer_loop.py add \
+    --ledger design_cases/_batch/campaign.jsonl \
+    --project design_cases/my_design \
+    [--platform nangate45]
+
+# Run the campaign (process up to N designs, default: unlimited)
+python3 scripts/loop/engineer_loop.py run \
+    --ledger design_cases/_batch/campaign.jsonl \
+    [--max N]
+
+# Inspect current state of each design in the ledger
+python3 scripts/loop/engineer_loop.py status \
+    --ledger design_cases/_batch/campaign.jsonl
+```
+
+### Ledger Format and Resumability
+
+The ledger is a JSONL file: one line per state transition, last-state-wins. This means:
+
+- Killing or crashing the loop mid-run leaves the ledger intact and fully consistent.
+- Restarting with the same `--ledger` path resumes exactly where the loop left off; no design
+  is reprocessed unless its state is `pending` or `flow` (the in-progress states).
+- States: `pending → flow → signoff → fixing → clean | escalated | abandoned`.
+- A/B arms are ordinary ledger entries (`kind=ab_arm`) that the same loop executes.
+
+### Environment Knobs
+
+| Variable | Effect |
+|---|---|
+| `R2G_JOURNAL=0` | Disable journaling to `journal.sqlite` (skips all journal DB writes) |
+| `R2G_JOURNAL_DB=<path>` | Override the journal DB path (default: `knowledge/journal.sqlite`) |
+| `R2G_LOOP_RUN_FLOW=<script>` | Override the flow subprocess script (testing) |
+| `R2G_LOOP_FIX=<script>` | Override the fix subprocess script (testing) |
+| `R2G_LOOP_INGEST=<script>` | Override the ingest subprocess script (testing) |
+| `R2G_FIX_EXCLUDE=<strategy>` | Exclude a strategy from the fix ranking (A/B arm knob) |
+| `R2G_FIX_RANK_FIRST=<strategy>` | Force a strategy to rank first (A/B arm B knob) |
+
+`R2G_FIX_EXCLUDE` and `R2G_FIX_RANK_FIRST` are consumed by `fix_signoff.sh`, which passes
+`--exclude` / `--rank-first` to `diagnose_signoff_fix.py` to implement A/B arm separation.
+
+### Phase-1 Constraints (Hard)
+
+- **Workers = 1.** Phase-1 runs single-process. Parallel campaigns require separate ledgers
+  on separate machines.
+- **Unique `DESIGN_NAME` + `FLOW_VARIANT`.** Never run two configs with the same design name
+  and flow variant concurrently; `run_orfs.sh` derives `FLOW_VARIANT` from the project dir
+  basename — keep project names unique within a `DESIGN_NAME`.
+- **Single concurrent LVS for designs > 100 K cells.** Each KLayout LVS process uses 3–5 GB
+  RAM; concurrency causes wall-time inflation. With workers=1 this is automatically satisfied.
+
+## 3. Escalation Drain (Agent Runbook)
+
+When `engineer_loop.py` cannot handle a design it opens an escalation and moves on. The
+agent drains these periodically. **Agent-authored strategies carry no special trust — they
+must win their A/B trial before promoting to live ranking (decision 7).**
+
+### Step-by-step
+
+**(a) List open escalations**
+
+```bash
+python3 -c "
+import sys; sys.path.insert(0,'r2g-rtl2gds/knowledge')
+import escalations, knowledge_db
+conn = knowledge_db.connect()
+for e in escalations.list_open(conn):
+    print(e)
+"
+```
+
+Each record includes `escalation_id`, `design`, `project_path`, `run_id`, `symptom_id`
+(may be NULL), and `reason` ∈ `{unknown_symptom, catalog_exhausted, unseen_crash,
+repeated_regression}`.
+
+**(b) Diagnose**
+
+For each escalation, gather context from three sources:
+
+```bash
+# Provenance: what is known about this bug?
+python3 r2g-rtl2gds/knowledge/trace_provenance.py bug --symptom <symptom_id>
+
+# Evidence-ranked strategy list for the design's violation
+python3 r2g-rtl2gds/scripts/reports/diagnose_signoff_fix.py <project_path> \
+    --check <drc|lvs> --list
+
+# Prose lessons and known failure patterns
+# Read: r2g-rtl2gds/references/failure-patterns.md
+```
+
+**(c) Author a new strategy**
+
+If the violation is not handled by any existing strategy, author a new predicate + strategy
+in the appropriate catalog inside `diagnose_signoff_fix.py`. The predicate must reference the
+`symptom_id` so the lifecycle machinery can key it correctly.
+
+**(d) Stage the strategy as shadow**
+
+```python
+from knowledge import recipe_lifecycle, knowledge_db
+conn = knowledge_db.connect()
+recipe_lifecycle.stage_shadow(
+    conn,
+    provenance='agent:<escalation_id>',
+    symptom_id='<sid>',
+    design_class='<design_class>',
+    platform='<platform>',
+    strategy='<strategy_name>',
+)
+```
+
+The new strategy now exists in `recipe_status` with state `shadow`. It is **inert** in live
+ranking until an A/B win promotes it.
+
+**(e) Journal every action**
+
+Every discrete action taken during diagnosis and authoring must be journaled:
+
+```bash
+python3 r2g-rtl2gds/knowledge/journal_action.py action \
+    --project <project_path> \
+    --actor agent \
+    --type <config_knob_delta|sdc_edit|stage_rerun|tool_invoke|escalate|ab_launch|promote|demote> \
+    [--payload '{"key": "value"}'] \
+    [--symptom <symptom_id>] \
+    [--session <fix_session_id>]
+```
+
+The CLI never breaks the caller (exits 0 with a warning on error). `R2G_JOURNAL=0` disables
+it entirely. Journal every config edit, every `diagnose_signoff_fix.py` invocation, and the
+`stage_shadow` call.
+
+**(f) Resolve the escalation and re-queue**
+
+```python
+escalations.resolve(conn, <escalation_id>, status='drained', notes='<summary>')
+```
+
+Then re-add the design to the ledger so the loop will pick it up again once the A/B trial
+has promoted the strategy (or mark `wont_fix` if the root cause is irrecoverable):
+
+```bash
+python3 scripts/loop/engineer_loop.py add \
+    --ledger design_cases/_batch/campaign.jsonl \
+    --project <project_path> \
+    [--platform <platform>]
+```
+
+### Prose update
+
+If the escalation reveals a new failure class, add a section to
+`r2g-rtl2gds/references/failure-patterns.md` **by hand** — the loop never auto-merges prose.
+
+## 4. Provenance Queries
+
+`knowledge/trace_provenance.py` is a read-only CLI that joins both DBs via shared keys
+(`symptom_id`, `run_id`, `fix_session_id`).
+
+**Solution → origin:** given a recipe key, trace back through A/B trials, fix episodes,
+journal actions, and designs to answer "where did this fix come from?"
+
+```bash
+python3 r2g-rtl2gds/knowledge/trace_provenance.py solution \
+    --symptom <symptom_id> \
+    --class <design_class> \
+    --platform <platform> \
+    --strategy <strategy_name>
+```
+
+Returns a JSON provenance tree: which A/B trials validated it, which fix episodes contributed
+evidence, which journal actions were taken, which designs were involved, and which tool bugs
+were observed.
+
+**Bug → solutions:** given a symptom, list every known solution with lifecycle status and
+evidence strength.
+
+```bash
+python3 r2g-rtl2gds/knowledge/trace_provenance.py bug --symptom <symptom_id>
+```
+
+Returns a list of all known strategies for this symptom, each with its `recipe_status` state
+(`shadow`, `candidate`, `promoted`), A/B trial summary, and the designs it was proven on.
+
+## 5. Safety Invariants
+
+- `PLACE_DENSITY_LB_ADDON ≥ 0.10` is never touched by the loop or any recipe; placement
+  divergence is irrecoverable.
+- Design-type / platform caps are applied as absolute post-filters by `suggest_config.py`
+  over any learned median — safety rails beat empirical medians.
+- **Only `promoted` recipes affect live strategy ranking** in `diagnose_signoff_fix.py`.
+  Shadow and candidate recipes are logged but inert in arm-A and live runs. An absent
+  `recipe_status` row means the recipe is grandfathered as promoted (pre-loop recipes that
+  were already validated by live use).
+- Promotion is evidence-only: an A/B win on the configured minimum matched-design count is
+  required. No human gate, no agent shortcut.
+- Auto-demotion fires on 2 consecutive regression verdicts; the recipe returns to shadow.
+- Agent-authored strategies stage as `shadow` and must win their A/B before promoting.
+  They receive **no special trust** — same lifecycle as machine-learned re-rankings (decision 7).
+- `failure-patterns.md` is authored prose, never auto-merged — the agent tier writes it
+  explicitly when confirming a new failure class.
+- Journal failures never break the flow; the journal is evidence, not a prerequisite.
+- Only the loop process ingests into `knowledge.sqlite` (single-writer invariant).

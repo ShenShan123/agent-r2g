@@ -167,3 +167,73 @@ signoff-positive partials).
     real-fix catalog by clearance score; it never edits `PLACE_DENSITY_LB_ADDON` or adds strategies.
     `mine_rules.py`'s `fix_candidates` (≥3 resolved episodes) is a human-review queue —
     `failure-patterns.md` is never auto-written.
+16. **Only `promoted` recipes affect live strategy ranking** (`filter_promoted` in
+    `diagnose_signoff_fix.py`). An absent `recipe_status` row = grandfathered `promoted`.
+    Shadow and candidate recipes are logged but inert in arm-A and live runs.
+17. **Journal archival loses no conclusions.** `knowledge/journal.sqlite` (gitignored,
+    high-volume evidence) is physically separate from `knowledge.sqlite` /
+    `heuristics.json` (git-tracked conclusions). Archiving or rotating the journal DB
+    never removes a recipe or trajectory from the knowledge DB.
+18. **The provenance chain is queryable end-to-end** via `knowledge/trace_provenance.py`:
+    `solution` traces a recipe back through A/B trials, fix episodes, journal actions, and
+    designs; `bug` lists every known solution for a symptom with lifecycle status and
+    evidence strength.
+
+## Engineer Loop (spec 2026-06-09)
+
+The engineer loop (`scripts/loop/engineer_loop.py`) closes the observe→ingest→learn→fix cycle
+autonomously. It introduces a two-database split and a recipe lifecycle enforced by the
+`recipe_status` table.
+
+### Two-database split
+
+| Database | Tracked? | Tables | Role |
+|---|---|---|---|
+| `knowledge/journal.sqlite` | **gitignored** | `actions`, `log_summaries`, `tool_bugs` | Evidence: full flow telemetry — every command, tool-log digest, EDA-tool bug |
+| `knowledge/knowledge.sqlite` + `heuristics.json` | **git-tracked** | existing + `recipe_status`, `ab_trials`, `escalations`, `meta` | Conclusions: recipes, trajectories, heuristics, A/B verdicts |
+
+The two DBs link via shared keys: `symptom_id`, `run_id`, `fix_session_id`. Journal archival
+never loses a conclusion — conclusions live only in the knowledge DB.
+
+### New knowledge DB tables (added by engineer loop)
+
+| Table | Key columns | Purpose |
+|---|---|---|
+| `recipe_status` | `symptom_id`, `design_class`, `platform`, `strategy` | Lifecycle state: `shadow` → `candidate` → `promoted` (or `demoted`) |
+| `ab_trials` | `trial_id`, `recipe_key`, `arm_a_run_id`, `arm_b_run_id` | A/B verdict: `win` / `loss` / `inconclusive` with metrics |
+| `escalations` | `escalation_id`, `design`, `run_id`, `reason`, `status` | Open items for the agent tier; `reason` ∈ `{unknown_symptom, catalog_exhausted, unseen_crash, repeated_regression}` |
+| `meta` | `key`, `value` | Heuristics generation counter and loop bookkeeping |
+
+### Recipe lifecycle
+
+```
+shadow  (inert, outside live pool)
+  │  A/B win
+  ▼
+candidate  (enqueued for A/B trial)
+  │  win → promote
+  │  loss / inconclusive → demote back to shadow
+  ▼
+promoted  (affects live ranking in diagnose_signoff_fix.py)
+  │  2 consecutive regressions → auto-demote
+  └──────────────────────────────────────────────►  shadow
+```
+
+Absent `recipe_status` row = grandfathered `promoted` (recipes validated before the loop
+shipped). New and changed learned recipes enter as `candidate` via `diff_and_enqueue`.
+Agent-authored strategies enter via `recipe_lifecycle.stage_shadow(...,
+provenance='agent:<escalation_id>', ...)` and must win their A/B before promoting — no
+special trust (decision 7 of the design spec).
+
+### Journaling (agent tier)
+
+The agent journals every discrete action via the CLI:
+
+```bash
+python3 knowledge/journal_action.py action \
+    --project <dir> --actor agent \
+    --type <config_knob_delta|sdc_edit|stage_rerun|tool_invoke|escalate|ab_launch|promote|demote> \
+    [--payload JSON] [--symptom <sid>] [--session <fix_session_id>]
+```
+
+Never breaks the caller (warns + exits 0). `R2G_JOURNAL=0` disables all journal writes.

@@ -209,6 +209,44 @@ evidence-ranked order on the next similar violation.
 
 See `references/signoff-fixing.md` ("Fix-Learning Loop") and `knowledge/README.md`.
 
+#### Engineer Loop (campaign mode)
+
+Use campaign mode when you need to run the full flow unattended across many designs — or
+when you want the A/B-gated recipe-learning cycle to run autonomously. The campaign
+orchestrator (`scripts/loop/engineer_loop.py`) drives the flow scripts, ingests results,
+triggers learning, and manages A/B trials without human gates.
+
+```bash
+# Add a project to the campaign ledger
+python3 scripts/loop/engineer_loop.py add \
+    --ledger design_cases/_batch/campaign.jsonl \
+    --project design_cases/my_design [--platform nangate45]
+
+# Run the campaign (optionally limit to N designs)
+python3 scripts/loop/engineer_loop.py run \
+    --ledger design_cases/_batch/campaign.jsonl [--max N]
+
+# Inspect per-design state
+python3 scripts/loop/engineer_loop.py status \
+    --ledger design_cases/_batch/campaign.jsonl
+```
+
+The ledger is JSONL (last-state-wins); kill/restart is safe — the campaign resumes where it
+left off. States: `pending → flow → signoff → fixing → clean | escalated | abandoned`.
+
+**Hard rules for campaign mode:**
+- Phase-1 runs workers=1 (single-process); do not run two campaigns sharing a `DESIGN_NAME`
+  concurrently.
+- Never run two configs with the same `DESIGN_NAME` + `FLOW_VARIANT` concurrently.
+- Never run more than one LVS job concurrently for designs > 100 K cells.
+- Only `promoted` recipes affect live strategy ranking; shadow and candidate recipes are
+  inert until their A/B trial completes.
+
+When the loop opens an escalation (unknown symptom, exhausted catalog, unseen crash, or
+repeated regression), drain it following the agent runbook in
+`references/engineer-loop.md` ("Escalation Drain"). That document also covers provenance
+queries (`trace_provenance.py`) and the full safety-invariant list.
+
 #### Platform Support Matrix
 
 | Platform | KLayout DRC | KLayout LVS | Magic DRC | Netgen LVS | RCX |
