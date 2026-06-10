@@ -245,3 +245,22 @@ CREATE TABLE IF NOT EXISTS escalations (
     resolved_at   TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_escalations_status ON escalations(status);
+
+-- Engineer-loop inline recipe A/B (spec §5.4). One row per finished trial.
+-- A 'win' (arm B usable signed-off AND cheaper/cleaner) promotes the recipe;
+-- loss/inconclusive reverts to shadow. Crash arms are inconclusive, never wins.
+CREATE TABLE IF NOT EXISTS ab_trials (
+    trial_id      INTEGER PRIMARY KEY AUTOINCREMENT,
+    symptom_id    TEXT NOT NULL,
+    design_class  TEXT NOT NULL,
+    platform      TEXT NOT NULL,
+    strategy      TEXT NOT NULL,
+    arm_a_run_id  TEXT,
+    arm_b_run_id  TEXT,
+    verdict       TEXT,             -- win | loss | inconclusive
+    metrics_json  TEXT,
+    match_level   TEXT,             -- exact | pooled_class | pooled_platform
+    ts            TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_ab_trials_key
+    ON ab_trials(symptom_id, design_class, platform, strategy);
