@@ -8,6 +8,11 @@ implementation in this session.
 `2026-06-09-symptom-indexed-memory-design.md` (symptom index, implemented on main).
 **Authors:** user5 + agent. Grounded in a very-thorough read-only inventory of the existing
 learning machinery (knowledge tiers, fix loop, symptom memory, A/B harness, dashboards).
+**Revision 2026-06-09 (same day, user review):** (a) decision 7 amended — agent-discovered
+solutions join the recipe pool **only after proven efficacy** (A/B win); (b) new decision 8 —
+recipe pool / learning DB indexed by **issue category × design class × platform** (design
+class promoted from Phase-2 conditioning to a Phase-1 index dimension); (c) new decision 9 +
+§5.8 — dedicated **dead-code & script cleanup** task added to Phase-1 scope.
 
 ---
 
@@ -51,9 +56,28 @@ evidence-only recipe promotion + auto-demotion).
    `fix_iters_to_clean`, `wall_s_to_clean`, and the heuristics **generation counter** at
    ingest. Strength = first-pass clean rate trending up and median iterations/wall-clock
    trending down across generations.
-7. **Architecture C: hybrid.** Deterministic loop core + agent escalation tier. The catalog
-   can *grow* (agent-authored strategies), not just re-rank, while the bulk loop stays cheap,
-   reproducible, and immune to session limits.
+7. **Architecture C: hybrid — and agent discoveries are efficacy-gated.** Deterministic loop
+   core + agent escalation tier. The catalog can *grow* (agent-authored strategies), not just
+   re-rank, while the bulk loop stays cheap, reproducible, and immune to session limits.
+   **When the agent discovers a new solution, it does NOT enter the live recipe pool
+   directly:** it is staged as a `shadow` strategy outside the pool and joins the pool only
+   after **proven efficacy** — a matched-design A/B win under the honest verdict criteria
+   (§5.4, §5.5). No exceptions for agent-authored fixes; same lifecycle as learned re-rankings.
+8. **Index = issue category × design class × platform.** The learning DB and recipe pool are
+   keyed primarily by **issue category** — the symptom signature (`symptom_id`: check +
+   violation class + discriminating predicates) — refined by two conditioning index
+   dimensions: **design class** (structural, never the design name: `design_type` ∈
+   {bus_heavy, crypto, macro_heavy, logic} from RTL-content scan × `size_class` ∈
+   {small, medium, large} from cell count — both already derivable via
+   `suggest_config.detect_design_type` and the size classifier) and **platform**. Ranking
+   lookup relaxes in order: exact `(symptom, design_class, platform)` → pooled across design
+   class → pooled across platforms, with the confidence floor (§5.7) guarding the
+   cross-platform step. This promotes design-class conditioning from Phase 2 (symptom-memory
+   spec decision 3) into a Phase-1 index dimension; family/design-name remains provenance
+   only.
+9. **Repo hygiene is in scope.** Phase 1 includes a dedicated **dead-code & script cleanup**
+   task (§5.8): retire the accumulated one-off operator scripts, stale logs/scratch dirs, and
+   ad-hoc campaign drivers that `engineer_loop.py` supersedes.
 
 ## 3. Background — what exists vs. what this adds
 
@@ -150,6 +174,12 @@ execution path, no parallel infrastructure.
 - Recipes (both Tier-3 learned entries and static-catalog strategies added by the agent
   tier) carry a status: `shadow → candidate → promoted` (+ `demoted`), persisted in a new
   `recipe_status` table (§8).
+- **Recipe key = `(symptom_id, design_class, platform)`** (decision 8). The
+  `heuristics.json` projection becomes `recipes[symptom_id][design_class][platform]` with
+  pooled rollups materialized at each relaxation level (`design_class="*"`,
+  `platform="*"`); `design_class = design_type × size_class`, stamped on every run at
+  ingest. The legacy family-keyed view is dropped from lookup (family stays provenance
+  only, per the symptom-memory spec).
 - After each learn cycle, diff `heuristics.json` recipes against the previous **generation**
   (monotonic counter stored in the DB and stamped into `heuristics.json`); new/changed
   entries become `candidate` and are enqueued for A/B.
@@ -160,9 +190,12 @@ execution path, no parallel infrastructure.
   `grandfathered:<date>`; everything new goes through A/B.
 
 ### 5.4 `knowledge/ab_runner.py` — inline recipe A/B
-- For each `candidate` recipe (keyed by symptom signature + platform): select matched
-  designs from `run_violations` history (same `symptom_id`; **cheapest matching designs
-  first** — Phase-0 small-design-first decision), default 2 matched designs per trial.
+- For each `candidate` recipe (keyed by `(symptom_id, design_class, platform)`): select
+  matched designs from `run_violations` history at the exact key (**cheapest matching
+  designs first** — Phase-0 small-design-first decision), default 2 matched designs per
+  trial. If fewer than the minimum exist at the exact key, relax `design_class` first, then
+  `platform` (mirroring the decision-8 lookup order), recording the match level in the
+  trial.
 - Arm A: prior ranking (candidate excluded). Arm B: candidate ranked first. Arms are emitted
   as ordinary ledger entries (`kind=ab_arm`) with distinct project dirs / `FLOW_VARIANT`s, so
   the same loop executes them.
@@ -182,14 +215,17 @@ execution path, no parallel infrastructure.
 - The loop never blocks on an escalation: it records it and moves to the next design.
 - Agent runbook: new `references/engineer-loop.md` + a SKILL.md section ("Escalation
   drain"). The agent diagnoses with symptom lookup + `lessons_for_symptom()` +
-  `failure-patterns.md`, authors a **new strategy** into the static catalog as `shadow` with
-  a symptom predicate, journals every action via `journal_action.py`, and requeues the
-  design. Agent-authored strategies get **no special trust** — same A/B lifecycle.
+  `failure-patterns.md`, authors a **new strategy** staged as `shadow` (with a symptom
+  predicate and its `(symptom_id, design_class, platform)` key), journals every action via
+  `journal_action.py`, and requeues the design. Agent-authored strategies get **no special
+  trust** — they are *outside the live recipe pool* until their A/B win proves efficacy
+  (decision 7); same lifecycle as learned re-rankings.
 - Prose: only the agent tier writes `failure-patterns.md` (authored, not auto-merged) —
   existing invariant preserved.
 
 ### 5.6 `scripts/reports/build_strength_report.py` — strength metric
-- At ingest, every run is stamped with the current heuristics **generation** plus
+- At ingest, every run is stamped with the current heuristics **generation**, its
+  **`design_class`** (`design_type` + `size_class`, decision 8), plus
   `first_attempt_clean` (bool, first attempt for that design+platform),
   `fix_iters_to_clean`, `wall_s_to_clean` (NULL until clean).
 - Report: trend of first-pass clean rate and median iterations/wall-clock-to-clean vs.
@@ -198,7 +234,9 @@ execution path, no parallel infrastructure.
   `build_lineage_view.py`); gets a dashboard panel.
 
 ### 5.7 Dormant-path activation (prerequisite work items)
-1. `diagnose_signoff_fix.py` passes pooled symptom priors into `fix_model.rank_strategies`.
+1. `diagnose_signoff_fix.py` passes pooled symptom priors into `fix_model.rank_strategies`,
+   resolving the recipe at the decision-8 relaxation order: exact
+   `(symptom, design_class, platform)` → pooled design class → pooled platform.
 2. **Confidence floor:** an untried strategy ranked purely on pooled/cross-platform priors
    cannot outrank a locally proven (≥1 success same-platform) strategy unless pooled
    attempts ≥ N (default 5). Implemented in `fix_model.py`; unit-tested.
@@ -207,6 +245,23 @@ execution path, no parallel infrastructure.
 4. Timing: `check_timing.py --journal` becomes default-on in the loop; timing strategy
    catalog seeded with `period_relax` + `utilization_reduce` so timing recipes flow through
    the same lifecycle.
+
+### 5.8 Dead-code & script cleanup (dedicated Phase-1 task)
+- **Immediate candidates** (verified present 2026-06-09): the `tools/_*` one-off scripts and
+  scratch logs (`_cmp_v3_vs_skill.sh`, `_complete_signoff_side.sh`,
+  `_finish_signoff_remainder.sh`, `_koios_attempt.sh`, `_lvs_recovery.sh`, `_wait_bulk.sh`,
+  `_wait_koios.sh`, `_wf_complete_remaining.js`, `_boom_finish_logs/`,
+  `_boom_route_fast_logs/`, `_drc_band_410k*.log`, `_lvs_test_*.log`), finished-campaign
+  drivers (`retry_pass4.sh`, `retry_boom_*.sh`, `pass4_*.sh`, `pending_recovers.txt`), the
+  stray root-level `install.sh` (the canonical installer is `r2g-rtl2gds/install.sh`), and
+  the `last_graph/` scratch dir. (`feature_test_v3/` is already gone.)
+- **Post-loop candidates:** once `engineer_loop.py` ships and the Phase-0 live run passes,
+  retire the ad-hoc campaign drivers whose resumable-ledger pattern it absorbs
+  (`tools/sky130_campaign.py`, `tools/run_sky130_design.sh`, `tools/mk_sky130_project.py`,
+  `tools/launch_boom_route_fast.sh`, `tools/batch_*.sh` where superseded).
+- **Gate:** delete only after grep-verifying nothing in the skill, tests, docs, or CI
+  references the file; anything of historical value gets a one-line summary in
+  `lessons-learned.md` first. The exact inventory is finalized at plan time.
 
 ## 6. Data flow (one full loop turn)
 
@@ -251,15 +306,17 @@ execution path, no parallel infrastructure.
 | `actions` | NEW (Tier-0) | append-only action journal (§5.2) |
 | `ab_trials` | NEW | one row per recipe A/B trial (§5.4) |
 | `escalations` | NEW | open problems for the agent tier (§5.5) |
-| `recipe_status` | NEW | recipe lifecycle state + provenance + generation (§5.3) |
-| `runs` | +cols | `heuristics_generation`, `first_attempt_clean`, `fix_iters_to_clean`, `wall_s_to_clean` |
-| `heuristics.json` | +field | top-level `generation`; per-recipe `status` view folded from `recipe_status` |
+| `recipe_status` | NEW | recipe lifecycle state + provenance + generation, keyed `(symptom_id, design_class, platform, strategy)` (§5.3, decision 8) |
+| `runs` | +cols | `heuristics_generation`, `design_class` (`design_type` + `size_class`), `first_attempt_clean`, `fix_iters_to_clean`, `wall_s_to_clean` |
+| `heuristics.json` | +field | top-level `generation`; recipe projection re-keyed `recipes[symptom_id][design_class][platform]` with `"*"` pooled rollups; per-recipe `status` folded from `recipe_status` |
 
 ## 9. Testing
 
 - **Unit (extends the 417-test pytest suite):** ledger state-machine transitions; recipe
-  diff/lifecycle (shadow never ranks in live/arm-A); A/B verdict honesty cases; `actions`
-  idempotent ingest; generation stamping; confidence-floor ranking; auto-demotion trigger.
+  diff/lifecycle (shadow never ranks in live/arm-A; agent-authored strategies excluded from
+  the pool until A/B win); A/B verdict honesty cases; `actions` idempotent ingest;
+  generation stamping; confidence-floor ranking; decision-8 index relaxation order
+  (exact → pooled class → pooled platform); `design_class` stamping; auto-demotion trigger.
 - **Integration:** dry-run mode with a mocked flow runner drives ~10 synthetic designs
   through the complete loop — including one forced escalation and one forced A/B
   promotion — deterministically in CI. No real EDA tools needed.
