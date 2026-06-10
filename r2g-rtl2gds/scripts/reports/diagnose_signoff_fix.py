@@ -375,6 +375,40 @@ def load_symptom_recipe(*, check: str, platform: str, drc: dict, lvs: dict,
     return (recipe if recipe["strategies"] else None), pooled
 
 
+def load_indexed_recipe(*, check: str, platform: str, design_class: str,
+                        drc: dict, lvs: dict, heuristics: Path | None = None):
+    """Decision-8 lookup with relaxation: recipes[sid][design_class][platform]
+    -> recipes[sid]['*'][platform] (pooled class) -> recipes[sid]['*']['*']
+    (pooled platform). Returns (recipe_entry|None, pooled_prior, match_level).
+    pooled_prior is always the global rollup (recipes[sid]['*']['*'])."""
+    hp = heuristics or (Path(__file__).resolve().parents[2]
+                        / "knowledge" / "heuristics.json")
+    if not hp.exists():
+        return None, {}, "none"
+    data = json.loads(hp.read_text(encoding="utf-8"))
+    recipes = data.get("recipes") or {}
+    if check == "drc":
+        cats = drc.get("categories") or {}
+        vclass = max(cats, key=lambda k: cats[k].get("count") or 0) if cats else None
+        report = drc
+    else:
+        vclass, report = lvs.get("mismatch_class"), lvs
+    sig = symptom.canonical_signature(check, vclass,
+                                      symptom.predicates_for(check, report))
+    bucket = recipes.get(symptom.symptom_id(sig)) or {}
+    glob = (bucket.get("*") or {}).get("*") or {}
+    pooled = {s: {k: v.get(k, 0) for k in ("attempts", "successes",
+                                           "wins", "failures")}
+              for s, v in (glob.get("strategies") or {}).items()}
+    for dclass, plat, level in ((design_class, platform, "exact"),
+                                ("*", platform, "pooled_class"),
+                                ("*", "*", "pooled_platform")):
+        node = (bucket.get(dclass) or {}).get(plat)
+        if node and node.get("strategies"):
+            return node, pooled, level
+    return None, pooled, "none"
+
+
 def _current_vclass(check: str, drc: dict, lvs: dict) -> str | None:
     """The dominant violation_class for the current symptom (same rule as
     load_symptom_recipe): DRC dominant category, else LVS mismatch_class."""
@@ -419,9 +453,42 @@ def main(argv=None) -> int:
     # Symptom-first lookup (spec 2026-06-09): prefer the symptom-indexed recipe +
     # pooled cross-platform prior; fall back to the legacy family/platform recipe.
     plat = cfg.get("PLATFORM", "nangate45")
-    sym_recipe, pooled = load_symptom_recipe(check=args.check, platform=plat, drc=drc, lvs=lvs)
-    recipes = sym_recipe if sym_recipe is not None else _load_recipes(
-        proj, check=args.check, drc=drc, lvs=lvs)
+    # Decision-8 indexed lookup first (engineer-loop §5.7): exact (symptom,
+    # design_class, platform) -> pooled class -> pooled platform; only PROMOTED
+    # recipes rank live. Falls back to the symptom/family path when absent.
+    try:
+        import suggest_config as _sc
+        _stats = _sc.parse_synth_stats(proj / "synth")
+        _cells = _stats.get("cell_count", 0)
+        _size = ("unknown" if not _cells else "tiny" if _cells < 100 else
+                 "small" if _cells < 5000 else "medium" if _cells < 50000
+                 else "large")
+        design_class = f"{_sc.detect_design_type(proj, cfg)}/{_size}"
+    except Exception:
+        design_class = "unknown/unknown"
+    idx_recipe, idx_pooled, idx_level = load_indexed_recipe(
+        check=args.check, platform=plat, design_class=design_class, drc=drc, lvs=lvs)
+    if idx_recipe is not None:
+        recipes, pooled = idx_recipe, idx_pooled
+        try:
+            import knowledge_db
+            import recipe_lifecycle
+            _vc = _current_vclass(args.check, drc, lvs)
+            _report = drc if args.check == "drc" else lvs
+            _sid = symptom.symptom_id(symptom.canonical_signature(
+                args.check, _vc, symptom.predicates_for(args.check, _report)))
+            _kc = knowledge_db.connect()
+            knowledge_db.ensure_schema(_kc)
+            recipes = recipe_lifecycle.filter_promoted(
+                _kc, recipes, symptom_id=_sid, design_class=design_class,
+                platform=plat)
+            _kc.close()
+        except Exception:
+            pass    # lifecycle filter must never break diagnosis
+    else:
+        sym_recipe, pooled = load_symptom_recipe(check=args.check, platform=plat, drc=drc, lvs=lvs)
+        recipes = sym_recipe if sym_recipe is not None else _load_recipes(
+            proj, check=args.check, drc=drc, lvs=lvs)
     plan = build_plan(drc, lvs, cfg, check=args.check, exclude=exclude, recipes=recipes)
     _rank_plan_strategies(plan, recipes, pooled=pooled)
     attach_lessons(plan, check=args.check,

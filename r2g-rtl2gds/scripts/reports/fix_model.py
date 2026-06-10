@@ -25,8 +25,12 @@ def _score(successes: int, attempts: int, wins: int = 0) -> float:
     return (successes + 0.5 * wins + 1) / (attempts + 2)
 
 
+POOLED_MIN_ATTEMPTS = 5   # confidence floor (engineer-loop spec §5.7.2)
+
+
 def rank_strategies(recipe_entry: dict | None, static_order: list[str],
-                    pooled: dict | None = None) -> list[dict]:
+                    pooled: dict | None = None,
+                    pooled_min_attempts: int = POOLED_MIN_ATTEMPTS) -> list[dict]:
     """Rank `static_order` strategies by smoothed historical clearance.
 
     recipe_entry: Tier-3 aggregate for this (check, violation_class) — or, in the
@@ -58,6 +62,14 @@ def rank_strategies(recipe_entry: dict | None, static_order: list[str],
             wins = int(ps.get("wins", 0))
             failures = int(ps.get("failures", max(0, attempts - successes)))
             score = _score(successes, attempts, wins)
+            # Confidence floor (engineer-loop §5.7.2): a pooled-only strategy
+            # below the attempt floor must not outrank a locally PROVEN one.
+            local_proven = [
+                _score(int(v.get("successes", 0)), int(v.get("attempts", 0)),
+                       int(v.get("wins", 0)))
+                for v in stats.values() if int(v.get("successes", 0)) >= 1]
+            if attempts < pooled_min_attempts and local_proven:
+                score = min(score, max(local_proven) - 1e-6)
             prov = f"prior(pooled,tried={attempts})"
         else:
             attempts = successes = failures = wins = 0
