@@ -1,9 +1,9 @@
 {
-  "generated_at": "2026-06-10T12:50:47Z",
-  "source_run_count": 782,
+  "generated_at": "2026-06-11T13:42:25Z",
+  "source_run_count": 841,
   "min_successful_runs_required": 3,
   "schema_version": 3,
-  "generation": 1,
+  "generation": 71,
   "families": {
     "rv32i": {
       "platforms": {
@@ -69,6 +69,19 @@
                     "median_reduction_pct": 0.0
                   }
                 },
+                "n_sessions": 1
+              }
+            }
+          }
+        },
+        "sky130hd": {
+          "sample_size": 0,
+          "success_count": 0,
+          "success_rate": 0.0,
+          "fix_recipes": {
+            "drc": {
+              "null": {
+                "strategies": {},
                 "n_sessions": 1
               }
             }
@@ -3421,6 +3434,19 @@
           }
         }
       }
+    },
+    "1684bfb75790d374": {
+      "check": "lvs",
+      "class": null,
+      "predicates": {},
+      "platforms_seen": [
+        "sky130hd"
+      ],
+      "evidence_designs": [
+        "i2c_slave_controller"
+      ],
+      "n_sessions": 1,
+      "strategies": {}
     }
   },
   "recipes": {
@@ -3815,6 +3841,28 @@
             }
           },
           "n_sessions": 5
+        }
+      }
+    },
+    "1684bfb75790d374": {
+      "logic/small": {
+        "sky130hd": {
+          "strategies": {},
+          "n_sessions": 0
+        },
+        "*": {
+          "strategies": {},
+          "n_sessions": 0
+        }
+      },
+      "*": {
+        "sky130hd": {
+          "strategies": {},
+          "n_sessions": 0
+        },
+        "*": {
+          "strategies": {},
+          "n_sessions": 0
         }
       }
     }

@@ -138,7 +138,8 @@ Two tool options are available:
 
 2. **Magic DRC** (sky130 only) — `scripts/flow/run_magic_drc.sh <project-dir> [platform]`
    - Uses Magic's built-in DRC engine with sky130A tech file
-   - Requires sky130A PDK at `/opt/pdks/sky130A/`
+   - Requires the sky130A PDK; the script reads `$PDK_ROOT/sky130A/libs.tech/magic/sky130A.tech`
+     (set `PDK_ROOT` via `references/env.local.sh` — `/opt/pdks` is only the fallback default).
    - Outputs: `drc/magic_drc.rpt`, `drc/magic_drc_count.rpt`, `drc/magic_drc_result.json`
    - Supported platforms: sky130hd, sky130hs
 
@@ -155,9 +156,22 @@ Two tool options are available:
 
 2. **Netgen LVS** (sky130 only) — `scripts/flow/run_netgen_lvs.sh <project-dir> [platform]`
    - Two-step flow: Magic extracts SPICE from GDS, then Netgen compares against Verilog netlist
-   - Requires sky130A PDK at `/opt/pdks/sky130A/` (Magic tech + Netgen setup.tcl)
+   - Requires the sky130A PDK (Magic tech + `$PDK_ROOT/sky130A/libs.tech/netgen/sky130A_setup.tcl`).
+     Set `PDK_ROOT` via `references/env.local.sh`; `/opt/pdks` is only the fallback default.
    - Outputs: `lvs/extracted.spice`, `lvs/netgen_lvs.rpt`, `lvs/netgen_lvs_result.json`
    - Supported platforms: sky130hd, sky130hs
+   - **This is the production sky130 LVS path** — prefer it over KLayout LVS on sky130 (the
+     ORFS KLayout sky130 rule deck is not production-grade; see `references/failure-patterns.md`,
+     "sky130 LVS").
+   - Antenna-diode designs are handled automatically: the script normalizes Magic's diode
+     `X`-subcircuit instances to `D` devices (`perim=`→`pj=`) and runs netgen with
+     `MAGIC_EXT_USE_GDS=1`, so `sky130_fd_sc_hd__diode_2` matches instead of flattening.
+   - Designs with port-to-port feedthroughs (`assign out_port = in_port`) need
+     `export POST_GLOBAL_PLACE_TCL = <skill>/scripts/flow/orfs_hooks/buffer_port_feedthroughs.tcl`
+     in config.mk **before the backend run** — SPICE cannot express two top-level ports on one
+     net, so without the hook LVS fails "Top level cell failed pin matching". The hook is a
+     no-op for designs without feedthroughs (safe to set everywhere); a backend re-run is
+     required when adding it. See `references/failure-patterns.md`, "sky130 LVS" cause 5.
 
 #### RCX (Parasitic Extraction)
 

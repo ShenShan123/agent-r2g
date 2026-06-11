@@ -210,6 +210,13 @@ if [[ ! -f "$EXTRACTED_SPICE" ]]; then
 fi
 echo "Extracted: $EXTRACTED_SPICE ($(wc -l < "$EXTRACTED_SPICE") lines)"
 
+# Normalize antenna-diode primitives in the extracted netlist (X subcircuit
+# instance -> D device, perim= -> pj=) so the diode class matches the PDK cell
+# library instead of flattening sky130_fd_sc_hd__diode_2 and failing top-level
+# pin matching. See normalize_diode_spice.py and references/failure-patterns.md
+# "sky130 LVS" cause 5 (fixed 2026-06-11).
+python3 "$(dirname "${BASH_SOURCE[0]}")/normalize_diode_spice.py" "$EXTRACTED_SPICE"
+
 # Step 2: Run Netgen LVS comparison
 NETGEN_LOG="$LVS_DIR/netgen_lvs.log"
 NETGEN_REPORT="$LVS_DIR/netgen_lvs.rpt"
@@ -242,7 +249,10 @@ fi
 
 LVS_STATUS=0
 set +e +o pipefail
-timeout --signal=TERM --kill-after=60 "$NETGEN_TIMEOUT" $NETGEN_CMD -batch source "$NETGEN_TCL" 2>&1 | tee "$NETGEN_LOG"
+# MAGIC_EXT_USE_GDS=1 tells the PDK's sky130A_setup.tcl that circuit1 came from a
+# GDS extraction, activating its `ignore class` rules for layout-only cells
+# (tapvpwrvgnd, fakediode) so they are ignored instead of flattened into the top.
+MAGIC_EXT_USE_GDS=1 timeout --signal=TERM --kill-after=60 "$NETGEN_TIMEOUT" $NETGEN_CMD -batch source "$NETGEN_TCL" 2>&1 | tee "$NETGEN_LOG"
 LVS_STATUS=${PIPESTATUS[0]}
 set -e -o pipefail
 
@@ -270,6 +280,23 @@ if [[ -f "$NETGEN_REPORT" ]] && [[ "$MATCH_STATUS" == "unknown" ]]; then
   fi
 fi
 
+# Classify the mismatch so the knowledge store's symptom index can key repair
+# experience on it (ingest_run.py reads "mismatch_class" from reports/lvs.json).
+# Classes: top_pin_mismatch — devices/nets match but top-level pin lists don't
+# (LVS-setup/representation residual: antenna-diode flattening or port-to-port
+# feedthrough aliasing; see failure-patterns.md "sky130 LVS" cause 5);
+# netgen_topology — real device/net count differences; generic — anything else.
+MISMATCH_CLASS=""
+if [[ "$LVS_RESULT" == "mismatch" && -f "$NETGEN_REPORT" ]]; then
+  if grep -qi 'Top level cell failed pin matching' "$NETGEN_REPORT"; then
+    MISMATCH_CLASS="top_pin_mismatch"
+  elif grep -qiE 'Number of devices:.*\*\*MISMATCH\*\*|do not match' "$NETGEN_REPORT"; then
+    MISMATCH_CLASS="netgen_topology"
+  else
+    MISMATCH_CLASS="generic"
+  fi
+fi
+
 # Write JSON result
 cat > "$LVS_DIR/netgen_lvs_result.json" << JSON_EOF
 {
@@ -278,6 +305,7 @@ cat > "$LVS_DIR/netgen_lvs_result.json" << JSON_EOF
   "platform": "$PLATFORM",
   "status": "$LVS_RESULT",
   "match": "$MATCH_STATUS",
+  "mismatch_class": "$MISMATCH_CLASS",
   "extracted_spice": "$EXTRACTED_SPICE",
   "reference_netlist": "$VERILOG_NETLIST",
   "report_file": "$NETGEN_REPORT",

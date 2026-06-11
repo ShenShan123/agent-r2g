@@ -673,26 +673,50 @@ first end-to-end Netgen runs surfaced three defects that had made the path inert
    well-characterized `lvs_mismatch` residual (devices-match, power-net-modeling-differs) —
    NOT clean, and NOT a layout defect.
 
+#### sky130 Netgen LVS: top-level pin-matching residuals (antenna diodes + port feedthroughs)
+
+<!-- r2g-lesson:
+id: lesson-sky130-netgen-top-pin-mismatch
+status: active
+trigger: {check: lvs, class: top_pin_mismatch, platform: "*"}
+strategy_ids: [netgen_diode_normalize, buffer_port_feedthroughs]
+-->
+
 5. **Two residual LVS-mismatch causes found in the first 50-design sky130 wave (2026-06-11,
-   OPEN).** With the power-aware-netlist fix, 30/42 designs reached clean DRC+LVS+RCX. All 12
-   mismatches share the SAME netgen verdict — `Top level cell failed pin matching` — with every
-   subcircuit and net count matching (i.e. NOT a topology/connectivity defect). Two sub-causes:
-   - **Antenna diodes (8/12).** Designs that needed antenna-diode insertion during routing carry
-     `sky130_fd_sc_hd__diode_2` (primitive `sky130_fd_pr__diode_pw2nd_05v5`). Netgen does not
-     recognize that primitive as a device (`contains no devices` / `No property value/mult/perim
-     found`), so it flattens the diode cell and the flattening exposes a top-level pin mismatch.
-     Correlation is 100%: every diode-bearing design mismatched, zero diode-free designs did for
-     this reason. Candidate fix: declare `sky130_fd_pr__diode_pw2nd_05v5` as a 2-terminal device
-     in the netgen setup (or filter ORFS antenna diodes from the LVS comparison), so the diode
-     cell matches instead of flattening.
-   - **Top-level power-port reconciliation (4/12).** Diode-free bridge/interface designs
-     (axis_ll_bridge, wb2axip_axilite2axi, APB GPIO slave) also fail `Top level cell failed pin
-     matching` — the powered netlist's top-level supply ports (VDD/VSS) don't reconcile with the
-     layout-extracted top ports for these port-heavy tops. Candidate fix: normalize global
-     supply port names between `write_verilog -include_pwr_gnd` output and the Magic extraction.
-   Both are LVS-setup residuals, not layout defects, and are independent of the (now-fixed)
-   power-aware-netlist issue. The PD flow itself was flawless across the wave: 0 DRC fails,
-   0 crashes, 0 timeouts.
+   FIXED 2026-06-11).** All 13 wave mismatches shared the SAME netgen verdict — `Top level
+   cell failed pin matching` — with every subcircuit and net count matching (i.e. NOT a
+   topology/connectivity defect). Final classification after root-causing both: 8 antenna-diode
+   + 5 port-feedthrough (the initial "power-port reconciliation" guess for the diode-free
+   subset was wrong — VDD/VSS matched fine; the unmatched pins were signal ports).
+   `run_netgen_lvs.sh` now classifies this verdict as `mismatch_class=top_pin_mismatch`.
+   - **Antenna diodes (8/13) — FIXED in `run_netgen_lvs.sh`.** Diode-bearing designs carry
+     `sky130_fd_sc_hd__diode_2`. Magic extracts its primitive as an `X` *subcircuit instance*
+     (`X0 VNB DIODE sky130_fd_pr__diode_pw2nd_05v5 perim=... area=...`) with no `.subckt`
+     definition → netgen invents a black box with pins `1 2`. The PDK cell library models the
+     same primitive as a `D` *device* (pins anode/cathode, properties `area`/`pj`). The class
+     mismatch makes netgen flatten every diode_2 and fail top-level pin matching. **Fix (two
+     parts):** (a) post-process `extracted.spice` rewriting diode `X` instances to `D` device
+     lines and `perim=` → `pj=` (the netgen setup compares `pj` at 2% tolerance and deletes
+     `perim`); (b) run netgen with `MAGIC_EXT_USE_GDS=1` so the PDK setup's `ignore class`
+     rules for layout-only cells (tapvpwrvgnd, fakediode) activate instead of flattening.
+     Validated: ultraembedded_irq_ctrl 355/355 devices, 398/398 nets, "Circuits match
+     uniquely".
+   - **Port-to-port feedthroughs (5/13) — FIXED via `POST_GLOBAL_PLACE_TCL` hook.** Diode-free
+     bridge/interface designs (`assign out_port = in_port` in RTL: axis_ll_bridge,
+     ll_axis_bridge, wb2axip_axilite2axi, axi_ram_wr_if, APB GPIO slave) put 2+ top-level port
+     names on ONE net. SPICE cannot express two ports on one node, so Magic's extraction keeps
+     only one name → pin lists can never reconcile ("Netlists match uniquely with port
+     errors" + failed pin matching). Yosys emits a buffer for these assigns, but ORFS
+     `global_place.tcl` runs `remove_buffers` (GPL_TIMING_DRIVEN=1) which deletes it and merges
+     the port nets; OpenROAD's `buffer_ports` skips port-only nets. **Fix:**
+     `scripts/flow/orfs_hooks/buffer_port_feedthroughs.tcl`, wired as `POST_GLOBAL_PLACE_TCL`
+     (first point after the flow's last `remove_buffers`): splits every aliased output port
+     onto its own net behind a real `MIN_BUF_CELL_AND_PORTS` buffer placed at the port pin
+     (legalized by detailed placement). Idempotent; no-op for designs without feedthroughs.
+     `tools/mk_sky130_project.py` (agent-r2g repo) wires it into every generated sky130
+     config.mk; requires a backend re-run from synth/floorplan (the netlist changes).
+   Both were LVS-setup/representation residuals, not layout defects. The PD flow itself was
+   flawless across the wave: 0 DRC fails, 0 crashes, 0 timeouts.
 
 ### LVS CDL_FILE Override by Platform Config
 
