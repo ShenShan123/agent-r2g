@@ -406,6 +406,11 @@ design_cases/<design-name>/
 - Read `references/feature-extraction.md` when building the graph-feature (X) side of the dataset (per-node/per-edge/metadata CSVs + stats).
 - Read `scripts/extract/techlib/` for the shared per-platform tech layer consumed by both stages: `profile.py` (supply voltage, tap patterns, cell-type strategy per ORFS platform), `resolve.py` (the Python backend for `resolve_platform_paths.sh` — same `KEY=VALUE` contract), `def_parse.py` (single DEF/SDC parser), `lef.py` (routing-layer names, pitch/direction, regex matcher), `liberty.py` (cell/pin/net classifiers), `cell_types.py` (`cell_type_id` map — curated for nangate45, runtime-built for all others).
 - Use scripts in `scripts/` for initialization, spec normalization, environment checks, lint, simulation, synthesis, ORFS backend, DRC, LVS, RCX extraction, result collection, GDS preview rendering, dashboard generation, and run summaries.
+- Use `scripts/flow/orfs_hooks/` for Tcl sourced into ORFS stages via the generic
+  `PRE_<STAGE>_TCL` / `POST_<STAGE>_TCL` env hooks (set them in config.mk, not the shell —
+  ORFS scrubs exported variables). Currently: `buffer_port_feedthroughs.tcl`
+  (`POST_GLOBAL_PLACE_TCL`) splits port-to-port feedthrough nets behind real buffers so
+  Netgen LVS top-level pins match; a no-op for designs without feedthroughs.
 - Use `assets/examples/simple-arbiter/` as the first smoke-test case.
 - Use `assets/config-template.mk` and `assets/constraint-template.sdc` as default backend configuration templates.
 
@@ -616,6 +621,15 @@ override export CDL_FILE = /absolute/path/to/combined_with_fakerams.cdl
 ```
 
 The `override` keyword on CDL_FILE is essential: ORFS includes the platform config.mk *after* the design config.mk, so a bare `export CDL_FILE` gets silently overwritten by the platform default (which only has standard cells).
+
+For sky130 (and any design whose RTL contains port-to-port `assign out = in` feedthroughs),
+also add the stage hook that keeps Netgen LVS top-level pins matchable:
+```makefile
+# Split port-to-port feedthrough nets so Netgen LVS top-level pins match
+export POST_GLOBAL_PLACE_TCL = <skill>/scripts/flow/orfs_hooks/buffer_port_feedthroughs.tcl
+```
+Set it in config.mk (not the shell — ORFS scrubs exported variables). It is a no-op for
+designs without feedthroughs, so it is safe to set unconditionally.
 
 ### config.mk Validation Rules (Hard)
 

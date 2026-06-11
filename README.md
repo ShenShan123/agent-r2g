@@ -191,6 +191,45 @@ export R2G_ENV_FILE=/path/to/your-env.sh   # add to ~/.bashrc or ~/.zshrc
 
 ---
 
+### Installing the signoff toolchain without sudo (Miniconda)
+
+If `iverilog`/`vvp`, `magic`, `netgen`, or the sky130A PDK are missing and you do not have
+root, install them at user level from the [litex-hub](https://anaconda.org/litex-hub) channel:
+
+```bash
+# 1. Miniconda (user-level, no sudo)
+curl -sL -o /tmp/miniconda.sh https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh
+bash /tmp/miniconda.sh -b -p "$HOME/miniconda3"
+
+# 2. Tools — note --override-channels (the conda 'defaults' channel now requires
+#    interactive Terms-of-Service acceptance and will abort a non-interactive create).
+"$HOME/miniconda3/bin/conda" create -y -n eda --override-channels \
+    -c litex-hub -c conda-forge  magic netgen iverilog
+
+# 3. sky130A PDK (~8GB extracted; put it on a volume with space, NOT a full $HOME).
+#    The package installs the tree under <prefix>/share/pdk/sky130A. If $HOME is small,
+#    extract the cached tarball to a big volume instead and point PDK_ROOT there:
+"$HOME/miniconda3/bin/conda" install -y -n eda --override-channels \
+    -c litex-hub -c conda-forge  open_pdks.sky130a
+```
+
+Then pin the paths in `references/env.local.sh`:
+
+```bash
+_eda="$HOME/miniconda3/envs/eda/bin"
+export IVERILOG_EXE="$_eda/iverilog"
+export VVP_EXE="$_eda/vvp"
+export MAGIC_EXE="$_eda/magic"
+export NETGEN_EXE="$_eda/netgen"
+export PDK_ROOT="$HOME/miniconda3/envs/eda/share/pdk"   # or wherever sky130A/ lives
+```
+
+(Avoid `volare` for the PDK behind a SOCKS proxy: its `httpx` client needs the `socksio`
+package and the GitHub release API rate-limits unauthenticated listing — the conda
+`open_pdks.sky130a` package sidesteps both.)
+
+---
+
 ### Verify the setup
 
 ```bash
@@ -269,6 +308,7 @@ agent-r2g/
 │   ├── install.sh                  #   Standalone installer
 │   ├── scripts/                    #   ~30 stateless Python/Shell CLIs
 │   │   ├── flow/                   #     stage runners (lint, sim, synth, orfs, drc, lvs, rcx)
+│   │   │   └── orfs_hooks/         #       Tcl sourced into ORFS stages (PRE/POST_<STAGE>_TCL)
 │   │   ├── extract/                #     parse tool output → JSON
 │   │   ├── project/                #     init / normalize / validate
 │   │   ├── reports/                #     timing gate, diagnosis, run history
@@ -283,7 +323,10 @@ agent-r2g/
 │   ├── setup_rtl_designs.py        #     scaffold design_cases/ from an RTL catalog
 │   ├── batch_orfs_only.sh          #     parallel ORFS runner with per-case flock
 │   ├── batch_flow.sh               #     full flow (ORFS + signoff)
-│   └── fix_orfs_failures.py        #     log-driven config.mk rewriter
+│   ├── fix_orfs_failures.py        #     log-driven config.mk rewriter
+│   ├── sky130_campaign.py          #     sky130hd sweep ledger (init / wave / status)
+│   ├── mk_sky130_project.py        #     source project → sky130hd materializer
+│   └── run_sky130_design.sh        #     per-design sky130 driver (flow → signoff → ingest)
 └── CLAUDE.md                       #   Project instructions for this repo (not part of the skill)
 ```
 
@@ -364,6 +407,14 @@ DESIGNS_LIST=failed.txt bash tools/batch_orfs_only.sh 8 7200
 
 LVS gracefully skips for platforms without `.lylvs` rules (reports `status: "skipped"`).
 
+On sky130, **Netgen LVS is the production path** (the bundled KLayout sky130 rule cannot
+reconcile flat-transistor extraction). `run_netgen_lvs.sh` handles antenna-diode designs
+automatically (Magic's diode X-subcircuit → D-device normalization) and classifies any
+mismatch (`top_pin_mismatch` / `netgen_topology` / `generic`). Designs with port-to-port
+`assign` feedthroughs additionally need the `buffer_port_feedthroughs.tcl` stage hook in
+config.mk — see `r2g-rtl2gds/SKILL.md` ("Netgen LVS") and
+`references/failure-patterns.md` ("sky130 LVS").
+
 ---
 
 ## Validated scale
@@ -387,6 +438,14 @@ The skill has been validated on **682 RTL designs** spanning ICCAD benchmarks, R
 | RCX | 681 / 682 | **99.85%** | 1 intractable (boom_smallseboom) |
 
 A curated 70-design subset (7 families including macro designs) achieves **100% ORFS + LVS + RCX pass rate**.
+
+**sky130hd signoff wave 1 (50 designs, 2026-06-11):** **50/50 signoff-clean** — KLayout DRC
+clean, Magic-extracted **Netgen LVS "Circuits match uniquely"**, and OpenRCX complete on every
+design; 0 crashes, 0 timeouts. The wave's 13 initial LVS residuals (all "Top level cell failed
+pin matching") were root-caused and fixed at skill level: 8 antenna-diode device-class
+mismatches (X→D normalization in `run_netgen_lvs.sh`) and 5 port-feedthrough aliases
+(`buffer_port_feedthroughs.tcl` hook + backend re-run). 400 more sky130hd candidates are
+queued in the resumable campaign ledger (`tools/sky130_campaign.py status`).
 
 ---
 

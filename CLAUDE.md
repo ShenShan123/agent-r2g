@@ -2,7 +2,7 @@
 
 AI-driven open-source EDA flow: natural-language spec → GDSII via OpenROAD-flow-scripts
 (ORFS), with full signoff (DRC, LVS, RCX). Implemented as the `r2g-rtl2gds` Claude Code
-skill.
+skill. This skill manages an as-human-engineering learning loop with memory databases and keeps self-evolving.
 
 This file orients you to the repo. The skill itself documents *how* to run the flow,
 debug failures, and tune for known design families. **Do not duplicate skill content
@@ -14,6 +14,7 @@ here.** When you fix a bug, update `r2g-rtl2gds/` (the skill) — not this file.
 r2g-rtl2gds/                  # The skill (everything to run a flow lives here)
   SKILL.md                      # Workflow, hard rules, env knobs (PLACE_FAST, ROUTE_FAST, …)
   scripts/flow/                 # Stage runners: run_orfs.sh, run_drc.sh, run_lvs.sh, run_rcx.sh, …
+    orfs_hooks/                   # ORFS stage-hook Tcl (e.g. buffer_port_feedthroughs.tcl via POST_GLOBAL_PLACE_TCL)
   scripts/extract/              # Parse tool output → JSON: extract_ppa, extract_drc, extract_lvs, …
     techlib/                      # Shared per-platform tech layer: profile, resolve, def_parse, lef, liberty, cell_types
     labels/                       # Dataset label extractors (congestion, wirelength, timing, irdrop) + stats roller
@@ -37,12 +38,10 @@ design_cases/                   # All design runs (gitignored)
 ## Skill Deployment (must be a symlink, not a copy)
 
 Claude Code loads the skill from `.claude/skills/r2g-rtl2gds/` (gitignored), **not** from
-the canonical `r2g-rtl2gds/` source tree. Deploy it with `bash r2g-rtl2gds/install.sh
---project . --link` so the deployed path is a **symlink** to the canonical tree. A plain
+the canonical `r2g-rtl2gds/` source tree. Deploy it with `bash r2g-rtl2gds/install.sh --project . --link` so the deployed path is a **symlink** to the canonical tree. A plain
 `cp` install silently goes stale — the harness then loads an old `SKILL.md` (wrong env
 paths, missing failure buckets) while the canonical skill keeps evolving. If a session's
-loaded skill disagrees with `r2g-rtl2gds/SKILL.md`, re-run the installer with `--link
---force`. (Root-cause of the 2026-06-08 stale-skill defect.)
+loaded skill disagrees with `r2g-rtl2gds/SKILL.md`, re-run the installer with `--link --force`. (Root-cause of the 2026-06-08 stale-skill defect.)
 
 ## Toolchain (autodetected by the skill)
 
@@ -51,11 +50,26 @@ manually. Override any value via `$R2G_ENV_FILE`, `references/env.local.sh`, or 
 exporting `ORFS_ROOT`, `OPENROAD_EXE`, `YOSYS_EXE`, `KLAYOUT_CMD`, etc. before invoking
 a script.
 
-| Required | Optional |
-|----------|----------|
+| Required                                        | Optional                                                                  |
+| ----------------------------------------------- | ------------------------------------------------------------------------- |
 | python3 (3.10+), yosys, openroad, ORFS checkout | iverilog/vvp, verilator, klayout, magic, netgen-lvs, opensta, sky130A PDK |
 
 Verify with `bash r2g-rtl2gds/scripts/flow/check_env.sh`.
+
+**Installed signoff toolchain (2026-06-10, this machine).** `iverilog`/`vvp`, `magic`, and
+`netgen` are installed in a user-level Miniconda env (`~/miniconda3/envs/eda`, litex-hub
+channel — no sudo). The sky130A PDK (`open_pdks.sky130a`, ~8GB) is staged at
+`/proj/workarea/user5/sky130_pdk/share/pdk/sky130A` — on the 50T `/proj` volume because
+`/home` (100G) is full. All four are pinned for the skill in
+`r2g-rtl2gds/references/env.local.sh` (`IVERILOG_EXE`/`VVP_EXE`/`MAGIC_EXE`/`NETGEN_EXE` +
+`PDK_ROOT`); `check_env.sh` shows them green. This unblocks real sky130 Magic DRC + Netgen
+LVS (the prior tooling gap that paused the sky130 campaign). Install recipe + gotchas
+(conda `--override-channels` ToS, volare/SOCKS) are in `README.md`. **Do not install large
+packages into `$HOME`** — it is full; use `/proj`. Validated at scale 2026-06-11: the first
+50-design sky130hd wave closed at **50/50 signoff-clean** (Magic-extracted Netgen LVS
+"Circuits match uniquely") after two skill-level LVS fixes — antenna-diode device
+normalization and port-feedthrough buffering (see `r2g-rtl2gds/references/failure-patterns.md`,
+"sky130 LVS" cause 5).
 
 ORFS platforms shipped with this checkout: `nangate45` (default), `sky130hd`, `sky130hs`,
 `asap7`, `gf180`, `ihp-sg13g2`. The nangate45 LVS rule (`FreePDK45.lylvs`) is bundled at
@@ -96,21 +110,21 @@ The skill enforces this order. Don't skip a failed stage — diagnose first via
 
 ## Where to Find X
 
-| Question | File |
-|----------|------|
-| How does the skill run a flow? | `r2g-rtl2gds/SKILL.md` |
-| Phase-by-phase workflow | `r2g-rtl2gds/references/workflow.md` |
-| ORFS backend setup, env knobs, macro designs | `r2g-rtl2gds/references/orfs-playbook.md` |
-| A specific failure / pitfall (DRC stuck, place_gp hang, CDL override, …) | `r2g-rtl2gds/references/failure-patterns.md` |
-| Historical debug narratives + corpus results | `r2g-rtl2gds/references/lessons-learned.md` |
-| How to read PPA / signoff JSON | `r2g-rtl2gds/references/ppa-report-guide.md` |
-| Dataset label extraction (Y: congestion/wirelength/timing/irdrop) | `r2g-rtl2gds/references/label-extraction.md` |
-| Dataset feature extraction (X: graph nodes/edges/metadata) | `r2g-rtl2gds/references/feature-extraction.md` |
-| Per-platform tech handling (voltage, tap cells, cell-type ids, routing layers, liberty) | `r2g-rtl2gds/scripts/extract/techlib/` |
-| Spec / config / SDC templates | `r2g-rtl2gds/references/spec-template.md`, `r2g-rtl2gds/assets/` |
-| Validated config tuning per design family | `r2g-rtl2gds/references/lessons-learned.md` (corpus tables) |
-| Platform extras (nangate45 LVS rule, etc.) | `r2g-rtl2gds/assets/platforms/<plat>/` |
-| DRC/LVS violation fixing (antenna diode insertion, route/density, LVS triage) | `r2g-rtl2gds/references/signoff-fixing.md` |
+| Question                                                                                | File                                                                 |
+| --------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| How does the skill run a flow?                                                          | `r2g-rtl2gds/SKILL.md`                                             |
+| Phase-by-phase workflow                                                                 | `r2g-rtl2gds/references/workflow.md`                               |
+| ORFS backend setup, env knobs, macro designs                                            | `r2g-rtl2gds/references/orfs-playbook.md`                          |
+| A specific failure / pitfall (DRC stuck, place_gp hang, CDL override, …)               | `r2g-rtl2gds/references/failure-patterns.md`                       |
+| Historical debug narratives + corpus results                                            | `r2g-rtl2gds/references/lessons-learned.md`                        |
+| How to read PPA / signoff JSON                                                          | `r2g-rtl2gds/references/ppa-report-guide.md`                       |
+| Dataset label extraction (Y: congestion/wirelength/timing/irdrop)                       | `r2g-rtl2gds/references/label-extraction.md`                       |
+| Dataset feature extraction (X: graph nodes/edges/metadata)                              | `r2g-rtl2gds/references/feature-extraction.md`                     |
+| Per-platform tech handling (voltage, tap cells, cell-type ids, routing layers, liberty) | `r2g-rtl2gds/scripts/extract/techlib/`                             |
+| Spec / config / SDC templates                                                           | `r2g-rtl2gds/references/spec-template.md`, `r2g-rtl2gds/assets/` |
+| Validated config tuning per design family                                               | `r2g-rtl2gds/references/lessons-learned.md` (corpus tables)        |
+| Platform extras (nangate45 LVS rule, etc.)                                              | `r2g-rtl2gds/assets/platforms/<plat>/`                             |
+| DRC/LVS violation fixing (antenna diode insertion, route/density, LVS triage)           | `r2g-rtl2gds/references/signoff-fixing.md`                         |
 
 ## When You Fix a Bug
 
@@ -128,9 +142,7 @@ Skill scripts and references are the source of truth — not this file. The work
    is implied.
 4. **Commit with a clear "feat(skill):" or "fix(skill):" prefix.** The commit log is the
    long-term record.
-
-This file (`CLAUDE.md`) only changes when the repo *layout* changes — not when a bug is
-fixed inside the skill.
+5. When you have done a iteration of signoff flow, check if there are any updates in both database `journal.sqlite` and `knowledge.sqlite`. Make the skill keep evolving with each action on the issue-fixing trajectory.
 
 ## Project Conventions
 
