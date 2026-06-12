@@ -54,6 +54,29 @@ def parse_config(path: Path) -> dict:
     return vals
 
 
+def source_def_pins(src: Path) -> int:
+    """Bit-blasted top-level pin count from the source design's ORFS DEF.
+
+    Bus ports are already expanded in the DEF `PINS N` header, so this is the
+    true IO-pad demand (the RTL port *declaration* count is far smaller — a
+    64-bit AXI stream demux is ~57 declarations but ~1500 pads). Returns 0 when
+    no DEF is present (e.g. a source that never reached detailed placement).
+    """
+    backend = src / "backend"
+    if not backend.is_dir():
+        return 0
+    defs = sorted(backend.rglob("6_final.def")) or sorted(backend.rglob("*.def"))
+    for d in reversed(defs):
+        try:
+            with open(d, errors="ignore") as fh:
+                for line in fh:
+                    if line.startswith("PINS "):
+                        return int(line.split()[1])
+        except Exception:
+            continue
+    return 0
+
+
 def main() -> int:
     if len(sys.argv) != 3:
         print("usage: mk_sky130_project.py <source_project_dir> <dest_project_dir>", file=sys.stderr)
@@ -148,6 +171,23 @@ def main() -> int:
     core_side = math.sqrt(est_core)
     use_floor = core_side < (PDN_DIE_FLOOR - 40)   # design too small -> needs floor
 
+    # IO-pad perimeter demand (PPL-0024). A cell-area-tiny but pin-huge design
+    # (wide AXI/bus demuxes, packet routers) overflows the die perimeter even
+    # when its logic fits: ORFS aborts floorplan with
+    #   [ERROR PPL-0024] Number of IO pins (N) exceeds maximum number of
+    #   available positions (718). Increase the die perimeter ...
+    # The 200um floor die (800um perimeter) seats ~718 pads; only when the source
+    # DEF's pad count exceeds that do we enlarge the die, sized from PPL's own
+    # recommended ~1.36um/pad (which already carries its corner margin) plus a
+    # safety factor and rounded up to 10um. This is a strict *lower bound* that is
+    # a no-op for every <=718-pad design, so all previously-clean designs keep
+    # their byte-identical 200um floor. See references/failure-patterns.md
+    # "sky130 high-pin-count floorplan (PPL-0024)".
+    FLOOR_PIN_CAPACITY = 718
+    pins = source_def_pins(src)
+    pin_side = (math.ceil(pins * 1.45 / 4 / 10) * 10
+                if pins > FLOOR_PIN_CAPACITY else 0)
+
     lines = [
         f"export DESIGN_NAME = {design}",
         "export PLATFORM    = sky130hd",
@@ -156,10 +196,15 @@ def main() -> int:
         f"export SDC_FILE      = {dest_sdc}",
         "",
     ]
-    if use_floor:
-        side = PDN_DIE_FLOOR
+    if use_floor or pin_side:
+        # Explicit DIE: the PDN-feasible floor (PDN-0185) raised, when needed, to
+        # seat the IO pads (PPL-0024). pin_side is 0 unless pads overflow the
+        # floor, so small designs keep the plain 200um die.
+        side = max(PDN_DIE_FLOOR, pin_side)
+        why = ("Small/PDN-floored die" if not pin_side
+               else f"Pin-heavy ({pins} pads): die enlarged for IO perimeter (PPL-0024)")
         lines += [
-            "# Small design: explicit DIE floored to a PDN-feasible size (PDN-0185).",
+            f"# {why}.",
             f"export DIE_AREA  = 0 0 {side} {side}",
             f"export CORE_AREA = 10 10 {side - 10} {side - 10}",
             f"export PLACE_DENSITY_LB_ADDON = {pdl_val}",

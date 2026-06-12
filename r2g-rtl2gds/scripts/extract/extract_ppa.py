@@ -140,6 +140,56 @@ def find_reports(project_root: Path) -> dict:
     return reports
 
 
+# Main ORFS stages in order; each emits a same-named result ODB on completion.
+_ORFS_STAGES = [
+    ('synth', '1_synth.odb'),
+    ('floorplan', '2_floorplan.odb'),
+    ('place', '3_place.odb'),
+    ('cts', '4_cts.odb'),
+    ('route', '5_route.odb'),
+    ('finish', '6_final.odb'),
+]
+
+
+def detect_orfs_progress(run_dir: Path) -> dict:
+    """Classify how far the ORFS backend got from the stage result ODBs.
+
+    Returns {orfs_status, orfs_last_stage, orfs_fail_stage}:
+      - complete : 6_final.odb present (full flow)
+      - partial  : some stages done, the next one is missing -> orfs_fail_stage
+      - fail     : not even synth produced an ODB
+
+    The collected backend flattens results under <run>/results/, but ORFS's
+    native layout nests them under results/<platform>/<design>/<variant>/, so we
+    match by basename anywhere beneath the run dir. Consumed by the campaign
+    driver (run_sky130_design.sh) to label residuals as orfs_<stage> instead of
+    the catch-all orfs_incomplete (the prior producer/consumer gap: the driver
+    read orfs_fail_stage but extract_ppa never wrote it).
+    """
+    present = set()
+    rdir = run_dir / 'results'
+    search_root = rdir if rdir.is_dir() else run_dir
+    if search_root.is_dir():
+        for name in {odb for _, odb in _ORFS_STAGES}:
+            if next(search_root.rglob(name), None) is not None:
+                present.add(name)
+    last_stage = None
+    fail_stage = None
+    for stage, odb in _ORFS_STAGES:
+        if odb in present:
+            last_stage = stage
+        elif fail_stage is None:
+            fail_stage = stage  # first missing stage after the last completed one
+    if last_stage == 'finish':
+        return {'orfs_status': 'complete', 'orfs_last_stage': 'finish',
+                'orfs_fail_stage': None}
+    if last_stage is None:
+        return {'orfs_status': 'fail', 'orfs_last_stage': None,
+                'orfs_fail_stage': 'synth'}
+    return {'orfs_status': 'partial', 'orfs_last_stage': last_stage,
+            'orfs_fail_stage': fail_stage}
+
+
 def main():
     if len(sys.argv) < 3:
         print('usage: extract_ppa.py <project-root> <output.json>', file=sys.stderr)
@@ -160,6 +210,14 @@ def main():
         'geometry': {},
         'run_dir': reports.get('run_dir'),
     }
+
+    # ORFS stage progress / failed stage (top-level so the campaign driver can
+    # read it via a flat key lookup). Absent run_dir -> nothing ran.
+    if reports.get('run_dir'):
+        ppa.update(detect_orfs_progress(Path(reports['run_dir'])))
+    else:
+        ppa.update({'orfs_status': 'fail', 'orfs_last_stage': None,
+                    'orfs_fail_stage': 'synth'})
 
     for key, parser in [
         ('area_report', parse_area_report),

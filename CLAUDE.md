@@ -69,7 +69,14 @@ packages into `$HOME`** — it is full; use `/proj`. Validated at scale 2026-06-
 50-design sky130hd wave closed at **50/50 signoff-clean** (Magic-extracted Netgen LVS
 "Circuits match uniquely") after two skill-level LVS fixes — antenna-diode device
 normalization and port-feedthrough buffering (see `r2g-rtl2gds/references/failure-patterns.md`,
-"sky130 LVS" cause 5).
+"sky130 LVS" cause 5). Extended 2026-06-12 (waves 2–4, +86 designs → **136/136
+signoff-clean**): one new skill-level fix — `tools/mk_sky130_project.py` is now IO-pad-aware,
+reading the source DEF `PINS` count and enlarging the PDN-floor die only when pads exceed its
+~718 capacity (PPL-0024 on pin-huge/cell-tiny designs like `verilog_ethernet_ip_demux`, 1523
+pads → 560 µm die; a no-op for ≤718-pad designs, so the 134 other waves are byte-identical).
+`extract_ppa.py` now emits `orfs_fail_stage` (the campaign driver already consumed it). See
+`references/failure-patterns.md` "sky130 high-pin-count floorplan (PPL-0024)". 314 candidates
+pending for future waves.
 
 ORFS platforms shipped with this checkout: `nangate45` (default), `sky130hd`, `sky130hs`,
 `asap7`, `gf180`, `ihp-sg13g2`. The nangate45 LVS rule (`FreePDK45.lylvs`) is bundled at
