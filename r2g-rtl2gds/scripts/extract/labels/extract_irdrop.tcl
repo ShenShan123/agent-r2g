@@ -201,7 +201,16 @@ if {[catch {analyze_power_grid -net $target_net -voltage_file $out_file} error_m
         set p95_mv [lindex $sorted_drops $p95_idx]
     }
 
-    set has_irdrop [expr {$p95_mv >= 0.05}]
+    # Masking threshold for the has_irdrop flag / label. Default 0.05 mV, but
+    # small designs can have genuinely tiny (real, non-zero) IR drop that this
+    # floor would mask to label 0. Make it overridable via env so the raw
+    # IR_Drop_mV column (always written) can be surfaced into the label too.
+    # Setting IRDROP_THRESHOLD_MV=0 surfaces all real values.
+    set irdrop_threshold_mv 0.05
+    if {[info exists ::env(IRDROP_THRESHOLD_MV)] && [string trim $::env(IRDROP_THRESHOLD_MV)] ne ""} {
+        set irdrop_threshold_mv $::env(IRDROP_THRESHOLD_MV)
+    }
+    set has_irdrop [expr {$p95_mv >= $irdrop_threshold_mv}]
     if {$has_irdrop} {
         set has_irdrop_str "true"
     } else {
