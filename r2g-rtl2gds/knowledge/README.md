@@ -142,6 +142,20 @@ python3 knowledge/repair_run_status.py --db knowledge/knowledge.sqlite
 > partial / 17 fail**. ORFS aborts now also record a `failure_events` row whose signature carries
 > the tool's own error code (e.g. `orfs-fail-place-PPL-0024`) with the error line as `detail`.
 
+> **2026-06-13 follow-on (commit pending).** The note above was only half-true: ORFS aborts
+> record a `failure_events` row on the **live ingest path** (`ingest_run.py`), but
+> `repair_run_status.py` reconciled `orfs_status` with a direct SQL `UPDATE` and never touched
+> `failure_events`. So the 17 rows it flipped `partial→fail` stayed invisible in the table the
+> learner / escalation / `search_failures` actually read — a dual-write consistency gap. Fix:
+> `repair_run_status._reconcile_orfs_failure_event` now maintains the `orfs-fail-<stage>` event
+> in lock-step with the reconciled status (idempotent; owns only `orfs-fail-%` signatures, leaving
+> diagnosis events like `synthesis_errors` intact). It backfills already-flipped historical rows
+> even when the status is unchanged, and works from the `runs` columns alone when the project dir
+> is gone (bare `orfs-fail-<stage>`, null `detail` — honest: no flow.log to quote). Separately,
+> `knowledge_db.connect` now arms `timeout=30s` + `PRAGMA busy_timeout=30000` (parity with
+> `journal_db.connect`): the campaign runs a pool of `ingest_run` subprocesses against one DB and
+> the driver swallows ingest errors, so an unguarded `database is locked` would silently drop a run.
+
 ## Invariants
 
 1. `ingest_run.py` only reads structured JSON artifacts; it never parses raw ORFS logs. If an artifact is missing, the corresponding column is NULL.

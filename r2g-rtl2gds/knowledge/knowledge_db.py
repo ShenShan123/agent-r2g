@@ -21,7 +21,13 @@ DEFAULT_FAMILIES_PATH = DEFAULT_KNOWLEDGE_DIR / "families.json"
 def connect(db_path: Path | str = DEFAULT_DB_PATH) -> sqlite3.Connection:
     db_path = Path(db_path)
     db_path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(db_path))
+    # timeout + busy_timeout make a concurrent writer wait-and-retry rather than
+    # fail instantly with "database is locked". The campaign runs a pool of
+    # ingest_run subprocesses against this one DB and the driver swallows ingest
+    # errors, so an unguarded lock would silently drop a run from the store.
+    # Parity with journal_db.connect (which also writes concurrently at ingest).
+    conn = sqlite3.connect(str(db_path), timeout=30.0)
+    conn.execute("PRAGMA busy_timeout = 30000")
     conn.execute("PRAGMA foreign_keys = ON")
     return conn
 

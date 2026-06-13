@@ -4,6 +4,19 @@ from __future__ import annotations
 import knowledge_db
 
 
+def test_connect_sets_busy_timeout(tmp_knowledge_dir):
+    """The campaign runs a pool of ingest subprocesses against one DB; without a
+    busy_timeout a concurrent writer fails instantly with 'database is locked'
+    and the driver swallows it, silently dropping a run. connect() must arm a
+    nonzero busy_timeout so writers wait-and-retry instead (parity with
+    journal_db.connect). See repair_run_status / campaign honesty."""
+    db_path = tmp_knowledge_dir / "knowledge.sqlite"
+    conn = knowledge_db.connect(db_path)
+    busy = conn.execute("PRAGMA busy_timeout").fetchone()[0]
+    assert busy >= 30000
+    conn.close()
+
+
 def test_ensure_schema_creates_tables(tmp_knowledge_dir):
     db_path = tmp_knowledge_dir / "knowledge.sqlite"
     conn = knowledge_db.connect(db_path)
