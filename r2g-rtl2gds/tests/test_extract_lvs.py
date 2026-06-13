@@ -331,3 +331,56 @@ def test_cdl_parse_error_reason(tmp_path):
     result = _run_script(proj, out)
     assert result["status"] == "unknown", result
     assert result.get("reason") == "cdl_parse_error", result
+
+
+# ---------------------------------------------------------------------------
+# Netgen path (sky130 production LVS) — regression for the 2026-06-13
+# LVS-clobber bug. run_netgen_lvs.sh writes netgen_lvs_result.json and leaves
+# NO KLayout artifacts; extract_lvs.py must honor that verdict instead of
+# falling through to status='unknown' (which mis-recorded LVS-clean sky130
+# designs as lvs_unknown whenever DRC failed and the driver re-extracted).
+# ---------------------------------------------------------------------------
+
+def _make_netgen_project(tmp_path: Path, ng: dict, *, also_klayout: str = "") -> Path:
+    proj = tmp_path / "proj"
+    lvs_dir = proj / "lvs"
+    lvs_dir.mkdir(parents=True)
+    (lvs_dir / "netgen_lvs_result.json").write_text(json.dumps(ng), encoding="utf-8")
+    if also_klayout:
+        (lvs_dir / "6_lvs.log").write_text(also_klayout, encoding="utf-8")
+    return proj
+
+
+def test_netgen_clean_is_honored(tmp_path):
+    """Netgen 'clean' verdict + no KLayout artifacts → status clean (not unknown)."""
+    ng = {"tool": "netgen", "design": "memory_controller", "platform": "sky130hd",
+          "status": "clean", "match": "match", "mismatch_class": "",
+          "report_file": "/p/lvs/netgen_lvs.rpt", "log_file": "/p/lvs/netgen_lvs.log"}
+    out = tmp_path / "lvs.json"
+    result = _run_script(_make_netgen_project(tmp_path, ng), out)
+    assert result["status"] == "clean", result
+    assert result["mismatch_count"] == 0, result
+    assert result["tool"] == "netgen", result
+
+
+def test_netgen_fail_is_honored(tmp_path):
+    """Netgen 'fail' verdict is surfaced with its mismatch_class, not 'unknown'."""
+    ng = {"tool": "netgen", "status": "fail", "match": "mismatch",
+          "mismatch_class": "property_mismatch"}
+    out = tmp_path / "lvs.json"
+    result = _run_script(_make_netgen_project(tmp_path, ng), out)
+    assert result["status"] == "fail", result
+    assert result["mismatch_count"] is None, result
+    assert result["mismatch_class"] == "property_mismatch", result
+
+
+def test_klayout_takes_precedence_over_netgen(tmp_path):
+    """If KLayout artifacts ARE present, defer to the KLayout parsers (nangate45
+    byte-identical behavior) rather than the netgen shortcut."""
+    ng = {"tool": "netgen", "status": "clean", "match": "match"}
+    proj = _make_netgen_project(tmp_path, ng, also_klayout="netlists don't match\n")
+    out = tmp_path / "lvs.json"
+    result = _run_script(proj, out)
+    # KLayout log says mismatch → fail; netgen shortcut must NOT have fired.
+    assert result["status"] == "fail", result
+    assert result.get("tool") != "netgen", result

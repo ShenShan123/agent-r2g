@@ -764,6 +764,25 @@ strategy_ids: [netgen_diode_normalize, buffer_port_feedthroughs]
    Both were LVS-setup/representation residuals, not layout defects. The PD flow itself was
    flawless across the wave: 0 DRC fails, 0 crashes, 0 timeouts.
 
+6. **`extract_lvs.py` clobbered a clean Netgen verdict on DRC-fail designs (2026-06-13,
+   FIXED).** `extract_lvs.py` is a *KLayout* lvsdb/log parser. A Netgen run leaves NO KLayout
+   artifacts (`6_lvs.lvsdb`/`6_lvs.log`/`lvs_run.log` all absent) — only
+   `lvs/netgen_lvs_result.json`. The driver copies that Netgen result into `reports/lvs.json`
+   up front, but its **DRC/LVS fix-loop branch** (`if DRC==fail || LVS==fail`) re-runs
+   `extract_lvs.py reports/lvs.json` *after* the fix attempt to refresh DRC. With no KLayout
+   artifacts every parser returned empty and the status fell through to `unknown`, **overwriting
+   the clean Netgen verdict**. Net effect: any sky130 design that is **LVS-clean but DRC-fail**
+   (e.g. `RV32I_Memorycontroller`: 84 genuine `m3.2` met3-spacing violations, Netgen "Circuits
+   match uniquely") was mis-recorded as `lvs_unknown` and ingested as such — an honesty-invariant
+   violation (`run_violations`/residual-class for an LVS-clean design now lies). Latent because
+   the re-extract only runs on DRC/LVS failures, so all 174 prior clean-DRC passes were
+   unaffected. **Fix (root cause, in `extract_lvs.py`):** before the KLayout parsers, if
+   `lvs/netgen_lvs_result.json` exists and no KLayout artifacts are present, emit the Netgen
+   verdict (status + `mismatch_class`) directly. Defers to KLayout whenever its artifacts exist,
+   so nangate45 is byte-identical. Regression tests: `test_netgen_clean_is_honored`,
+   `test_netgen_fail_is_honored`, `test_klayout_takes_precedence_over_netgen`. The driver needs
+   no change — its post-fix-loop `extract_lvs.py` call is now correct for the Netgen path.
+
 ### LVS CDL_FILE Override by Platform Config
 
 **Symptoms:**

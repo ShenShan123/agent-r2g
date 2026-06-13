@@ -263,6 +263,46 @@ def main():
         except Exception:
             pass
 
+    # Netgen path (sky130 production LVS): run_netgen_lvs.sh writes the
+    # authoritative verdict to netgen_lvs_result.json and leaves NO KLayout
+    # artifacts (no 6_lvs.lvsdb / 6_lvs.log / lvs_run.log). The KLayout parsers
+    # below would all return empty and fall through to status='unknown',
+    # silently clobbering a clean Netgen result. This is the root cause of the
+    # 2026-06-13 LVS-clobber bug: a DRC-fail sky130 design re-ran extract_lvs.py
+    # after the fix-loop and lost its already-clean Netgen verdict, mis-recording
+    # an LVS-clean design as lvs_unknown (an honesty-invariant violation that
+    # poisons run_violations / residual classification). Honor the Netgen result
+    # whenever it exists and KLayout produced nothing. Defers to KLayout if its
+    # artifacts are present, so nangate45 (KLayout LVS) is byte-identical.
+    netgen_file = lvs_dir / 'netgen_lvs_result.json'
+    klayout_present = (lvs_dir / '6_lvs.lvsdb').exists() or log_present
+    if netgen_file.exists() and not klayout_present:
+        try:
+            ng = json.loads(netgen_file.read_text(encoding='utf-8'))
+            ng_status = ng.get('status', 'unknown')
+            ng_class = ng.get('mismatch_class') or ''
+            out = {
+                'status': ng_status,
+                'mismatch_count': 0 if ng_status == 'clean' else None,
+                'lvsdb': {},
+                'log_info': {
+                    'tool': 'netgen',
+                    'match': ng.get('match'),
+                    'report_file': ng.get('report_file'),
+                    'log_file': ng.get('log_file'),
+                },
+                'tool': 'netgen',
+            }
+            if ng_class:
+                out['mismatch_class'] = ng_class
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            out_path.write_text(json.dumps(out, indent=2, ensure_ascii=False),
+                                encoding='utf-8')
+            print(out_path)
+            return
+        except Exception:
+            pass  # malformed netgen JSON -> fall through to KLayout parsing
+
     lvsdb_result = parse_lvsdb(lvs_dir)
     log_info = parse_lvs_log(lvs_dir)
 
