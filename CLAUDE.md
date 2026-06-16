@@ -59,43 +59,15 @@ a script.
 
 Verify with `bash r2g-rtl2gds/scripts/flow/check_env.sh`.
 
-**Installed signoff toolchain (2026-06-10, this machine).** `iverilog`/`vvp`, `magic`, and
-`netgen` are installed in a user-level Miniconda env (`~/miniconda3/envs/eda`, litex-hub
-channel — no sudo). The sky130A PDK (`open_pdks.sky130a`, ~8GB) is staged at
-`/proj/workarea/user5/sky130_pdk/share/pdk/sky130A` — on the 50T `/proj` volume because
-`/home` (100G) is full. All four are pinned for the skill in
-`r2g-rtl2gds/references/env.local.sh` (`IVERILOG_EXE`/`VVP_EXE`/`MAGIC_EXE`/`NETGEN_EXE` +
-`PDK_ROOT`); `check_env.sh` shows them green. This unblocks real sky130 Magic DRC + Netgen
-LVS (the prior tooling gap that paused the sky130 campaign). Install recipe + gotchas
-(conda `--override-channels` ToS, volare/SOCKS) are in `README.md`. **Do not install large
-packages into `$HOME`** — it is full; use `/proj`. Validated at scale 2026-06-11: the first
-50-design sky130hd wave closed at **50/50 signoff-clean** (Magic-extracted Netgen LVS
-"Circuits match uniquely") after two skill-level LVS fixes — antenna-diode device
-normalization and port-feedthrough buffering (see `r2g-rtl2gds/references/failure-patterns.md`,
-"sky130 LVS" cause 5). Extended 2026-06-12 (waves 2–4, +86 designs → **136/136
-signoff-clean**): one new skill-level fix — `tools/mk_sky130_project.py` is now IO-pad-aware,
-reading the source DEF `PINS` count and enlarging the PDN-floor die only when pads exceed its
-~718 capacity (PPL-0024 on pin-huge/cell-tiny designs like `verilog_ethernet_ip_demux`, 1523
-pads → 560 µm die; a no-op for ≤718-pad designs, so the 134 other waves are byte-identical).
-`extract_ppa.py` now emits `orfs_fail_stage` (the campaign driver already consumed it). See
-`references/failure-patterns.md` "sky130 high-pin-count floorplan (PPL-0024)". Extended again
-2026-06-13 (wave 5, +40 diverse → **176/450 done, 174 clean / 2 genuine route-congestion**):
-every wave-5 failure was ONE bug — `mk_sky130_project.py` read top-level `ppa["cell_count"]`
-(always null) instead of `geometry.instance_count`, so the die was *always* the 200 µm PDN
-floor; cell-dense designs (~3100-3600 cells) over-packed it to ~100 % util and aborted at place
-(DPL-0036) or route (GRT-0116/timeout). Fixed the read (+ `source_def_components()` DEF fallback);
-small designs stay below the floor threshold (byte-identical), large ones now size by
-`CORE_UTILIZATION` and close. Three more skill fixes in the same session, all with the knowledge
-store's honesty as the throughline: `extract_ppa.detect_orfs_progress` now reads `stage_log.jsonl`
-(was mis-attributing the fail stage from disk-ODB probing); `repair_run_status.py` now maintains
-`failure_events` in lock-step with reconciled status **and** only touches the latest-ingested row
-per project (a multi-run-clobber bug it briefly caused, then fixed — restored from its own `.bak`);
-`knowledge_db.connect` arms `busy_timeout` (parity with `journal_db`) so pooled campaign ingests
-can't silently drop a run. The 2 residuals (AES `aes_encipher_block`, DES `des_area`) are genuine
-route congestion — crypto SPN logic on sky130hd's 5 routing layers; lowering `CORE_UTILIZATION`
-≤ 8 is the lever but some may not close. See `references/failure-patterns.md` "sky130hd large-core
-over-packs the PDN floor (DPL-0036)" and "sky130hd route-dense designs (crypto SPN)". 274 candidates
-pending for future waves.
+**Installed signoff toolchain (this machine).** `iverilog`/`vvp`, `magic`, and `netgen` live in a
+user-level Miniconda env (`~/miniconda3/envs/eda`, litex-hub channel, no sudo); the sky130A PDK
+(~8GB) is staged at `/proj/workarea/user5/sky130_pdk/share/pdk/sky130A`. All are pinned in
+`references/env.local.sh` (`IVERILOG_EXE`/`VVP_EXE`/`MAGIC_EXE`/`NETGEN_EXE` + `PDK_ROOT`) and show
+green in `check_env.sh` — this enables real sky130 Magic DRC + Netgen LVS. Install recipe + gotchas
+(conda ToS, volare/SOCKS) are in `README.md`. **Never install large packages into `$HOME` (full) —
+use `/proj`.** Validated at scale on the sky130hd campaign; per-wave results and the skill fixes
+that closed them live in `references/failure-patterns.md`, `references/lessons-learned.md`, and the
+session memory — not here.
 
 ORFS platforms shipped with this checkout: `nangate45` (default), `sky130hd`, `sky130hs`,
 `asap7`, `gf180`, `ihp-sg13g2`. The nangate45 LVS rule (`FreePDK45.lylvs`) is bundled at
@@ -129,8 +101,6 @@ The skill enforces this order. Don't skip a failed stage — diagnose first via
   `run_orfs.sh` derives `FLOW_VARIANT` from the project dir basename — keep project names
   unique within a DESIGN_NAME.
 - **Never set `PLACE_DENSITY_LB_ADDON` below 0.10.** Placer divergence is irrecoverable.
-- **When one config in a design family crashes, apply the workaround to ALL configs of
-  that family** before retrying — see `references/failure-patterns.md`.
 - **For >100K-cell designs, never run multiple LVS jobs concurrently.** Each KLayout LVS
   process uses 3-5GB RAM; 2-3 in parallel cause 2-3× wall-time inflation.
 
@@ -228,9 +198,9 @@ the A/B machinery is "live" only after such a case has driven a verdict end-to-e
 | Question                                                                                | File                                                                 |
 | --------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
 | How does the skill run a flow?                                                          | `r2g-rtl2gds/SKILL.md`                                             |
-| Closed learning loop, DB schema, store invariants                                       | `r2g-rtl2gds/knowledge/README.md`                                 |
+| Closed learning loop, DB schema, store invariants                                       | `r2g-rtl2gds/knowledge/README.md`                                  |
 | Autonomous campaign + escalation drain + provenance                                     | `r2g-rtl2gds/references/engineer-loop.md`                          |
-| Fix-learning loop (record → learn → apply, symptom index)                               | `r2g-rtl2gds/references/signoff-fixing.md`                         |
+| Fix-learning loop (record → learn → apply, symptom index)                             | `r2g-rtl2gds/references/signoff-fixing.md`                         |
 | Phase-by-phase workflow                                                                 | `r2g-rtl2gds/references/workflow.md`                               |
 | ORFS backend setup, env knobs, macro designs                                            | `r2g-rtl2gds/references/orfs-playbook.md`                          |
 | A specific failure / pitfall (DRC stuck, place_gp hang, CDL override, …)               | `r2g-rtl2gds/references/failure-patterns.md`                       |
