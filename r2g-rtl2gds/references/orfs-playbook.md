@@ -173,6 +173,26 @@ scripts/flow/run_rcx.sh <project-dir> [platform]
 
 **Never set PLACE_DENSITY_LB_ADDON below 0.05** — this reliably causes placement divergence on any non-trivial design.
 
+### Backend-aware synthesis retune (post-route timing miss, clean routing)
+
+When a design **routes clean** but **misses timing after route** (the synth-time WNS
+estimate was optimistic), re-pick the ABC mapping strategy and re-synthesize instead of
+relaxing the clock or the floorplan. `diagnose_signoff_fix.py --check timing` offers the
+`backend_aware_synth_retune` recipe in this case (Win 6):
+
+| Knob | Delta | Effect |
+|------|-------|--------|
+| `ABC_AREA` | → `0` | Timing-driven ABC mapping (area mode off) |
+| `SYNTH_HIERARCHICAL` | → `0` | Flatten so ABC optimizes across module boundaries |
+
+It reruns from `synth` (the already-paved `rerun_from:"synth"` path) and rechecks timing,
+feeding the **real routed WNS** back as `outcome_score`. The recipe **enters as shadow**
+(`requires_ab_promotion`): a blind live run never auto-applies it — only the A/B arm
+(`--rank-first backend_aware_synth_retune`) exercises it until it wins an LCB-gated A/B
+trial (`R2G_AB_REPEATS`, Win 2), after which the learned-recipe ranking surfaces it. It is
+**never** hand-promoted and **never** auto-merged into `failure-patterns.md`. Fires only on
+`moderate`/`severe` timing tiers with clean DRC.
+
 ### Safety Flags for Large Designs
 For designs with > 50K instances or macros (swerv, black_parrot, ibex):
 ```makefile

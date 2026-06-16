@@ -258,7 +258,8 @@ def _rank_plan_strategies(plan: dict, recipes: dict | None,
     return plan
 
 
-def _timing_plan(tcheck: dict, cfg: dict, exclude: set) -> dict:
+def _timing_plan(tcheck: dict, cfg: dict, exclude: set,
+                 routing_clean: bool = False) -> dict:
     tier = tcheck.get("tier", "unknown")
     wns = tcheck.get("wns_ns")
     plan = {"check": "timing", "status": tier, "violation_count": None,
@@ -289,6 +290,28 @@ def _timing_plan(tcheck: dict, cfg: dict, exclude: set) -> dict:
          "config_edits": {"CORE_UTILIZATION": str(max(5, cur_util - 5))},
          "sdc_edits": {}, "rerun_from": "floorplan", "recheck": "timing",
          "auto_apply": True})
+    # Win 6 (backend-aware synthesis retune): a POST-ROUTE timing miss WITH clean
+    # routing means the synth-time estimate was wrong, not the floorplan. Re-pick
+    # the ABC mapping strategy (ABC_AREA off -> timing-driven) and flatten
+    # (SYNTH_HIERARCHICAL off) so ABC optimizes across the full netlist, then
+    # re-synthesize via the already-paved rerun_from:"synth" path; the re-run feeds
+    # real routed WNS back as outcome_score (Win 1). Enters as SHADOW
+    # (requires_ab_promotion): never auto-applied in a blind live run — only the
+    # A/B arm (--rank-first) exercises it until it wins an LCB-gated trial (Win 2),
+    # then the learned-recipe ranking surfaces it. Not auto-merged into
+    # failure-patterns.md (human-review-queue invariant). See orfs-playbook.md.
+    if routing_clean and tier in ("moderate", "severe"):
+        strategies.append(
+            {"id": "backend_aware_synth_retune",
+             "rationale": "Post-route timing miss with clean routing: re-pick the "
+                          "ABC map strategy (ABC_AREA=0 -> timing-driven) and "
+                          "flatten (SYNTH_HIERARCHICAL=0) for cross-boundary "
+                          "optimization, then re-synthesize. Closes the loop on "
+                          "real routed WNS, not the synth-time estimate "
+                          "(MCP4EDA / PostEDA-Bench). A/B-gated before live use.",
+             "config_edits": {"ABC_AREA": "0", "SYNTH_HIERARCHICAL": "0"},
+             "sdc_edits": {}, "rerun_from": "synth", "recheck": "timing",
+             "auto_apply": True, "requires_ab_promotion": True})
     plan["strategies"] = [s for s in strategies if s["id"] not in exclude]
     return plan
 
@@ -301,12 +324,34 @@ def build_plan(drc: dict, lvs: dict, cfg: dict, *, check: str = "drc",
     is given, strategies are re-ranked by empirical clearance (fix_model)."""
     excl = set(exclude or ())
     if check == "timing":
-        plan = _timing_plan(tcheck or {}, cfg, excl)
+        routing_clean = (drc or {}).get("status") in ("clean", "clean_beol")
+        plan = _timing_plan(tcheck or {}, cfg, excl, routing_clean=routing_clean)
     elif check == "drc":
         plan = _drc_plan(drc or {}, cfg, excl)
     else:
         plan = _lvs_plan(lvs or {}, cfg, excl)
     return _rank_plan_strategies(plan, recipes)
+
+
+def _live_auto_strategy(plan: dict, rank_first: str | None = None) -> dict | None:
+    """The strategy a LIVE run should auto-apply: the first auto_apply strategy,
+    SKIPPING any `requires_ab_promotion` (shadow) recipe unless the caller forced
+    it via --rank-first (the A/B arm-B path). This is the Win 6 gate that keeps a
+    backend-aware retune out of blind live runs until it wins its A/B trial."""
+    strategies = plan.get("strategies", [])
+    # A/B arm B explicitly forces a strategy: honor it (it may be a shadow recipe).
+    if rank_first:
+        forced = next((s for s in strategies
+                       if s["id"] == rank_first and s.get("auto_apply")), None)
+        if forced is not None:
+            return forced
+    for s in strategies:
+        if not s.get("auto_apply"):
+            continue
+        if s.get("requires_ab_promotion"):
+            continue        # shadow recipe: never auto-applied in a blind live run
+        return s
+    return None
 
 
 def apply_edits(config_text: str, edits: dict) -> str:
@@ -597,7 +642,7 @@ def main(argv=None) -> int:
         return 0
 
     if args.next:
-        auto = next((s for s in plan["strategies"] if s.get("auto_apply")), None)
+        auto = _live_auto_strategy(plan, rank_first=args.rank_first)
         if auto is None:
             reason = plan.get("residual_reason") or "no_auto_strategy"
             print(f"STOP\t{plan['status']}\t{reason}")
