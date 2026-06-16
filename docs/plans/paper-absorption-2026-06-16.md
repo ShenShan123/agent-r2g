@@ -19,6 +19,19 @@
 > the live store: 0 → 7 A/B candidates, honesty count 69/69 intact); **(2)** Gate B is a documented
 > runbook; **(3)** Win 5's pre-route extractor is funded and shipped. See the rev-2 → rev-3
 > implementation log at the foot. The rev-1 → rev-2 changelog follows it.
+>
+> **UPDATE 2026-06-16 (Gate B FIRED on the LIVE store).** The deferred compute-bound Gate B was
+> executed for real and exposed + closed a **second blocker on top of Gate A**: `ab_runner.plan_trial`
+> selected A/B subjects only from `run_violations` (the POST-fix snapshot), so a *successfully-fixed*
+> symptom (antenna) had no rows there and the winning recipe could never be A/B'd
+> (`plan_trial→None`, verified). Fixed by a Tier-2 fallback to the recipe's `evidence_designs`
+> (pre-fix exhibitors). A new sky130 DRC strategy `density_relief` (lower `CORE_UTILIZATION`; deck
+> never relaxed) cleared all 9 pending sky130hd `m3.2`/via designs (34/20/10/6/4/84→0). Live result:
+> Gate A enqueued (`recipe_status` 0→2, `learner_diff`); `ab-drain` → **`ab_trials` 0→2, both `win`**;
+> `logic/small density_relief` `candidate → promoted`. honesty 69/69; suite 592→597. The
+> `ab_trials=0` Gate A signature is now cleared on the live corpus — the first end-to-end A/B verdict
+> ever recorded. See `references/engineer-loop.md` "Tier −1 Gate B — FIRED" and memory
+> `project_gateB_fired_live`.
 
 ---
 

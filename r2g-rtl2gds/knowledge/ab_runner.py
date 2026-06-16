@@ -19,6 +19,8 @@ import statistics
 
 import recipe_lifecycle
 
+HEUR_PATH = os.path.join(os.path.dirname(__file__), "heuristics.json")
+
 N_DESIGNS_DEFAULT = 2     # min matched designs per trial (spec §5.4)
 AB_REPEATS_DEFAULT = 2    # Win 2: k repeats per arm for variance-aware promotion
 AB_LCB_Z = 1.0            # z for the lower-confidence bound (mean − z·stderr)
@@ -89,6 +91,51 @@ def _now() -> str:
     return _dt.datetime.utcnow().isoformat(timespec="seconds") + "Z"
 
 
+def _evidence_designs(symptom_id: str) -> list[str]:
+    """Designs the learner recorded as having EXHIBITED this symptom (pre-fix)."""
+    try:
+        with open(HEUR_PATH) as fh:
+            heur = json.load(fh)
+    except (OSError, ValueError):
+        return []
+    sym = (heur.get("symptoms") or {}).get(symptom_id) or {}
+    return list(sym.get("evidence_designs") or [])
+
+
+def _resolve_evidence(conn, ev_names: list[str], want_platform: str | None) -> list[dict]:
+    """Map recipe evidence-design names -> on-disk re-runnable project dirs.
+
+    fix_events/heuristics record the project-dir basename as the design name; the
+    runs table carries the absolute project_path. We match a runs row whose
+    project_path basename is an evidence name (optionally stripping a `__<plat>`
+    suffix), keep the latest row per project, require the dir to still exist, and
+    order cheapest-first (Phase-0 small-design-first)."""
+    if not ev_names:
+        return []
+    names = set(ev_names)
+    rows = conn.execute(
+        "SELECT design_name, project_path, cell_count, platform, "
+        "ROW_NUMBER() OVER (PARTITION BY project_path ORDER BY ingested_at DESC, run_id DESC) rn "
+        "FROM runs").fetchall()
+    out, seen = [], set()
+    for design_name, project_path, cell_count, plat, rn in rows:
+        if rn != 1 or not project_path or project_path in seen:
+            continue
+        base = os.path.basename(project_path.rstrip("/"))
+        stem = base.split("__", 1)[0]
+        if base not in names and stem not in names:
+            continue
+        if want_platform and plat != want_platform:
+            continue
+        if not os.path.isdir(project_path):
+            continue
+        seen.add(project_path)
+        out.append({"design_name": design_name, "project_path": project_path,
+                    "cell_count": cell_count or 0})
+    out.sort(key=lambda d: d["cell_count"])
+    return out
+
+
 def plan_trial(conn, *, symptom_id: str, design_class: str, platform: str,
                strategy: str, n_designs: int = N_DESIGNS_DEFAULT) -> dict | None:
     """Returns {designs, arm_a, arm_b, match_level} or None if no match."""
@@ -102,6 +149,17 @@ def plan_trial(conn, *, symptom_id: str, design_class: str, platform: str,
         return [dict(zip(("design_name", "project_path", "cell_count"), x))
                 for x in cur.fetchall()]
 
+    def _trial(designs, level):
+        return {
+            "designs": designs[:n_designs],
+            "match_level": level,
+            "arm_a": {"exclude_strategy": strategy},
+            "arm_b": {"rank_first_strategy": strategy},
+            "key": {"symptom_id": symptom_id, "design_class": design_class,
+                    "platform": platform, "strategy": strategy},
+        }
+
+    # Tier 1 — run_violations (POST-fix residual exhibitors of the symptom).
     for extra, params, level in (
             ("AND r.design_class=? AND r.platform=?", (design_class, platform),
              "exact"),
@@ -109,14 +167,18 @@ def plan_trial(conn, *, symptom_id: str, design_class: str, platform: str,
             ("", (), "pooled_platform")):
         designs = _q(extra, params)
         if len(designs) >= n_designs:
-            return {
-                "designs": designs[:n_designs],
-                "match_level": level,
-                "arm_a": {"exclude_strategy": strategy},
-                "arm_b": {"rank_first_strategy": strategy},
-                "key": {"symptom_id": symptom_id, "design_class": design_class,
-                        "platform": platform, "strategy": strategy},
-            }
+            return _trial(designs, level)
+
+    # Tier 2 — recipe evidence designs (PRE-fix exhibitors). run_violations is a
+    # post-fix snapshot, so a SUCCESSFULLY-FIXED symptom (e.g. antenna) leaves no
+    # rows there — yet that is exactly the recipe we most need to A/B. The learner
+    # already records who exhibited the symptom in heuristics.symptoms[sid].
+    # evidence_designs; resolve those to on-disk dirs. (2026-06-16: this gap, on
+    # top of Gate A, was the second reason the live A/B loop had never fired.)
+    for want_plat, level in ((platform, "evidence_platform"), (None, "evidence_pooled")):
+        designs = _resolve_evidence(conn, _evidence_designs(symptom_id), want_plat)
+        if len(designs) >= n_designs:
+            return _trial(designs, level)
     return None
 
 

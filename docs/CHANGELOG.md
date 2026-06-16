@@ -19,6 +19,35 @@ skipped as library-pre-verified).
 
 ---
 
+## 2026-06-16 — Gate B FIRED on the live store: A/B loop's first end-to-end verdict + density_relief
+
+Ran the deferred compute-bound **Tier −1 Gate B** for real on the live `knowledge.sqlite`
+(branch `feat/paper-absorption`). The corpus showed the exact Gate A signature — 69 `fail` +
+41 `partial` runs but `recipe_status` empty and `ab_trials=0` — i.e. the A/B loop had never
+fired in production.
+
+- **Second blocker found + fixed.** `ab_runner.plan_trial` selected A/B subjects only from
+  `run_violations` (the POST-fix snapshot), so a *successfully-fixed* symptom (antenna) had no
+  rows there and its winning recipe could never be A/B'd (`plan_trial→None`, verified — same
+  fixture-vs-production trap as Gate A itself). Fixed with a Tier-2 fallback to the recipe's
+  `heuristics.symptoms[sid].evidence_designs` (pre-fix exhibitors), resolved to on-disk dirs.
+- **New sky130 DRC strategy `density_relief`.** The 9 pending sky130hd DRC-fail designs were
+  genuine metal/via **spacing** residuals (`m3.2`/`via.4*`/`via_OFFGRID`) that v1 left as
+  "non-antenna DRC not handled." `diagnose_signoff_fix._routing_drc_strategies` now lowers
+  `CORE_UTILIZATION` (by 8, floor 8, rerun_from floorplan) — a real layout change; the deck is
+  never relaxed. Cleared **all 9** (34/20/10/6/4/84 → 0) → 9 newly fully-signed-off sky130
+  designs.
+- **Loop fired end-to-end.** Learner derived the recipe → Gate A enqueued (`recipe_status` 0→2,
+  `learner_diff`) → `engineer_loop ab-drain` ran arm A (`--exclude`, stays dirty) vs arm B
+  (`--rank-first`, clears) → **`ab_trials` 0→2, both `win`** → `logic/small density_relief`
+  recipe `candidate → promoted` (`ab_trial:2`). Honesty re-validated: `fail`-rows ==
+  `orfs-fail`-events 69/69; no `is_success` flip.
+- Tests 592 → **597** (1 plan_trial fallback + 4 density_relief). Source: this session;
+  details in `references/engineer-loop.md` "Tier −1 Gate B — FIRED", `knowledge/README.md`
+  invariant 20, `references/signoff-fixing.md` catalog.
+
+---
+
 ## 2026-06-04 — OpenSpace absorption: live learning loop + observability + payoff eval
 *(plan: `docs/plans/openspace-absorption-2026-06-03.md`; skill commits `356d517`→`5dd99ee`; PR [#3](https://github.com/ShenShan123/agent-r2g/pull/3))*
 

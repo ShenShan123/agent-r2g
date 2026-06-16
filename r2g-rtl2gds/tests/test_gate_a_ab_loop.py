@@ -134,6 +134,46 @@ def _fake_arm_scripts(tmp_path):
     return {"R2G_LOOP_RUN_FLOW": str(flow), "R2G_LOOP_FIX": str(fix)}
 
 
+def test_plan_trial_falls_back_to_recipe_evidence_designs(tmp_path, monkeypatch):
+    """Second live-fire blocker (2026-06-16): plan_trial picked A/B subjects only
+    from run_violations, which is a POST-fix snapshot — so a successfully-FIXED
+    symptom (antenna) has no rows there and the winning recipe could never be
+    A/B'd. plan_trial must fall back to the recipe's evidence_designs (the pre-fix
+    exhibitors the learner recorded), resolved to on-disk project dirs."""
+    import ab_runner
+    db = tmp_path / "knowledge.sqlite"
+    conn = knowledge_db.connect(db)
+    knowledge_db.ensure_schema(conn)
+    sid = "abc1230000000001"
+    # Two designs with on-disk dirs and runs rows, but NO run_violations for sid.
+    names = []
+    for nm, cells in (("ev_small", 120), ("ev_big", 800)):
+        d = tmp_path / "designs" / nm
+        (d / "constraints").mkdir(parents=True)
+        conn.execute(
+            "INSERT INTO runs (run_id, project_path, design_name, platform, "
+            "design_class, cell_count, orfs_status, ingested_at) "
+            "VALUES (?,?,?,?,?,?,?,?)",
+            (f"r_{nm}", str(d), nm, "nangate45", "logic/small", cells, "pass",
+             "2026-06-16T00:00:00Z"))
+        names.append(nm)
+    conn.commit()
+    heur = tmp_path / "heuristics.json"
+    heur.write_text(json.dumps({"symptoms": {sid: {
+        "check": "drc", "class": "antenna", "strategies": {"antenna_diode_repair": {}},
+        "evidence_designs": names}}}))
+    monkeypatch.setattr(ab_runner, "HEUR_PATH", str(heur))
+
+    trial = ab_runner.plan_trial(conn, symptom_id=sid, design_class="logic/small",
+                                 platform="nangate45",
+                                 strategy="antenna_diode_repair", n_designs=2)
+    conn.close()
+    assert trial is not None, "evidence fallback must find subjects when run_violations is empty"
+    assert trial["match_level"].startswith("evidence")
+    # cheapest-first ordering preserved
+    assert [d["design_name"] for d in trial["designs"]] == ["ev_small", "ev_big"]
+
+
 def test_ab_drain_fires_trial_and_transitions_recipe(tmp_path, monkeypatch):
     """ab_drain plans + runs + judges trials for pending candidates WITHOUT
     re-running the normal designs. Exit criterion (Gate A): ab_trials gains a row

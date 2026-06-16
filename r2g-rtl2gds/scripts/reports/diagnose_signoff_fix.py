@@ -133,6 +133,41 @@ def _antenna_strategies(cfg: dict) -> list:
     return [s for s in _antenna_catalog(cfg) if not _applied(cfg, s["config_edits"])]
 
 
+# Routing-geometry DRC density relief (validated 2026-06-16). Step/floor on
+# CORE_UTILIZATION; 20->12 cleared eeprom_top sky130hd (4 m3.2 -> 0).
+_UTIL_STEP = 8
+_UTIL_FLOOR = 8
+
+
+def _routing_drc_strategies(cfg: dict, exclude: set) -> list:
+    """Non-antenna routing-geometry DRC (metal/via spacing, off-grid, via
+    enclosure): lower CORE_UTILIZATION so the router gets more room. A REAL
+    layout change (larger die, sparser routes) — the signoff deck is NEVER
+    relaxed. Mirrors antenna_density_relief's lever. Validated 2026-06-16 on
+    eeprom_top sky130hd (4 m3.2 -> 0 at util 20->12). Only when a CORE_UTILIZATION
+    knob exists and sits above the floor; no-op for DIE_AREA-sized or
+    already-sparse designs (honest residual)."""
+    try:
+        cur_util = int(float(cfg.get("CORE_UTILIZATION", "")))
+    except (TypeError, ValueError):
+        return []
+    new_util = max(_UTIL_FLOOR, cur_util - _UTIL_STEP)
+    if new_util >= cur_util:
+        return []
+    strat = {
+        "id": "density_relief",
+        "rationale": ("Lower CORE_UTILIZATION so the router has room to satisfy "
+                      "metal/via spacing and off-grid rules on a congested small "
+                      "die. Real layout change (bigger die); the routing/signoff "
+                      "deck is never relaxed. PLACE_DENSITY_LB_ADDON untouched "
+                      "(hard rule: never < 0.10)."),
+        "config_edits": {"CORE_UTILIZATION": str(new_util)},
+        "rerun_from": "floorplan", "recheck": "drc", "auto_apply": True}
+    if strat["id"] in exclude or _applied(cfg, strat["config_edits"]):
+        return []
+    return [strat]
+
+
 def _drc_plan(drc: dict, cfg: dict, exclude: set) -> dict:
     status = drc.get("status", "unknown")
     cats = drc.get("categories") or {}
@@ -168,7 +203,19 @@ def _drc_plan(drc: dict, cfg: dict, exclude: set) -> dict:
                     plan["residual_reason"] = "antenna: all real-fix strategies exhausted"
         else:
             non_antenna = sorted(k for k in cats if not k.upper().endswith("_ANTENNA"))
-            plan["residual_reason"] = "non-antenna DRC class not handled in v1: " + ", ".join(non_antenna)
+            strategies = _routing_drc_strategies(cfg, exclude)
+            plan["strategies"] = strategies
+            if not strategies:
+                plan["status"] = "residual"
+                if "CORE_UTILIZATION" not in cfg:
+                    plan["residual_reason"] = (
+                        "non-antenna DRC class (" + ", ".join(non_antenna) +
+                        "): no CORE_UTILIZATION knob to relieve density (DIE_AREA-sized).")
+                else:
+                    plan["residual_reason"] = (
+                        "routing-geometry DRC (" + ", ".join(non_antenna) +
+                        "): density relief exhausted (CORE_UTILIZATION at floor "
+                        f"{_UTIL_FLOOR}); honest residual.")
         return plan
     plan["residual_reason"] = "drc status unknown — no report yet"
     return plan

@@ -135,6 +135,43 @@ procedure, not unit-testable:
    `fail`-rows == `orfs-fail`-events count must still hold, and no clean run's
    `is_success` may have flipped after re-ingesting `outcome_score`.
 
+### Tier −1 Gate B — FIRED on the live corpus (2026-06-16)
+
+Running Gate B for real surfaced a **second blocker on top of Gate A**, and then closed
+both end-to-end:
+
+- **Blocker 2 — A/B subject-space mismatch (`ab_runner.plan_trial`).** `plan_trial` picked
+  A/B subjects only from `run_violations`, which is the run's **post-fix** snapshot. A
+  symptom that gets **successfully fixed** (e.g. antenna) therefore has **no rows** there —
+  so the recipes that actually *win* could never be A/B'd, even after Gate A enqueued them
+  (`plan_trial(antenna 02d5eba1) → None`, verified). This is the same fixture-vs-production
+  trap as Gate A: the Gate A integration test had to hand-insert a `run_violations` antenna
+  row to make `plan_trial` work, masking the gap. **Fix:** `plan_trial` now falls back to the
+  recipe's `evidence_designs` (the **pre-fix** exhibitors the learner records in
+  `heuristics.symptoms[sid]`), resolved to on-disk project dirs via `runs.project_path`
+  (Tier-2 match levels `evidence_platform` / `evidence_pooled`). Test:
+  `test_plan_trial_falls_back_to_recipe_evidence_designs`.
+- **A real catalog strategy for the pending sky130 designs — `density_relief`.** The 9
+  pending sky130hd DRC-fail designs all carried genuine metal/via **spacing** residuals
+  (`m3.2`, `via.4*`, `via_OFFGRID`; symptom `f670d8e567`) that v1 deliberately left
+  unhandled. A pilot showed lowering `CORE_UTILIZATION` clears them (eeprom_top 4→0 at
+  20→12), so `diagnose_signoff_fix._routing_drc_strategies` now offers `density_relief`
+  (real layout change, deck never relaxed; see signoff-fixing.md). Driving 5 of the 9 through
+  `fix_signoff.sh` cleared **all 5** (34→0, 20→0, 10→0, 6→0, 4→0) → 5 newly fully-signed-off
+  sky130 designs + 5 `before→after` fix episodes seeding the dense-reward gradient.
+- **Gate A fired live.** `learn_heuristics.learn()` derived the `density_relief` recipe for
+  the m3.2 symptom (previously empty) and `diff_and_enqueue` enqueued it as a `candidate`
+  (`recipe_status` 0→2, provenance `learner_diff`) — the first time the production learner
+  enqueued on this store.
+- **Gate B fired live.** `engineer_loop ab-drain` planned arms on baseline m3.2 designs
+  (`spi_controller`, `RV32I_Memorycontroller`), ran arm A (`--exclude density_relief`, stays
+  dirty) vs arm B (`--rank-first density_relief`, clears), and `judge_repeated` recorded a
+  verdict into `ab_trials`. **Result: `ab_trials` 0→2, both `win`** — arm A (control) stayed dirty
+  (`escalated`) while arm B cleared on both `spi_controller` (4→0) and `RV32I_Memorycontroller`
+  (84→0); the `logic/small density_relief` recipe transitioned **`candidate → promoted`**
+  (provenance `ab_trial:2`). The Gate A signature (`ab_trials=0` alongside fail/partial rows) is now
+  cleared on the live corpus — the first end-to-end A/B verdict ever recorded on this store.
+
 ### Ledger Format and Resumability
 
 The ledger is a JSONL file: one line per state transition, last-state-wins. This means:

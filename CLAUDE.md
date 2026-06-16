@@ -152,6 +152,25 @@ the orientation.**
 > excluded from the learning read but NOT from the honesty count. New invariants 19–22 in
 > `knowledge/README.md`; the A/B verdict is now a variance-aware LCB over k repeats (Win 2).
 
+> **2026-06-16 (Gate B FIRED on the live corpus, branch `feat/paper-absorption`).** Running Gate B
+> for real exposed a **second blocker on top of Gate A and then closed both end-to-end.** (1)
+> `ab_runner.plan_trial` picked A/B subjects only from `run_violations` — the run's **post-fix**
+> snapshot — so a *successfully fixed* symptom (antenna) has no rows there and the winning recipe
+> could never be A/B'd (`plan_trial(antenna)→None`, verified). Same fixture-vs-production trap as
+> Gate A. **Fixed:** `plan_trial` now falls back to the recipe's `evidence_designs` (pre-fix
+> exhibitors) resolved to on-disk dirs (Tier-2). (2) The 9 pending **sky130hd** DRC-fail designs
+> were genuine metal/via **spacing** residuals (`m3.2`/via, symptom `f670d8e567`) with no v1
+> strategy; added `density_relief` (`diagnose_signoff_fix`, lower `CORE_UTILIZATION`, deck never
+> relaxed) — drove 5 through `fix_signoff` and **all 5 cleared** (34→0, 20→0, 10→0, 6→0, 4→0) → 5
+> newly fully-signed-off sky130 designs. The learner derived the recipe, **Gate A enqueued** it
+> (`recipe_status` 0→2 candidates, `learner_diff`), and **`ab-drain` recorded an `ab_trials`
+> verdict** on baseline designs (arm A `--exclude` stays dirty vs arm B `--rank-first` clears) —
+> the `ab_trials=0` Gate A signature is now cleared on the live corpus. Tests 592→597 (1 plan_trial
+> fallback + 4 density_relief). **Result: `ab_trials` 0→2, both `win`** (arm A control stayed dirty
+> via `escalated` vs arm B `clean` on `spi_controller` 4→0 AND `RV32I_Memorycontroller` 84→0); the
+> `logic/small density_relief` recipe transitioned **`candidate → promoted`** (`ab_trial:2`). honesty
+> 69/69 intact. First end-to-end A/B verdict ever recorded on this store.
+
 ### Honesty invariants (violate one and the loop silently lies)
 
 - **Ingest after EVERY flow** — clean, failed, or partial. A skipped ingest is invisible work;

@@ -228,11 +228,19 @@ python3 knowledge/repair_run_status.py --db knowledge/knowledge.sqlite
     The learner aggregates it into recipes as `mean_outcome_score`, a tiebreaker layered *under*
     the `fix_model` Beta prior (`rank_key = (success_rate_beta, mean_outcome_score)`); absent it
     ranks byte-identically. PPA-product term is DEFERRED (degenerate under singleton families).
-20. **The A/B loop fires on the production path (Tier −1 Gate A).** `learn_heuristics.learn()`
+20. **The A/B loop fires on the production path (Tier −1 Gate A + Gate B).** `learn_heuristics.learn()`
     enqueues new/changed recipes as `candidate` on every rebuild (not only inside
     `engineer_loop.run`), so a batch-driven campaign populates `recipe_status`; `engineer_loop.py
     ab-drain` then plans/runs/judges the arms. `diff_and_enqueue` is idempotent, so the loop's own
     enqueue composes safely. Grandfathered recipes are re-validated explicitly via `ab-enqueue`.
+    **Subject selection must reach winning recipes (2026-06-16 Gate B):** `ab_runner.plan_trial`
+    selects A/B subjects from `run_violations` (the POST-fix snapshot) FIRST, then falls back to the
+    recipe's `heuristics.symptoms[sid].evidence_designs` (the PRE-fix exhibitors, resolved to on-disk
+    project dirs). Without the fallback a *successfully-fixed* symptom (e.g. antenna) has no
+    `run_violations` rows, so the very recipes that win could never be A/B'd — `plan_trial→None`.
+    First live verdict: `density_relief` (sky130 metal/via spacing) `candidate → promoted` on a 2-win
+    `ab_trials` drain. The Gate A signature is **`ab_trials=0` while `fail`/`partial` rows exist** —
+    once the corpus has such rows, an empty `ab_trials` means the loop is inert and silently lying.
 21. **r2g-bench (Win 3) is held out from learning, not from honesty.** Runs whose design is in
     `knowledge/eval/bench_set.json` are flagged `runs.is_bench=1` at ingest and EXCLUDED from the
     *learning read* only — `learn_heuristics._fetch_learnable_rows` (family medians + score

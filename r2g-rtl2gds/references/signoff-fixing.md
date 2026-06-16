@@ -121,19 +121,22 @@ the learning signal from timing-journal episodes; fixed so a timing `period_rela
 
 ## Strategy catalog (v1)
 
-### DRC — antenna violations only
+### DRC — antenna + routing-geometry spacing
 
 Strategies are `auto_apply: true`, applied in order; already-applied entries are skipped;
 when all are exhausted `status` becomes `residual`. **The catalog is platform-aware** —
 `nangate45` (in `DIODE_FORCED_REPAIR_PLATFORMS`) gets the single `antenna_diode_repair`
 strategy; every other platform gets the classic `antenna_diode_iters` → `antenna_density_relief`
-pair.
+pair. **Non-antenna routing-geometry DRC** (metal/via spacing, off-grid, via enclosure —
+e.g. `m3.2`, `via.4*`, `via_OFFGRID`) gets `density_relief` (any platform with a
+`CORE_UTILIZATION` knob).
 
 | id | platforms | config_edits | rerun_from | Effect |
 |----|-----------|-------------|------------|--------|
 | `antenna_diode_repair` | nangate45 | `SKIP_ANTENNA_REPAIR=1`, `MAX_REPAIR_ANTENNAS_ITER_DRT=10` | `route` | **Forces physical diode insertion** (the only repair the FreePDK45 deck credits). `SKIP_ANTENNA_REPAIR=1` disables OpenROAD's global-route *jumper* repair — jumpers satisfy OpenROAD's PAR but the deck still flags (it sums the whole net's per-layer metal and credits only diodes). The DRT repair loop then inserts `ANTENNA_X1` diodes. **Requires `tools/install_nangate45_antenna.sh` (one-time).** |
 | `antenna_diode_iters` | non-nangate45 (working diode) | `MAX_REPAIR_ANTENNAS_ITER_GRT=10`, `MAX_REPAIR_ANTENNAS_ITER_DRT=10` | `route` | Raises OpenROAD repair-antennas iterations (default 5) so more diodes are inserted. Diode auto-discovered from its `CLASS CORE ANTENNACELL` LEF declaration; do NOT set `CORE_ANTENNACELL` (not an ORFS env var). |
 | `antenna_density_relief` | non-nangate45 | `CORE_UTILIZATION` lowered by 5 (floor 5) | `floorplan` | Reduces placement density / grows area so the router can break long metal runs. `PLACE_DENSITY_LB_ADDON` is **never** touched (hard rule: never below 0.10). **Not offered on nangate45** — empirically counterproductive there (enlarging the die lengthens nets → more antennas; fifo_basic 14→16 at util 10→5). |
+| `density_relief` | any (needs `CORE_UTILIZATION`) | `CORE_UTILIZATION` lowered by 8 (floor 8) | `floorplan` | **Non-antenna routing-geometry DRC** (metal/via spacing, off-grid, via enclosure). Gives the router more room → metal/via *spacing* and off-grid rules resolve. Real layout change (bigger die, sparser routes); the routing/signoff deck is **never** relaxed; `PLACE_DENSITY_LB_ADDON` untouched. **Validated 2026-06-16** on sky130hd: `eeprom_top` 4→0, `axil_reg_if` 34→0, `can_fifo` 20→0, `aximrd2wbsp` 10→0, `eth_mac_mii` 6→0 (all `m3.2`/via, all cleared in 1 iter at util 20→12 / 25→17). No-op when only `DIE_AREA` is set (no util lever) or util already at floor → honest residual. |
 
 **Why nangate45 needs `antenna_diode_repair` specifically (verified 2026-06-02, supersedes the
 2026-06-01 "inert/residual" Finding B):** with the antenna model installed, OpenROAD's per-net
@@ -143,7 +146,9 @@ insertion, which both engines credit → clean. If the model is **not** installe
 won't repair and the loop honestly reports no-improvement → residual (reason points at the
 installer). The deck is never relaxed.
 
-Non-antenna DRC categories are **not** handled in v1 — reported as residual.
+Non-antenna routing-geometry DRC (metal/via spacing, off-grid) is handled by `density_relief`
+where a `CORE_UTILIZATION` knob exists; other non-antenna classes, or designs at the util floor /
+sized by `DIE_AREA`, remain honest residuals.
 
 ### LVS
 
@@ -162,7 +167,8 @@ These are reported honestly by `diagnose_signoff_fix.py` with a non-null `residu
 | Condition | `residual_reason` | What to do |
 |-----------|-------------------|-----------|
 | DRC stuck or timeout | `drc_stuck_tooling_out_of_v1_scope` / `drc_timeout_tooling_out_of_v1_scope` | KLayout polygon-op hang, outside v1 scope. Accept GDS+LVS+RCX pass as evidence. |
-| Non-antenna DRC class | `non-antenna DRC class not handled in v1: ...` | Operator review of the specific category. |
+| Non-antenna DRC, no util lever | `non-antenna DRC class (...): no CORE_UTILIZATION knob to relieve density (DIE_AREA-sized).` | Re-size with `CORE_UTILIZATION` instead of `DIE_AREA`, or operator review of the category. |
+| Routing-geometry DRC at util floor | `routing-geometry DRC (...): density relief exhausted (CORE_UTILIZATION at floor 8); honest residual.` | `density_relief` already pushed util to the floor without clearing — a harder residual (e.g. RV32I_Memorycontroller's 84 `m3.2`). Operator review. |
 | All antenna strategies exhausted | `antenna: all real-fix strategies exhausted` | No further config lever available; consider manual routing intervention or structural RTL change. |
 | LVS KLayout C++ crash (`sort_circuit` / `gen_log_entry` SIGSEGV) | `klayout_cpp_crash` | **RETRY — no longer a hard residual (2026-06-03).** A non-deterministic heap heisenbug in KLayout-0.30.7's comparer; a surviving run gives the true verdict (clean OR fail). `run_lvs.sh` retries automatically (`LVS_CRASH_RETRIES`, default 4; auto-1 for >150K cells). Validated: fifo_basic/verilog_axi_axi_fifo_wr→clean; aximwr2wbsp/core_usb_host_top/sha256_axi4_slave→fail/symmetric. `threads(1)`/`verbose(false)`/tcmalloc don't fix it; `flat` dodges the crash but yields garbage mismatches. Only a crash-free run (`grep -a "Signal number" 6_lvs.log` empty) is trustworthy; ≥0.30.10 fixes the source but no such build is on this host. See `failure-patterns.md` "LVS KLayout sort_circuit/gen_log_entry SIGSEGV". |
 | LVS symmetric-matcher residual (`Netlists don't match` with **balanced** schematic-only==layout-only unmatched nets, 0 paired-net deltas, 0 device deltas, plus instance swaps / *ambiguous group* warnings) | `lvs_symmetric_matcher_residual` | **No automated flow fix; layout is correct.** KLayout-0.30.7 limit on symmetric logic (parallel NAND/XOR trees, register files / memory arrays, replicated bit-slices, flat combinational benchmarks). Comparer budget does **not** help (validated). **Operator escape hatch (validated 2026-06-03):** strict `same_nets!` seeding on swapped-instance input nets — clears it on localized symmetry (rx_64), does NOT generalize (unit5_G). See "Symmetric-matcher seeding" below + `failure-patterns.md`. |
