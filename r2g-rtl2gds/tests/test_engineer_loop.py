@@ -86,5 +86,8 @@ def test_learn_cycle_enqueues_candidates_and_ab_arms(tmp_path, monkeypatch):
                                                     "recipes": {}},
                               n_ab_designs=1)
     arms = [e for e in led.entries() if e["kind"] == "ab_arm"]
-    assert len(arms) == 2       # arm A + arm B for the one matched design
+    # Win 2: each arm side is replicated R2G_AB_REPEATS times (default k=2), so one
+    # matched design yields 2 arms × 2 repeats = 4 entries.
+    assert len(arms) == 4
     assert {a["arm"] for a in arms} == {"A", "B"}
+    assert {a["repeat"] for a in arms} == {0, 1}

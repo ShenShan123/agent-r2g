@@ -14,10 +14,75 @@ from __future__ import annotations
 
 import datetime as _dt
 import json
+import os
+import statistics
 
 import recipe_lifecycle
 
 N_DESIGNS_DEFAULT = 2     # min matched designs per trial (spec §5.4)
+AB_REPEATS_DEFAULT = 2    # Win 2: k repeats per arm for variance-aware promotion
+AB_LCB_Z = 1.0            # z for the lower-confidence bound (mean − z·stderr)
+
+
+def ab_repeats() -> int:
+    """k repeats per arm (env R2G_AB_REPEATS, default 2). k=2 bounds the k×
+    wall-clock multiplier on the already-slow A/B path; k=3 is opt-in for
+    high-stakes promotions. <1 is clamped to 1."""
+    try:
+        return max(1, int(os.environ.get("R2G_AB_REPEATS", AB_REPEATS_DEFAULT)))
+    except (TypeError, ValueError):
+        return AB_REPEATS_DEFAULT
+
+
+def lcb(samples: list[float], z: float = AB_LCB_Z) -> float:
+    """Lower confidence bound = mean − z·stderr. Penalizes a high-variance arm so
+    one lucky win cannot promote a recipe (the documented LVS-crash heisenbug).
+    A single sample has stderr 0 -> returns the mean; empty -> 0.0."""
+    if not samples:
+        return 0.0
+    n = len(samples)
+    mean = sum(samples) / n
+    if n < 2:
+        return mean
+    stderr = statistics.stdev(samples) / (n ** 0.5)
+    return mean - z * stderr
+
+
+def judge_repeated(arm_a_samples: list[dict | None],
+                   arm_b_samples: list[dict | None], *,
+                   z: float = AB_LCB_Z) -> str:
+    """Variance-aware verdict over k repeats per arm (Win 2). Each sample is an
+    arm-result dict {is_success, wall_s?, fix_iters?, outcome_score?} or None
+    (crash). Promotion (`win`) requires arm B to sign off at least once AND a
+    higher LCB over the binary success-rate than arm A — never a single lucky run.
+    Degrades to the single-run binary verdict when each arm has one sample.
+
+    is_success stays the sole authority for a win: a never-clean arm B can never
+    win (invariant H4); outcome_score is NOT used to flip the verdict."""
+    a = [s for s in arm_a_samples if s is not None]
+    b = [s for s in arm_b_samples if s is not None]
+    if not a or not b:
+        return "inconclusive"                 # an arm produced no judgeable result
+    a_succ = [1.0 if s.get("is_success") else 0.0 for s in a]
+    b_succ = [1.0 if s.get("is_success") else 0.0 for s in b]
+    if sum(b_succ) == 0:                       # B never signed off -> never a win
+        return "inconclusive" if sum(a_succ) == 0 else "loss"
+    lcb_a, lcb_b = lcb(a_succ, z), lcb(b_succ, z)
+    if lcb_b > lcb_a:
+        return "win"
+    if lcb_b < lcb_a:
+        return "loss"
+    # Tie on success LCB (e.g. both reliably clean): the cheaper mean wall-clock
+    # wins, mirroring the single-run judge's cost tiebreaker.
+    wa = [s["wall_s"] for s in a if s.get("wall_s") is not None]
+    wb = [s["wall_s"] for s in b if s.get("wall_s") is not None]
+    if wa and wb:
+        ma, mb = statistics.mean(wa), statistics.mean(wb)
+        if mb < ma * 0.98:
+            return "win"
+        if mb > ma * 1.02:
+            return "loss"
+    return "inconclusive"
 
 
 def _now() -> str:

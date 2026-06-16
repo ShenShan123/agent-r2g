@@ -113,6 +113,7 @@ The ledger is a JSONL file: one line per state transition, last-state-wins. This
 | `R2G_LOOP_INGEST=<script>` | Override the ingest subprocess script (testing) |
 | `R2G_FIX_EXCLUDE=<strategy>` | Exclude a strategy from the fix ranking (A/B arm knob) |
 | `R2G_FIX_RANK_FIRST=<strategy>` | Force a strategy to rank first (A/B arm B knob) |
+| `R2G_AB_REPEATS=<k>` | Win 2: repeats per A/B arm side (default **k=2**). The verdict is the lower-confidence bound (mean − z·stderr) over the k repeats, so one lucky run cannot promote a recipe (the LVS-crash heisenbug). k=3 is opt-in for high-stakes promotions; each k is a k× wall-clock multiplier on the already-slow A/B path |
 
 `R2G_FIX_EXCLUDE` and `R2G_FIX_RANK_FIRST` are consumed by `fix_signoff.sh`, which passes
 `--exclude` / `--rank-first` to `diagnose_signoff_fix.py` to implement A/B arm separation.

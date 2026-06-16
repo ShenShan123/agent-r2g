@@ -173,13 +173,20 @@ def process_one(led: Ledger, entry: dict, conn) -> None:
                 notes=json.dumps(status, sort_keys=True))
 
 
-def plan_arms_for_candidates(led: Ledger, conn, *, n_ab_designs: int = 2) -> int:
+def plan_arms_for_candidates(led: Ledger, conn, *, n_ab_designs: int = 2,
+                             repeats: int | None = None) -> int:
     """For every pending candidate recipe, plan an A/B trial and append its arm
     entries to the ledger (the SAME loop — or ab_drain — executes them). Returns
     the number of arm entries appended. Idempotent on the arm dirs (skips a dst
-    that already exists)."""
+    that already exists).
+
+    Win 2: each arm side is replicated `repeats` times (default R2G_AB_REPEATS,
+    k=2) so the verdict is taken over a lower-confidence bound, not a single lucky
+    run. Repeat dirs are <design>_ab{arm}_{strat8}_{r}; they share the arm field
+    so judge_finished_trials aggregates them per arm."""
     import ab_runner
     import recipe_lifecycle
+    k = repeats if repeats is not None else ab_runner.ab_repeats()
     appended = 0
     for key in recipe_lifecycle.pending_candidates(conn):
         trial = ab_runner.plan_trial(conn, **key, n_designs=n_ab_designs)
@@ -188,16 +195,17 @@ def plan_arms_for_candidates(led: Ledger, conn, *, n_ab_designs: int = 2) -> int
         strat8 = key["strategy"][:8]
         for d in trial["designs"]:
             for arm in ("A", "B"):
-                src = Path(d["project_path"])
-                dst = src.parent / f"{src.name}_ab{arm}_{strat8}"
-                if src.is_dir() and not dst.exists():
-                    shutil.copytree(src, dst,
-                                    ignore=shutil.ignore_patterns("backend", "*.gds"))
-                led.add({"design": dst.name, "project_path": str(dst),
-                         "platform": key["platform"], "kind": "ab_arm",
-                         "arm": arm, "strategy": key["strategy"],
-                         "ab_key": key, "match_level": trial["match_level"]})
-                appended += 1
+                for r in range(k):
+                    src = Path(d["project_path"])
+                    dst = src.parent / f"{src.name}_ab{arm}_{strat8}_{r}"
+                    if src.is_dir() and not dst.exists():
+                        shutil.copytree(src, dst,
+                                        ignore=shutil.ignore_patterns("backend", "*.gds"))
+                    led.add({"design": dst.name, "project_path": str(dst),
+                             "platform": key["platform"], "kind": "ab_arm",
+                             "arm": arm, "strategy": key["strategy"], "repeat": r,
+                             "ab_key": key, "match_level": trial["match_level"]})
+                    appended += 1
     return appended
 
 
@@ -214,49 +222,52 @@ def learn_cycle(led: Ledger, conn, *, prev_heur: dict | None,
     return heur
 
 
-def judge_finished_trials(led: Ledger, conn) -> None:
-    """Pair finished A/B arms by (base design, strategy) and record verdicts."""
-    import ab_runner
+def _arm_metric(conn, project_path: str) -> dict | None:
+    """Latest run row for an arm dir -> the metric dict judge_repeated consumes
+    (or None if the arm produced no judgeable run). outcome_score is captured as
+    an ORDERING HINT only — the verdict never depends on it (invariant H4)."""
     import knowledge_db
+    row = conn.execute(
+        "SELECT total_elapsed_s, fix_iters_to_clean, drc_status, lvs_status, "
+        "rcx_status, lvs_mismatch_class, orfs_status, outcome_score "
+        "FROM runs WHERE project_path=? ORDER BY ingested_at DESC LIMIT 1",
+        (project_path,)).fetchone()
+    if row is None:
+        return None
+    cols = ("total_elapsed_s", "fix_iters_to_clean", "drc_status", "lvs_status",
+            "rcx_status", "lvs_mismatch_class", "orfs_status", "outcome_score")
+    r = dict(zip(cols, row))
+    return {"is_success": knowledge_db.is_success(r),
+            "wall_s": r["total_elapsed_s"], "fix_iters": r["fix_iters_to_clean"],
+            "outcome_score": r["outcome_score"]}
+
+
+def judge_finished_trials(led: Ledger, conn) -> None:
+    """Group finished A/B arm REPEATS by (base design, strategy) and record a
+    variance-aware (LCB) verdict per trial (Win 2)."""
+    import ab_runner
     arms = [e for e in led.entries() if e["kind"] == "ab_arm"
             and e["state"] in ("clean", "escalated", "abandoned")
             and not e.get("judged")]
-    by_pair: dict[tuple, dict] = {}
+    by_pair: dict[tuple, dict[str, list]] = {}
     for e in arms:
         base = e["design"].rsplit("_ab", 1)[0]
-        by_pair.setdefault((base, e["strategy"]), {})[e["arm"]] = e
+        by_pair.setdefault((base, e["strategy"]), {}).setdefault(e["arm"], []).append(e)
     for (base, strat), pair in by_pair.items():
         if set(pair) != {"A", "B"}:
             continue
-        metrics = {}
-        for arm, e in pair.items():
-            row = conn.execute(
-                "SELECT total_elapsed_s, fix_iters_to_clean, drc_status, "
-                "lvs_status, rcx_status, lvs_mismatch_class, orfs_status, "
-                "outcome_score "
-                "FROM runs WHERE project_path=? ORDER BY ingested_at DESC "
-                "LIMIT 1", (e["project_path"],)).fetchone()
-            if row is None:
-                metrics[arm] = None
-                continue
-            cols = ("total_elapsed_s", "fix_iters_to_clean", "drc_status",
-                    "lvs_status", "rcx_status", "lvs_mismatch_class",
-                    "orfs_status", "outcome_score")
-            r = dict(zip(cols, row))
-            # outcome_score is captured as an ORDERING HINT for suggestion ranking
-            # (persisted into ab_trials.metrics_json); judge ignores it for the
-            # verdict — a non-clean arm never wins (Win 1 invariant H4).
-            metrics[arm] = {"is_success": knowledge_db.is_success(r),
-                            "wall_s": r["total_elapsed_s"],
-                            "fix_iters": r["fix_iters_to_clean"],
-                            "outcome_score": r["outcome_score"]}
-        verdict = ab_runner.judge(metrics.get("A"), metrics.get("B"))
+        samples = {arm: [_arm_metric(conn, e["project_path"]) for e in entries]
+                   for arm, entries in pair.items()}
+        verdict = ab_runner.judge_repeated(samples["A"], samples["B"])
         ab_runner.record_trial(
-            conn, key=pair["B"]["ab_key"], verdict=verdict,
+            conn, key=pair["B"][0]["ab_key"], verdict=verdict,
             arm_a_run_id=None, arm_b_run_id=None,
-            metrics=metrics, match_level=pair["B"].get("match_level"))
-        for e in pair.values():
-            led.set_state(e["design"], e["state"], judged=True)
+            metrics={"A_samples": samples["A"], "B_samples": samples["B"],
+                     "repeats": {"A": len(samples["A"]), "B": len(samples["B"])}},
+            match_level=pair["B"][0].get("match_level"))
+        for entries in pair.values():
+            for e in entries:
+                led.set_state(e["design"], e["state"], judged=True)
 
 
 def ab_drain(ledger_path: Path, *, n_ab_designs: int = 2,
