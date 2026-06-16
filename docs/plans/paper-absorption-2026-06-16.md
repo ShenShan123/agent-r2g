@@ -437,6 +437,16 @@ Deferred ───┬─ Win 1 PPA-product term       (degenerate baseline; revi
 - Ingest after **every** run (clean, failed, partial); `failure_events` stays a derived mirror of
   `orfs_status`. **Bench-tagged runs are mirrored exactly like any other run** — `is_bench` filters
   only the *learning read*, never the *failure_events write*.
+- **Execute AND verify the A/B promotion machinery on every failure case and every
+  incomplete-signoff flow — never assume "it exists" means "it ran" (the Gate A lesson).** Those are
+  exactly the cases that produce candidate recipes, so each one must: (1) enqueue a `candidate` in
+  `recipe_status` (now done by `learn()` on every rebuild); (2) be drained (`engineer_loop ab-drain`,
+  or `ab-enqueue` to force-validate a grandfathered recipe) so the arms run and `judge_repeated`
+  records a verdict; (3) leave an `ab_trials` row that transitions the recipe
+  `candidate → promoted`/`→ shadow`. An empty `ab_trials` alongside `fail`/`partial` runs — or a
+  `recipe_status` that never churns — is the Gate A signature (the loop is inert and silently
+  lying): treat it as a first-class alarm. The loop is "live" only after a real failure/incomplete
+  case has driven a verdict end-to-end, not because the pipeline is wired.
 - **`outcome_score` is a pure function of one run's own artifacts** — no cross-row derivation, no
   reach to a "prior row." `repair_run_status.py` never touches it. Idempotency is test-proven.
 - Nothing auto-merges into `references/*.md`; the human review queue is sacrosanct.

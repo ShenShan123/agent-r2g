@@ -191,6 +191,22 @@ the orientation.**
   `repair_run_status.py` must too. If `runs` shows failures but `failure_events` is empty, the
   learner is blind to the entire backend-failure class even though the corpus *looks* populated.
   (Root cause of two 2026-06-12/13 defects.)
+- **The A/B promotion machinery must be EXECUTED and VERIFIED on every failure case and every
+  incomplete-signoff flow — its existence is not its execution.** This is the Gate A lesson
+  (2026-06-16): the `shadow → candidate → promoted` pipeline shipped *correct* (a passing
+  integration test) yet had **never fired in production** — it lived only inside
+  `engineer_loop.run` (never the production driver), so `learn()` never enqueued and `ab_trials`
+  stayed **0 across 1267 runs**. So, for every run that **fails a stage** or **leaves signoff
+  incomplete** (the cases that *produce* candidate recipes): (1) confirm `learn()` enqueued — a
+  `candidate` row landed in `recipe_status`; (2) actually run the drain (`engineer_loop ab-drain`,
+  or `ab-enqueue` to force-validate a grandfathered recipe) so the arms run and `judge_repeated`
+  records a verdict; (3) verify `ab_trials` gained a row and the recipe transitioned
+  `candidate → promoted`/`→ shadow`. A failing/partial corpus with an **empty `ab_trials`** — or a
+  `recipe_status` that never churns — means the loop is inert and silently lying: the corpus
+  *looks* like it is learning while no recipe is ever validated. Treat that as a first-class
+  alarm, exactly like an empty `heuristics.json`. Never declare the learning loop "live" on the
+  strength of the machinery existing; declare it live only after a real failure/incomplete case
+  has driven an `ab_trials` verdict end-to-end.
 - **Concurrent campaign ingests share one file.** `knowledge_db.connect` / `journal_db.connect`
   arm a `busy_timeout` so a lock waits instead of erroring; a pool driver that swallows ingest
   errors would otherwise drop runs silently. Never trust a swallowed ingest — confirm the row landed.
@@ -202,7 +218,10 @@ the orientation.**
 
 A fast end-to-end honesty check: the count of `runs` with `orfs_status='fail'` should equal the
 count of those carrying an `orfs-fail-%` `failure_event`; the dashboard's **Knowledge Store Health**
-panel renders red when `heuristics.json` is empty (learning is inert) — that red is the alarm.
+panel renders red when `heuristics.json` is empty (learning is inert) — that red is the alarm. **And:
+once the corpus contains failing or incomplete-signoff runs, `ab_trials` must be non-empty** — an
+empty `ab_trials` alongside `fail`/`partial` rows is the Gate A signature (the A/B loop never fired);
+the A/B machinery is "live" only after such a case has driven a verdict end-to-end.
 
 ## Where to Find X
 
