@@ -19,10 +19,19 @@ import subprocess
 import sys
 from pathlib import Path
 
-import extract_ppa          # scripts/extract on sys.path (conftest / _add_paths below)
-import fmax_model as fm
-
+# Make sibling skill modules importable when run as a CLI. conftest.py seeds these
+# paths for pytest; this makes `python3 fmax_search.py <project>` work standalone
+# too. MUST run BEFORE `import extract_ppa` — _add_paths() (defined below) executes
+# inside main()/probes, far too late for these module-level imports. (Bug surfaced
+# 2026-06-19: the feature had only ever been exercised via pytest, never as a CLI.)
 SKILL_ROOT = Path(__file__).resolve().parents[2]
+for _sub in (SKILL_ROOT / "scripts" / "extract", SKILL_ROOT / "knowledge"):
+    if str(_sub) not in sys.path:
+        sys.path.insert(0, str(_sub))
+
+import extract_ppa          # noqa: E402  (depends on the sys.path bootstrap above)
+import fmax_model as fm     # noqa: E402
+
 RUN_ORFS = SKILL_ROOT / "scripts" / "flow" / "run_orfs.sh"
 
 
