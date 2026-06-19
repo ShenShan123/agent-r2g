@@ -587,6 +587,14 @@ def main(argv=None) -> int:
     pe.add_argument("--design-class", required=True)
     pe.add_argument("--platform", required=True)
     pe.add_argument("--strategy", required=True)
+    pm = sub.add_parser("demote",
+                        help="flip a recipe to 'shadow' (operator-gated; the verb "
+                             "detect_contradictions.py emits). Never auto-applied.")
+    pm.add_argument("--symptom", required=True)
+    pm.add_argument("--design-class", required=True)
+    pm.add_argument("--platform", required=True)
+    pm.add_argument("--strategy", required=True)
+    pm.add_argument("--reason", required=True)
     args = ap.parse_args(argv)
     if args.cmd == "run":
         run(args.ledger, max_designs=args.max, max_workers=args.workers)
@@ -609,6 +617,22 @@ def main(argv=None) -> int:
             platform=args.platform, strategy=args.strategy)
         conn.close()
         print("enqueued" if created else "already in lifecycle (no-op)")
+    elif args.cmd == "demote":
+        import knowledge_db
+        import recipe_lifecycle
+        # Open the canonical store explicitly (module global, so tests that patch
+        # knowledge_db.DEFAULT_DB_PATH redirect this). recipe_lifecycle.demote is an
+        # idempotent UPSERT to status='shadow', stamping reason into provenance.
+        conn = knowledge_db.connect(knowledge_db.DEFAULT_DB_PATH)
+        knowledge_db.ensure_schema(conn)
+        recipe_lifecycle.demote(
+            conn, reason=args.reason, symptom_id=args.symptom,
+            design_class=args.design_class, platform=args.platform,
+            strategy=args.strategy)
+        conn.commit()
+        conn.close()
+        print(f"demoted {args.strategy} for symptom {args.symptom} "
+              f"({args.design_class}/{args.platform}) -> shadow")
     else:
         led = Ledger(args.ledger)
         from collections import Counter
