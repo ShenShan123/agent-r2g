@@ -174,7 +174,7 @@ def _routing_drc_strategies(cfg: dict, exclude: set) -> list:
 # ROUTE-STAGE abort (orfs-fail-route, symptom check=orfs_stage/class=route) which
 # never reaches signoff DRC — so the A/B loop was structurally blind to it until
 # this strategy + fix_signoff.sh --check route wired backend aborts into the loop.
-def _route_strategies(cfg: dict, exclude: set) -> list:
+def _route_strategies(cfg: dict, exclude: set, *, to_floor: bool = False) -> list:
     """Route-stage abort relief: lower CORE_UTILIZATION so detailed routing has
     room to converge — congested / timeout routes (substitution-permutation crypto,
     dense interconnect) leave DRT grinding stubborn tiles until the wall-clock kills
@@ -182,12 +182,22 @@ def _route_strategies(cfg: dict, exclude: set) -> list:
     is NEVER relaxed; PLACE_DENSITY_LB_ADDON untouched (hard rule: never < 0.10).
     Reruns from floorplan so the enlarged die re-places + re-routes. Only when a
     CORE_UTILIZATION knob exists above the floor; no-op for DIE_AREA-sized designs
-    (honest residual -> operator enlarges DIE_AREA, a v2 lever)."""
+    (honest residual -> operator enlarges DIE_AREA, a v2 lever).
+
+    to_floor (2026-06-18): for a route TIMEOUT, drop straight to the floor in ONE
+    reflow instead of shaving a single _UTIL_STEP. A timeout means detailed routing
+    cannot converge at this density within the wall-clock budget; each incremental
+    step burns another full timeout, and fix_one ABORTS after the first rerun that
+    times out (rc=124) — so a single step was the design's only shot, escalating it
+    prematurely (wbscope_avalon, verilog_ethernet_arp: timed out at util 12/17 after
+    one step, never reaching the floor). Max room in one reflow is the right lever.
+    A route that COMPLETED with violations keeps the gentle one-step relief (area is
+    preserved and the violation count guides further iteration)."""
     try:
         cur_util = int(float(cfg.get("CORE_UTILIZATION", "")))
     except (TypeError, ValueError):
         return []
-    new_util = max(_UTIL_FLOOR, cur_util - _UTIL_STEP)
+    new_util = _UTIL_FLOOR if to_floor else max(_UTIL_FLOOR, cur_util - _UTIL_STEP)
     if new_util >= cur_util:
         return []
     strat = {
@@ -217,7 +227,10 @@ def _route_plan(route: dict, cfg: dict, exclude: set) -> dict:
         plan["residual_reason"] = "no route-stage outcome to fix (abort earlier than route)"
         return plan
     if status in ("fail", "timeout", "residual"):
-        strategies = _route_strategies(cfg, exclude)
+        # A pure timeout (route never completed) -> jump CORE_UTILIZATION to the
+        # floor in one reflow; a route that completed WITH violations keeps the
+        # gentle one-step relief. See _route_strategies (2026-06-18).
+        strategies = _route_strategies(cfg, exclude, to_floor=(status == "timeout"))
         plan["strategies"] = strategies
         if not strategies:
             plan["status"] = "residual"
@@ -369,6 +382,33 @@ def _rank_plan_strategies(plan: dict, recipes: dict | None,
     plan["strategies"] = [by_id[r["strategy"]] for r in ranking if r["strategy"] in by_id]
     plan["ranking"] = ranking
     return plan
+
+
+def explain_ranking(plan: dict) -> list[str]:
+    """Human rationale for WHY each recipe ranked (--explain, spec 2026-06-18).
+    One line per ranked strategy: id, evidence (successes/attempts + wins),
+    cross-platform corroboration (N platforms), A/B provenance, and which boost
+    fired. Serves the 'transfer' mission — the engineer sees a fix is trusted
+    because it carried across platforms, not one fluke. Read-only; no DB."""
+    lines: list[str] = []
+    for pos, r in enumerate(plan.get("ranking") or [], start=1):
+        succ, att = r.get("successes", 0), r.get("attempts", 0)
+        wins, pc = r.get("wins", 0), int(r.get("platform_count", 0) or 0)
+        win_str = f", {wins} partial-win(s)" if wins else ""
+        if pc >= 2:
+            corro = (f"corroborated across {pc} platforms -> tiebreak lift")
+        elif pc == 1:
+            corro = "1 platform (single-platform evidence)"
+        else:
+            corro = "0 platforms (untried / single-design fluke)"
+        line = (f"#{pos} {r['strategy']}: score={r['score']:.3f}  "
+                f"evidence={succ}/{att}{win_str}  {corro}  "
+                f"provenance={r.get('provenance', 'cold-start')}")
+        mos = r.get("mean_outcome_score")
+        if mos is not None:
+            line += f"  outcome_score={mos:.3f}"
+        lines.append(line)
+    return lines
 
 
 def _timing_plan(tcheck: dict, cfg: dict, exclude: set,
@@ -538,6 +578,18 @@ def _load_recipes(proj: Path, *, check: str, drc: dict, lvs: dict,
     return by_check.get(vclass)
 
 
+def _platform_count(strat: dict) -> int:
+    """Distinct platforms this strategy is CORROBORATED on = number of
+    by_platform entries with successes>0 (spec 2026-06-18, the 'transfer'
+    mission). Falls back to len(platforms_seen) when by_platform is absent (the
+    Decision-8 indexed buckets carry only the symptom-level list). 0 when
+    unknown — a single-design fluke never earns the corroboration tiebreak."""
+    bp = strat.get("by_platform")
+    if bp:
+        return sum(1 for v in bp.values() if int(v.get("successes", 0) or 0) > 0)
+    return len(strat.get("platforms_seen") or [])
+
+
 def load_symptom_recipe(*, check: str, platform: str, drc: dict, lvs: dict,
                         heuristics: Path | None = None):
     """Return (recipe_entry, pooled_prior) for the current symptom, indexed by
@@ -569,9 +621,14 @@ def load_symptom_recipe(*, check: str, platform: str, drc: dict, lvs: dict,
     for stratid, s in strategies.items():
         bp = (s.get("by_platform") or {}).get(platform)
         if bp:
-            recipe["strategies"][stratid] = bp
+            # Annotate with the distinct-platform corroboration count so the
+            # ranker's cross-platform tiebreaker (spec 2026-06-18, 'transfer')
+            # can favour a fix proven across N platforms over a one-design fluke.
+            recipe["strategies"][stratid] = {
+                **bp, "platform_count": _platform_count(s)}
     # Pooled prior: cross-platform totals, minus platform_specific strategies.
-    pooled = {stratid: {k: s.get(k, 0) for k in ("attempts", "successes", "wins", "failures")}
+    pooled = {stratid: {**{k: s.get(k, 0) for k in ("attempts", "successes", "wins", "failures")},
+                        "platform_count": _platform_count(s)}
               for stratid, s in strategies.items() if not s.get("platform_specific")}
     return (recipe if recipe["strategies"] else None), pooled
 
@@ -597,15 +654,33 @@ def load_indexed_recipe(*, check: str, platform: str, design_class: str,
     sig = symptom.canonical_signature(check, vclass,
                                       symptom.predicates_for(check, report))
     bucket = recipes.get(symptom.symptom_id(sig)) or {}
+    # Cross-platform corroboration (spec 2026-06-18, 'transfer'): count the
+    # DISTINCT concrete platforms (the '*' wildcard is the rollup, not a real
+    # platform) on which each strategy cleared at least once, across all design
+    # classes. The ranker uses this only as a tiebreaker.
+    plat_count: dict[str, set] = {}
+    for dclass, by_plat in bucket.items():
+        for plat, node in (by_plat or {}).items():
+            if plat == "*":
+                continue
+            for sid, v in (node.get("strategies") or {}).items():
+                if int(v.get("successes", 0) or 0) > 0:
+                    plat_count.setdefault(sid, set()).add(plat)
     glob = (bucket.get("*") or {}).get("*") or {}
-    pooled = {s: {k: v.get(k, 0) for k in ("attempts", "successes",
-                                           "wins", "failures")}
+    pooled = {s: {**{k: v.get(k, 0) for k in ("attempts", "successes",
+                                              "wins", "failures")},
+                  "platform_count": len(plat_count.get(s) or ())}
               for s, v in (glob.get("strategies") or {}).items()}
     for dclass, plat, level in ((design_class, platform, "exact"),
                                 ("*", platform, "pooled_class"),
                                 ("*", "*", "pooled_platform")):
         node = (bucket.get(dclass) or {}).get(plat)
         if node and node.get("strategies"):
+            # Annotate the matched node's strategies with the corroboration count
+            # so rank_strategies' local path also sees the cross-platform signal.
+            strat_pc = {sid: {**v, "platform_count": len(plat_count.get(sid) or ())}
+                        for sid, v in node["strategies"].items()}
+            node = {**node, "strategies": strat_pc}
             return node, pooled, level
     return None, pooled, "none"
 
@@ -641,6 +716,9 @@ def main(argv=None) -> int:
     ap.add_argument("--next", action="store_true", help="print one tab-separated action line for the driver")
     ap.add_argument("--list", action="store_true",
                     help="print the full priority-ranked candidate list as JSON")
+    ap.add_argument("--explain", action="store_true",
+                    help="print a human rationale for WHY each recipe ranked "
+                         "(evidence, cross-platform corroboration, provenance)")
     ap.add_argument("--exclude", default="", help="comma-separated strategy ids to skip")
     ap.add_argument("--rank-first", default=None,
                     help="force this strategy id to the head of the ranked plan (A/B arm B)")
@@ -758,6 +836,19 @@ def main(argv=None) -> int:
         if sdc_edits:
             out["sdc_edits"] = sdc_edits
         print(json.dumps(out))
+        return 0
+
+    if args.explain:
+        # Human rationale for the ranking: WHY each recipe ranked, with the
+        # cross-platform corroboration boost called out (spec 2026-06-18).
+        rationale = explain_ranking(plan)
+        plan["explain"] = rationale
+        if rationale:
+            for ln in rationale:
+                print(ln)
+        else:
+            print(f"NO RANKED STRATEGIES\t{plan.get('status')}\t"
+                  f"{plan.get('residual_reason') or 'n/a'}")
         return 0
 
     if args.list:

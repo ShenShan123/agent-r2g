@@ -40,11 +40,15 @@ def test_route_fail_yields_route_relief():
     assert s["auto_apply"] is True
 
 
-def test_route_timeout_also_relieves():
+def test_route_timeout_jumps_to_floor():
+    # A route TIMEOUT (never converged) drops CORE_UTILIZATION straight to the floor
+    # in ONE reflow: incremental steps each burn a full wall-clock timeout and
+    # fix_one aborts after the first rerun-timeout, so a single step escalates the
+    # design prematurely (2026-06-18). Floor = _UTIL_FLOOR (8).
     cfg = {"CORE_UTILIZATION": "20"}
     plan = d.build_plan({}, {}, cfg, check="route", route=_route("timeout", None))
     assert [s["id"] for s in plan["strategies"]] == ["route_relief"]
-    assert plan["strategies"][0]["config_edits"]["CORE_UTILIZATION"] == "12"
+    assert plan["strategies"][0]["config_edits"]["CORE_UTILIZATION"] == "8"
 
 
 def test_route_die_area_design_is_honest_residual():
@@ -87,9 +91,10 @@ def test_cli_next_and_apply_route(tmp_path):
     r = _cli(tmp_path, "--check", "route", "--next")
     assert r.returncode == 0, r.stderr
     assert r.stdout.strip() == "route_relief\tfloorplan\troute"
-    # --apply writes the lowered util into the marked auto-block
+    # --apply writes the lowered util into the marked auto-block; a TIMEOUT jumps
+    # straight to the floor (8) in one reflow, not one _UTIL_STEP (2026-06-18).
     r = _cli(tmp_path, "--check", "route", "--apply", "route_relief")
     assert r.returncode == 0, r.stderr
     cfg_text = (tmp_path / "constraints" / "config.mk").read_text()
-    assert "export CORE_UTILIZATION = 17" in cfg_text
+    assert "export CORE_UTILIZATION = 8" in cfg_text
     assert json.loads(r.stdout)["applied"] == "route_relief"
