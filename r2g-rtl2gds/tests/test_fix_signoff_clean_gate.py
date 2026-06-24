@@ -90,3 +90,44 @@ def test_genuinely_clean_states_pass(tmp_path):
     assert _run_with_reports(tmp_path, "clean_beol", "clean") == 0
     assert _run_with_reports(tmp_path, "clean_beol", "skipped") == 0
     assert _run_with_reports(tmp_path, "clean", "skipped") == 0
+
+
+def _run_with_only_drc(tmp_path, drc_status, *, lvs_body=None):
+    """Seed ONLY drc.json (lvs.json absent unless lvs_body is given) and run the
+    full script to its gate, with extract/run stubs that write NOTHING — so a
+    required report can genuinely be missing/unreadable at gate time."""
+    proj = tmp_path / f"proj_onlydrc_{drc_status}_{lvs_body is not None}"
+    (proj / "reports").mkdir(parents=True)
+    (proj / "constraints").mkdir()
+    (proj / "constraints" / "config.mk").write_text(
+        "export DESIGN_NAME = demo\nexport PLATFORM = nangate45\n")
+    (proj / "reports" / "drc.json").write_text(json.dumps({"status": drc_status}))
+    if lvs_body is not None:
+        (proj / "reports" / "lvs.json").write_text(lvs_body)   # e.g. malformed JSON
+    bindir = proj / "bin"
+    bindir.mkdir()
+    _stub(bindir / "diagnose.py",
+          'if [[ "$*" == *"--next"* ]]; then echo -e "STOP\\tno_fix\\tnone"; fi')
+    _stub(bindir / "noop.sh", 'exit 0')                        # writes no report
+    env = dict(os.environ,
+               R2G_DIAGNOSE=str(bindir / "diagnose.py"),
+               R2G_RUN_DRC=str(bindir / "noop.sh"),
+               R2G_RUN_LVS=str(bindir / "noop.sh"),
+               R2G_EXTRACT_DRC=str(bindir / "noop.sh"),
+               R2G_EXTRACT_LVS=str(bindir / "noop.sh"),
+               R2G_JOURNAL_DB=str(tmp_path / "journal.sqlite"))
+    return subprocess.run(["bash", str(FIX_SIGNOFF), str(proj), "nangate45",
+                           "--check", "both", "--max-iters", "1"],
+                          env=env, check=False).returncode
+
+
+def test_missing_required_report_is_not_clean(tmp_path):
+    # 2026-06-23 audit, bug #4/#5: --check both must NOT pass on a clean DRC alone
+    # when lvs.json is ABSENT (the old `if os.path.exists(p)` guard skipped it, so
+    # the loop marked a design clean whose LVS never verified).
+    assert _run_with_only_drc(tmp_path, "clean") == 2
+
+
+def test_unreadable_required_report_is_not_clean(tmp_path):
+    # A malformed/non-JSON report for an active check is also a residual (rc=2).
+    assert _run_with_only_drc(tmp_path, "clean", lvs_body="not json {{{") == 2

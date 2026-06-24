@@ -69,7 +69,9 @@ def judge_repeated(arm_a_samples: list[dict | None],
     arm-result dict {is_success, wall_s?, fix_iters?, outcome_score?} or None
     (crash). Promotion (`win`) requires arm B to sign off at least once AND a
     higher LCB over the binary success-rate than arm A — never a single lucky run.
-    Degrades to the single-run binary verdict when each arm has one sample.
+    On a success tie the cost (wall-clock) tiebreaker decides ONLY if the delta
+    clears a variance-aware bound; with <2 repeats per arm (no variance estimate) a
+    cost-only difference is 'inconclusive'.
 
     is_success stays the sole authority for a win: a never-clean arm B can never
     win (invariant H4); outcome_score is NOT used to flip the verdict."""
@@ -86,16 +88,32 @@ def judge_repeated(arm_a_samples: list[dict | None],
         return "win"
     if lcb_b < lcb_a:
         return "loss"
-    # Tie on success LCB (e.g. both reliably clean): the cheaper mean wall-clock
-    # wins, mirroring the single-run judge's cost tiebreaker.
+    # Tie on success LCB (e.g. both arms reliably sign off): fall back to a
+    # wall-clock cost tiebreaker, BUT only flip the verdict when the cost delta
+    # clears the COMBINED sampling noise (a variance-aware bound), not a flat ±2%
+    # of raw means. Two equally-correct arms doing identical work otherwise
+    # oscillate win<->loss on pure flow-time jitter — the 2026-06-23 audit (bug #2)
+    # found nangate45 antenna trials 15/16 flipping win/loss on <12s of identical
+    # work, demoting a genuinely-good recipe to shadow at random. With <2 repeats
+    # per arm there is NO variance estimate, so a cost-only tie is 'inconclusive':
+    # a cost-neutral correct recipe stays shadow HONESTLY rather than being
+    # promoted/demoted on noise.
     wa = [s["wall_s"] for s in a if s.get("wall_s") is not None]
     wb = [s["wall_s"] for s in b if s.get("wall_s") is not None]
-    if wa and wb:
+    if len(wa) >= 2 and len(wb) >= 2:
         ma, mb = statistics.mean(wa), statistics.mean(wb)
-        if mb < ma * 0.98:
-            return "win"
-        if mb > ma * 1.02:
-            return "loss"
+        se = ((statistics.stdev(wa) ** 2) / len(wa)
+              + (statistics.stdev(wb) ** 2) / len(wb)) ** 0.5
+        # ZERO variance is MAXIMAL confidence (a deterministic delta), not "no
+        # confidence" — the bound is floored at 1% of the combined mean so a
+        # deterministic but substantial cost difference still decides, while a
+        # trivial delta stays inconclusive (2026-06-23 review BLOCKER #2: se==0 must
+        # not invert a real cost win to inconclusive -> terminal shadow).
+        bound = z * max(se, 0.01 * (ma + mb) / 2.0)
+        if (ma - mb) > bound:
+            return "win"                       # B robustly cheaper than A
+        if (mb - ma) > bound:
+            return "loss"                      # B robustly more expensive than A
     return "inconclusive"
 
 

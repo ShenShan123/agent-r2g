@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as _dt
+import hashlib
 import json
 import os
 import shutil
@@ -160,6 +161,13 @@ def _process_backend_ab_arm(led: "Ledger", entry: dict, conn) -> None:
         _apply_recipe_strategy(entry)
     led.set_state(design, "flow")
     rc = _run_flow(entry)
+    if not _has_backend_run(entry):
+        # The arm flow produced no backend at all (clone/setup aborted before any
+        # stage ran): do NOT ingest a junk orfs_status='unknown' row; escalate so
+        # the dropped arm is visible and judge_finished_trials records no false
+        # verdict for the trial (2026-06-23 audit, bug #3).
+        led.set_state(design, "escalated", reason="route_arm_incomplete")
+        return
     _ingest(entry)
     # The judge reads the ingested run's is_success; rc only drives the ledger
     # terminal state (clean vs escalated) so judge_finished_trials picks it up.
@@ -193,7 +201,27 @@ def _journal_ab_launch(entry: dict) -> None:
         pass
 
 
+def _has_backend_run(entry: dict) -> bool:
+    """True iff the project produced at least one backend stage_log — i.e. a flow
+    actually RAN (even if it failed mid-stage). Distinguishes a genuine (possibly
+    partial) flow result, which MUST be ingested, from an arm/clone that aborted
+    before any stage ran (which would otherwise ingest as a junk orfs_status=
+    'unknown' row). (2026-06-23 audit, bug #3.)"""
+    proj = Path(entry["project_path"])
+    return any(proj.glob("backend/RUN_*/stage_log.jsonl"))
+
+
 def _ingest(entry: dict) -> str | None:
+    # Skip a project that produced NO flow result at all — no backend stage_log AND
+    # no ppa.json. Ingesting it writes a junk orfs_status='unknown' run row
+    # (DESIGN_NAME defaults to 'unknown', platform to 'nangate45') that (a) pollutes
+    # the corpus and (b) via _arm_metric's latest-row-per-project query can clobber a
+    # prior real arm outcome and turn an A/B trial into a FALSE loss (2026-06-23
+    # audit, bug #3). A genuine PARTIAL run has a stage_log and is still ingested
+    # (honesty: ingest after every real flow — clean, failed, or partial).
+    proj = Path(entry["project_path"])
+    if not _has_backend_run(entry) and not (proj / "reports" / "ppa.json").exists():
+        return None
     r = subprocess.run(
         [sys.executable, _script("R2G_LOOP_INGEST", KNOWLEDGE / "ingest_run.py"),
          entry["project_path"]], capture_output=True, text=True)
@@ -276,6 +304,45 @@ def _resize_to_core_util(entry: dict, util: int = 30) -> bool:
     return True
 
 
+def _record_resize_fix(entry: dict, *, cleared: bool) -> None:
+    """Record the FLW-0024 die-resize (DIE_AREA -> CORE_UTILIZATION) as a fix_log row
+    so the NEXT _ingest projects it into fix_events -> fix_trajectories -> a Tier-3
+    recipe — making the recovery VISIBLE to learning (honest accounting, a
+    cross-design CORE_UTILIZATION prior, and fix-history subjects for the place
+    symptom). Before this the resize left ZERO learning trace (2026-06-23 audit, bug
+    #6).
+
+    SCOPE (2026-06-23 review): this makes the resize LEARNABLE, not A/B-PROMOTABLE.
+    The resize is a sticky, one-shot config change applied UNCONDITIONALLY in
+    process_one (not selected via diagnose, and strategy 'core_util_relief' is not a
+    diagnose --check strategy), and its A/B control is hard to reconstruct once the
+    die is auto-sized — so the place-resize recipe is NOT driven through the
+    candidate->A/B->promoted lifecycle, and promotion is moot while the recovery is
+    hard-coded. Wiring a backend-abort A/B arm for class=place is deferred alongside
+    #9b (see docs/superpowers/plans/r2g-loop-closure-audit-2026-06-23.md).
+
+    Keyed check='orfs_stage' / class='place' (no predicates) so symptom.from_fix_log_row
+    lands it under the place symptom af17c0ba7f62c48e — the symptom_id is computed at
+    INGEST from these fields, so there is no separate-writer / symptom_id drift. The
+    outcome is honest: clean retry -> cleared (before=1, after=0); a retry that still
+    aborts -> no_change (before=after=1), preserving negative learning."""
+    proj = Path(entry["project_path"])
+    reports = proj / "reports"
+    reports.mkdir(parents=True, exist_ok=True)
+    runs = sorted(proj.glob("backend/RUN_*"))
+    run_tag = runs[-1].name if runs else "norun"
+    sid = "resize_" + hashlib.sha1(f"{proj}:{run_tag}".encode("utf-8")).hexdigest()[:12]
+    row = {
+        "fix_session_id": sid, "iter": 1, "strategy": "core_util_relief",
+        "check": "orfs_stage", "violation_class": "place", "from_stage": "place",
+        "before": 1, "after": 0 if cleared else 1,
+        "before_status": "fail", "after_status": "clean" if cleared else "fail",
+        "verdict": "cleared" if cleared else "no_change", "ts": _now(),
+    }
+    with (reports / "fix_log.jsonl").open("a", encoding="utf-8") as f:
+        f.write(json.dumps(row, sort_keys=True) + "\n")
+
+
 def _signoff_status(entry: dict) -> dict:
     out = {}
     for check in ("drc", "lvs"):
@@ -312,7 +379,12 @@ def _mark_clean(led: Ledger, conn, design: str, note: str) -> None:
             pass
 
 
-def process_one(led: Ledger, entry: dict, conn, *, _resized: bool = False) -> None:
+def process_one(led: Ledger, entry: dict, conn, *,
+                _resized: bool = False) -> str | None:
+    """Run one design end-to-end. Returns the TERMINAL status it reached —
+    'clean' | 'escalated' (or None for an A/B arm handled out-of-band) — so a
+    caller (e.g. the FLW-0024 resize retry) can record the honest outcome without
+    re-deriving it from the ledger (2026-06-23 audit, bug #6)."""
     design = entry["design"]
     if entry.get("kind") == "ab_arm":
         _journal_ab_launch(entry)           # Tier B1 — advisory decision telemetry
@@ -321,7 +393,7 @@ def process_one(led: Ledger, entry: dict, conn, *, _resized: bool = False) -> No
     # through the dedicated apply-then-flow arm runner. (2026-06-17 route-relief.)
     if entry.get("kind") == "ab_arm" and entry.get("check") == "route":
         _process_backend_ab_arm(led, entry, conn)
-        return
+        return None
     led.set_state(design, "flow")
     rc = _run_flow(entry)
     if rc != 0:
@@ -342,7 +414,16 @@ def process_one(led: Ledger, entry: dict, conn, *, _resized: bool = False) -> No
                 and _fail_stage(entry) == "place" and _is_flw0024(entry)
                 and _resize_to_core_util(entry)):
             led.set_state(design, "fixing")
-            return process_one(led, entry, conn, _resized=True)
+            result = process_one(led, entry, conn, _resized=True)
+            # Record the die-resize as a learnable fix attempt so the recovery is
+            # not invisible to the loop (2026-06-23 audit, bug #6). The retry's
+            # returned terminal status is the honest outcome (clean -> the resize
+            # cleared the abort); re-ingest projects the appended fix_log row into a
+            # fix_event (idempotent UPSERT on the retry's run row — same ppa.json
+            # mtime -> same run_id).
+            _record_resize_fix(entry, cleared=(result == "clean"))
+            _ingest(entry)
+            return result
         reason, notes = "unseen_crash", f"run_orfs rc={rc}"
         if entry.get("kind") != "ab_arm" and _fail_stage(entry) == "route":
             led.set_state(design, "fixing")
@@ -350,7 +431,7 @@ def process_one(led: Ledger, entry: dict, conn, *, _resized: bool = False) -> No
             _ingest(entry)
             if fix_rc == 0:
                 _mark_clean(led, conn, design, "route_relief cleared the abort in-loop")
-                return
+                return "clean"
             # route_relief ran but did NOT clear the abort — a KNOWN, recipe-backed
             # backend residual (congestion past the CORE_UTILIZATION floor, or a
             # DIE_AREA-sized design with no util knob to relieve), NOT an "unseen
@@ -373,26 +454,32 @@ def process_one(led: Ledger, entry: dict, conn, *, _resized: bool = False) -> No
             escalations.open_escalation(
                 conn, design=design, project_path=entry["project_path"],
                 run_id=None, reason=reason, notes=notes)
-        return
+        return "escalated"
     led.set_state(design, "signoff")
     status = _signoff_status(entry)
-    if all(v in ("clean", "clean_beol", "skipped") for v in status.values()):
+    # A signoff A/B arm MUST always reach _run_fix so arm A's R2G_FIX_EXCLUDE and
+    # arm B's R2G_FIX_RANK_FIRST actually diverge the two arms — never short-circuit
+    # it to clean on an inherited (or genuinely-empty) verdict (2026-06-23 audit,
+    # bug #1, defense-in-depth alongside the reports/-exclude copytree fix above).
+    if (entry.get("kind") != "ab_arm"
+            and all(v in ("clean", "clean_beol", "skipped") for v in status.values())):
         _ingest(entry)
         _mark_clean(led, conn, design, "signoff clean on first pass")
-        return
+        return "clean"
     led.set_state(design, "fixing")
     fix_rc = _run_fix(entry)
     _ingest(entry)
     if fix_rc == 0:
         _mark_clean(led, conn, design, "signoff fix cleared residual")
-    else:
-        led.set_state(design, "escalated", reason="catalog_exhausted")
-        if conn is not None:
-            import escalations
-            escalations.open_escalation(
-                conn, design=design, project_path=entry["project_path"],
-                run_id=None, reason="catalog_exhausted",
-                notes=json.dumps(status, sort_keys=True))
+        return "clean"
+    led.set_state(design, "escalated", reason="catalog_exhausted")
+    if conn is not None:
+        import escalations
+        escalations.open_escalation(
+            conn, design=design, project_path=entry["project_path"],
+            run_id=None, reason="catalog_exhausted",
+            notes=json.dumps(status, sort_keys=True))
+    return "escalated"
 
 
 def plan_arms_for_candidates(led: Ledger, conn, *, n_ab_designs: int = 2,
@@ -413,6 +500,29 @@ def plan_arms_for_candidates(led: Ledger, conn, *, n_ab_designs: int = 2,
     for key in recipe_lifecycle.pending_candidates(conn):
         trial = ab_runner.plan_trial(conn, **key, n_designs=n_ab_designs)
         if trial is None:
+            # Gate B is unreachable for this candidate: fewer than n_ab_designs
+            # resolvable on-disk subjects, so plan_trial returns None on EVERY drain
+            # and the candidate would linger forever, silently (2026-06-23 audit,
+            # bug #8). Do NOT demote it (demotion is terminal — diff_and_enqueue
+            # won't re-enqueue a symptom that already has a recipe_status row), and
+            # do NOT fabricate a 2nd subject (honesty: a 2-design trial is genuinely
+            # impossible). Leave it 'candidate' so a later drain auto-retries when
+            # the corpus regrows, but SURFACE it: log + an idempotent escalation so a
+            # genuinely-good but unvalidatable recipe is visible to the operator.
+            print(f"[loop] A/B candidate unvalidatable (insufficient subjects): "
+                  f"{key['strategy']} symptom={key['symptom_id']} "
+                  f"{key['design_class']}/{key['platform']}")
+            if conn is not None:
+                try:
+                    import escalations
+                    escalations.open_escalation(
+                        conn, design=f"recipe:{key['strategy']}:{key['symptom_id']}",
+                        project_path="", run_id=None,
+                        reason="unvalidatable_insufficient_subjects",
+                        symptom_id=key["symptom_id"],
+                        notes=json.dumps(key, sort_keys=True))
+                except Exception:               # surfacing must never break the drain
+                    pass
             continue
         strat8 = key["strategy"][:8]
         # Resolve the fix-loop check from the symptom ONCE per trial so a route
@@ -424,8 +534,20 @@ def plan_arms_for_candidates(led: Ledger, conn, *, n_ab_designs: int = 2,
                     src = Path(d["project_path"])
                     dst = src.parent / f"{src.name}_ab{arm}_{strat8}_{r}"
                     if src.is_dir() and not dst.exists():
+                        # CRITICAL (2026-06-23 audit, bug #1): exclude reports/ too,
+                        # not just backend/+*.gds. A signoff arm's SUBJECT is a
+                        # previously-FIXED CLEAN project, so its reports/drc.json,
+                        # lvs.json, fix_log.jsonl are clean. If copied in, process_one
+                        # reads the stale-clean verdict (_signoff_status) and
+                        # short-circuits to _mark_clean BEFORE _run_fix ever runs — so
+                        # arm A's R2G_FIX_EXCLUDE and arm B's R2G_FIX_RANK_FIRST never
+                        # take effect, both arms do byte-identical work, and NO
+                        # nangate45 signoff recipe could ever earn a real win. A fresh
+                        # arm must start with no inherited verdict and recompute its own
+                        # signoff (the route arm reseeds reports/route.json itself).
                         shutil.copytree(src, dst,
-                                        ignore=shutil.ignore_patterns("backend", "*.gds"))
+                                        ignore=shutil.ignore_patterns(
+                                            "backend", "*.gds", "reports"))
                     led.add({"design": dst.name, "project_path": str(dst),
                              "platform": key["platform"], "kind": "ab_arm",
                              "arm": arm, "strategy": key["strategy"], "repeat": r,
@@ -484,6 +606,17 @@ def judge_finished_trials(led: Ledger, conn) -> None:
             continue
         samples = {arm: [_arm_metric(conn, e["project_path"]) for e in entries]
                    for arm, entries in pair.items()}
+        # If an arm produced NO judgeable run at all (incomplete clone/flow — see
+        # _process_backend_ab_arm, bug #3), record NO verdict: a trial that never
+        # actually ran must not demote a recipe. Mark the arms judged (so the loop
+        # does not re-scan + re-query them every drain — unbounded per-turn DB work
+        # over a multi-day campaign); the candidate stays 'candidate' and is
+        # re-planned with fresh arm entries on the next drain (2026-06-23 review).
+        if any(all(s is None for s in samples[arm]) for arm in pair):
+            for entries in pair.values():
+                for e in entries:
+                    led.set_state(e["design"], e["state"], judged=True)
+            continue
         verdict = ab_runner.judge_repeated(samples["A"], samples["B"])
         ab_runner.record_trial(
             conn, key=pair["B"][0]["ab_key"], verdict=verdict,

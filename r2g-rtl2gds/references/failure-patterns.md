@@ -1874,3 +1874,68 @@ The compare phase produces no log output — only "Flatten schematic circuit" li
 - Never run multiple LVS jobs concurrently for >100K cell designs.
 - The process is NOT stuck if CPU is at 100% — the compare phase is silent until completion.
 - To reduce cell count, try removing `SYNTH_HIERARCHICAL=1` and `ABC_AREA=1` from config.mk.
+
+## Learning-Loop Closure Failures (A/B promotion never fires)
+
+This is a *meta* failure class: not a flow that fails, but the **learning loop failing to
+PROMOTE a genuinely-good recipe** — the loop records fixes and runs A/B trials yet `promoted`
+never grows. Symptom (the alarm): `ab_trials` is non-empty and `fix_events` grows across waves,
+but `SELECT COUNT(*) FROM recipe_status WHERE status='promoted'` is flat — and **per-platform**,
+e.g. NO `nangate45` recipe ever promotes while sky130hd does. The coarse "ab_trials non-empty"
+check passes, so the loop looks live while being inert for a whole platform/recipe class. Found
+by the 2026-06-23 audit; see `docs/superpowers/plans/r2g-loop-closure-audit-2026-06-23.md`.
+
+**Pattern 1 — A/B arms do byte-identical work (the dominant cause).** `plan_arms_for_candidates`
+copytrees each arm dir; if it does NOT exclude `reports/`, a *signoff* arm (whose subject is a
+previously-FIXED clean project) inherits a clean `reports/drc.json`. `process_one` then reads
+that stale verdict (`_signoff_status`) and `_mark_clean`s the arm **before `_run_fix` runs**, so
+arm A's `R2G_FIX_EXCLUDE` and arm B's `R2G_FIX_RANK_FIRST` never take effect — both arms are
+identical and only `wall_s` differs. Tell-tale: `ab_trials.metrics_json` shows arm A and B with
+identical `is_success`+`outcome_score`+`fix_iters`. **Fix:** exclude `reports` from the arm
+copytree AND never short-circuit a `kind=='ab_arm'` to clean (engineer_loop.py). A signoff arm
+must always reach `_run_fix`. sky130 recipes escaped this only because their subjects were
+*failures* (no clean report to copy), so their flows genuinely diverged.
+
+**Pattern 2 — noise decides the verdict.** When both arms reliably sign off (a success-LCB tie),
+do NOT break the tie on raw mean wall-clock with a flat band — k≈2 flow-time jitter then flips
+`win`↔`loss` at random and demotes a good recipe to shadow. **Fix:** a variance-aware tiebreak
+(combined-stderr; `<2` repeats → `inconclusive`), so a cost-neutral correct recipe stays shadow
+*honestly* rather than oscillating. The real promotion path is the success-rate LCB (arm B signs
+off where arm A, with the recipe excluded, does not) — keep that intact.
+
+**Pattern 3 — the verdict can't accumulate (volatile lifecycle key).** `design_class` is part of
+the `recipe_status`/`ab_trials` key but is derived per-run; an FLW-0024 place abort re-ingests
+with `cell_count=NULL` → size band flips to `unknown` → `diff_and_enqueue` sees a "new" key and
+RESPAWNS a fresh candidate while the prior verdict strands on the old class. **Mitigation (#9a):**
+pin the size band from the project's prior non-null `cell_count` at ingest (the stored
+`cell_count` stays honestly NULL). **Structural fix (deferred #9b):** key on
+`(symptom_id, platform, strategy)` only.
+
+**Pattern 4 — silently-skipped candidates.** A candidate with fewer than `n_ab_designs`
+resolvable on-disk subjects makes `plan_trial` return `None`; do not `continue` silently — log +
+open an idempotent `unvalidatable_insufficient_subjects` escalation and leave it `candidate`
+(NEVER demote — `diff_and_enqueue` won't re-enqueue a symptom that already has a row, so demotion
+is terminal).
+
+**Pattern 5 — junk `unknown` arm rows.** An A/B arm whose flow produced no backend (clone/setup
+aborted) must NOT be ingested — it becomes an `orfs_status='unknown'`, `design_name='unknown'`
+row that, via the latest-row-per-project metric query, clobbers a prior real arm outcome and
+turns a trial into a false loss. **Fix:** `_ingest` skips a project with no backend stage_log AND
+no ppa.json; the arm escalates `route_arm_incomplete`; the judge records no verdict for an
+all-None pair.
+
+**Pattern 6 — a recovery that records no fix_event is unlearnable.** A backend-stage recovery
+applied as a raw config rewrite + reflow (the FLW-0024 die resize) leaves ZERO `fix_events`, so
+the learner builds no trajectory/recipe and Gate A never enqueues it — a validated recovery the
+loop can never promote (contrast `route_relief`, which goes through `fix_signoff.sh` and DID
+promote). **Fix:** record the recovery as a `fix_log` row (`strategy`,`check=orfs_stage`,
+`violation_class=<stage>`) so the next ingest projects it into `fix_events` (symptom_id is
+computed at ingest from the row — no separate-writer drift); record the REAL outcome
+(`cleared`/`no_change`) so negative learning is preserved.
+
+**Honesty corollary — re-validating after a fix that invalidates past verdicts.** When a fix
+makes prior A/B verdicts *known-contaminated* (e.g. Pattern 1), do NOT rewrite the immutable
+`ab_trials` history. Instead flip the affected `recipe_status` rows back to `candidate` (a
+current-state edit) so a fresh, valid trial runs. Then EXECUTE+VERIFY: confirm `ab_trials`
+gains rows with arm A `is_success` ≠ arm B and the recipe transitions `candidate → promoted`.
+"The A/B machinery existing" is never proof the loop learns — only a recorded promotion is.

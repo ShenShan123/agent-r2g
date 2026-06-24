@@ -355,8 +355,27 @@ def _bump_generation(conn) -> int:
 
 
 def _design_class_by_project(conn) -> dict[str, str]:
-    return {r[0]: (r[1] or "unknown/unknown") for r in conn.execute(
-        "SELECT project_path, design_class FROM runs WHERE project_path IS NOT NULL")}
+    # Deterministic class per project, PREFERRING the most-recent NON-'unknown' size
+    # band: an FLW-0024 place-abort re-ingest has cell_count NULL -> '.../unknown',
+    # and the old order-free dict comprehension was last-row-wins by iteration order,
+    # so a project would nondeterministically flip class and strand its A/B verdict
+    # (2026-06-23 review). Complements ingest #9a (forward-only); both are stopgaps
+    # until #9b drops design_class from the recipe-lifecycle key entirely.
+    out: dict[str, str] = {}
+    fallback: dict[str, str] = {}
+    for pp, dc in conn.execute(
+            "SELECT project_path, design_class FROM runs WHERE project_path IS NOT NULL "
+            "ORDER BY ingested_at DESC, run_id DESC"):
+        if not pp or pp in out:
+            continue
+        dc = dc or "unknown/unknown"
+        if dc.endswith("/unknown"):
+            fallback.setdefault(pp, dc)          # remember only as a last resort
+        else:
+            out[pp] = dc                         # most-recent real size band wins
+    for pp, dc in fallback.items():
+        out.setdefault(pp, dc)                   # projects with ONLY unknown bands
+    return out
 
 
 def _indexed_recipes(trajectories: list[dict],

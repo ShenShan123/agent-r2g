@@ -13,7 +13,19 @@ REASONS = ("unknown_symptom", "catalog_exhausted", "unseen_crash",
            # A backend route abort whose route_relief fixer is exhausted (util at
            # floor) or inapplicable (DIE_AREA-sized, no CORE_UTILIZATION knob).
            # A KNOWN, recipe-backed residual — NOT an unseen crash (2026-06-17).
-           "route_congestion_residual")
+           "route_congestion_residual",
+           # An A/B route arm whose flow produced NO backend (clone/setup aborted
+           # before any stage ran): the arm cannot be judged, so it is escalated
+           # rather than ingested as a junk orfs_status='unknown' row that would
+           # poison the verdict (2026-06-23 audit, bug #3).
+           "route_arm_incomplete",
+           # A learner-enqueued A/B candidate whose Gate-B is structurally
+           # unreachable: fewer than n_ab_designs resolvable on-disk subjects, so
+           # plan_trial returns None forever. Surfaced (not silently skipped) so a
+           # genuinely-good recipe stuck as 'candidate' is visible (2026-06-23
+           # audit, bug #8). Left 'candidate' so a later drain auto-retries when
+           # the corpus regrows — never demoted (demotion is terminal).
+           "unvalidatable_insufficient_subjects")
 
 
 def _now() -> str:

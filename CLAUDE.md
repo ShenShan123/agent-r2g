@@ -156,6 +156,19 @@ gated by a variance-aware LCB over *k* repeats. Production buttons:
   `candidate → promoted`/`→ shadow`. **An empty `ab_trials` alongside `fail`/`partial` rows is the
   alarm** (the loop is inert and lying) — treat it exactly like an empty `heuristics.json`. Never
   declare the loop "live" on the strength of the machinery existing.
+- **EXECUTED is still not enough — the two A/B arms must do DIFFERENT work** (2026-06-24 loop-closure
+  audit). If `plan_arms_for_candidates` copies the subject's CLEAN `reports/` into an arm dir,
+  `process_one` reads that stale verdict and `_mark_clean`s the arm BEFORE the fixer runs, so arm A
+  (`R2G_FIX_EXCLUDE`) and arm B (`R2G_FIX_RANK_FIRST`) are byte-identical and every verdict is
+  wall-clock NOISE → **no nangate45 recipe ever promoted** for 8 waves while `ab_trials` kept growing.
+  Invariants: the arm copytree MUST exclude `reports/`; a signoff `ab_arm` MUST always reach
+  `_run_fix`; the success-tie cost tiebreak MUST be variance-aware (a flat ±2% flips on jitter, and
+  `se==0` is MAXIMAL confidence, not none). VERIFY a trial's `metrics_json` shows the arms genuinely
+  diverging — not identical `is_success`+`outcome_score`+`fix_iters`. KNOWN GAP: the inline A/B arm
+  router (`_symptom_check`) exercises only **DRC/LVS + route** recipes; **timing/place** recipes route
+  to `--check both` and are inert in A/B (documented follow-up). Detail:
+  `references/failure-patterns.md` ("Learning-Loop Closure Failures") +
+  `docs/superpowers/plans/r2g-loop-closure-audit-2026-06-23.md`.
 - **Concurrent ingests share one file.** `knowledge_db`/`journal_db.connect` arm a `busy_timeout` so a
   lock waits instead of erroring — never trust a swallowed ingest; confirm the row landed.
 - **A design can have many runs.** Reconciliation/repair tools touch only the **latest-ingested row
@@ -180,8 +193,11 @@ gated by a variance-aware LCB over *k* repeats. Production buttons:
 
 **Fast honesty check:** `count(runs where orfs_status='fail')` must equal the count carrying an
 `orfs-fail-%` `failure_event`; once the corpus has `fail`/`partial` rows, `ab_trials` must be
-non-empty. The dashboard's **Knowledge Store Health** panel renders red when `heuristics.json` is
-empty — that red is the alarm.
+non-empty — AND, once trials exist, `promoted` must eventually grow **per-platform** (an
+`ab_trials`-grows-but-`promoted`-flat-for-a-whole-platform state is the 2026-06-24 "arms are
+identical" alarm — subtler than empty `ab_trials`, and the exact symptom that hid the loop being
+inert for nangate45). The dashboard's **Knowledge Store Health** panel renders red when
+`heuristics.json` is empty — that red is the alarm.
 
 ## Where to Find X
 

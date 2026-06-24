@@ -9,6 +9,8 @@ for its synthesized cells -> [ERROR FLW-0024] at global placement -> escalated a
 sky130 mk_*_project sizing bug. Validated live: dma_controller's 50x50 die held
 6442um^2 of cells (2.6x too big); CORE_UTILIZATION=30 auto-sized to 31% util -> placed.
 """
+import json
+
 import engineer_loop as el
 
 
@@ -109,6 +111,35 @@ def test_process_one_resizes_and_retries_then_recovers(tmp_path, monkeypatch):
     assert flow_calls["n"] == 2                                  # retried once
     assert "CORE_UTILIZATION" in (p / "constraints" / "config.mk").read_text()
     assert "demo" in cleaned                                     # recovered -> clean
+    # bug #6: the resize must leave a LEARNABLE fix_log row so the next ingest
+    # projects it into a fix_event (keyed to the place symptom af17c0ba) -> recipe.
+    # This makes the recovery VISIBLE to learning (not A/B-promoted — the place-resize
+    # is hard-coded; promotion is deferred, see the _record_resize_fix scope note).
+    rows = [json.loads(l) for l in
+            (p / "reports" / "fix_log.jsonl").read_text().splitlines() if l.strip()]
+    resize = [r for r in rows if r.get("strategy") == "core_util_relief"]
+    assert resize, "resize recovery left no fix_log row (invisible to learning)"
+    assert resize[0]["check"] == "orfs_stage"
+    assert resize[0]["violation_class"] == "place"
+    assert resize[0]["verdict"] == "cleared"                     # honest: it cleared
+
+
+def test_resize_that_does_not_recover_records_no_change(tmp_path, monkeypatch):
+    """A resize whose retry STILL over-packs must record verdict=no_change (negative
+    learning), not a fabricated win, AND escalate place_density_residual."""
+    p = _mk_project(tmp_path, die=True)
+    _seed_backend(p, flw0024=True)
+    entry = {"design": "demo", "project_path": str(p), "platform": "nangate45"}
+    monkeypatch.setattr(el, "_run_flow", lambda e: 2)            # never recovers
+    monkeypatch.setattr(el, "_ingest", lambda e: None)
+    monkeypatch.setattr(el, "_fail_stage", lambda e: "place")
+    led = _Led()
+    el.process_one(led, entry, None)
+    assert [r for (s, r) in led.states if s == "escalated"] == ["place_density_residual"]
+    rows = [json.loads(l) for l in
+            (p / "reports" / "fix_log.jsonl").read_text().splitlines() if l.strip()]
+    resize = [r for r in rows if r.get("strategy") == "core_util_relief"]
+    assert resize and resize[0]["verdict"] == "no_change"       # honest negative
 
 
 def test_process_one_escalates_honestly_when_resize_insufficient(tmp_path, monkeypatch):

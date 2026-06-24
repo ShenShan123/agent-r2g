@@ -363,7 +363,10 @@ python3 knowledge/knowledge_sync.py merge --from-db path/to/their/knowledge.sqli
 # Bootstrap a fresh store from a bundle only (rebuilds knowledge.sqlite):
 python3 knowledge/knowledge_sync.py import --bundle knowledge/store --db knowledge/knowledge.sqlite
 
-# Drift + honesty status (CI gate): is the committed bundle == the DB, and is it honest?
+# Honesty CI gate (the real gate — runs the 5 honesty gates over the committed store):
+python3 knowledge/honesty.py --db knowledge/knowledge.sqlite
+# On-demand drift check for an EXPORTED bundle you intend to share (reports
+# "no committed bundle" by design when none exists — NOT a CI gate post-revert):
 python3 knowledge/knowledge_sync.py status
 ```
 

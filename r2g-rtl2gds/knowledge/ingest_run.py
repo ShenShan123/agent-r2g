@@ -768,7 +768,23 @@ def ingest(project: Path,
     ppa_path = project / "reports" / "ppa.json"
     run_id = _compute_run_id(project, ppa_path)
 
-    design_class = f"{_design_type(project, cfg)}/{_size_class(cell_count)}"
+    # design_class's SIZE band must be STABLE across re-ingests of the SAME project.
+    # An FLW-0024 place-abort re-ingest has cell_count=NULL (no cells were placed),
+    # which would flip the size band to 'unknown'. Because design_class is part of the
+    # A/B recipe-lifecycle key, that flip RESPAWNS a fresh unvalidated candidate while
+    # the prior A/B verdict strands on the old class, so Gate B never compounds and no
+    # recipe for that symptom ever promotes (2026-06-23 audit, bug #9 — proximate
+    # trigger). Pin the band from this project's most-recent PRIOR non-null cell_count;
+    # the stored runs.cell_count for THIS run stays honest (NULL on an abort).
+    class_cell_count = cell_count
+    if class_cell_count is None:
+        prior = conn.execute(
+            "SELECT cell_count FROM runs WHERE project_path=? AND cell_count IS NOT NULL "
+            "ORDER BY ingested_at DESC, run_id DESC LIMIT 1",
+            (str(project.resolve()),)).fetchone()
+        if prior and prior[0]:
+            class_cell_count = prior[0]
+    design_class = f"{_design_type(project, cfg)}/{_size_class(class_cell_count)}"
     # Win 3 r2g-bench: flag held-out designs (by DESIGN_NAME or project basename).
     # Filtered ONLY at the learning read — failure_events/run_violations below are
     # still written for bench runs (honesty invariant H3).

@@ -408,13 +408,24 @@ echo "Summary: $REPORTS/fix_summary.md"
 # (no match verdict, no lvsdb) returned exit 0 -> the loop marked the design clean
 # though signoff never verified. Any status outside clean_states is an unresolved
 # residual. See references/failure-patterns.md + test_fix_signoff_clean_gate.py.
+#
+# A MISSING or UNREADABLE report for an ACTIVE check is itself a residual (rc=2),
+# NOT "no residual" — mirroring engineer_loop._signoff_status, which defaults a
+# missing/unreadable report to "unknown" (fail-closed). The earlier
+# `if os.path.exists(p)` short-circuit let an absent report (e.g. an extract crash
+# under fix_one's `|| true`) pass the gate, so for --check both a clean DRC alone
+# could mark a design clean though LVS never verified (2026-06-23 audit, bug #4/#5).
 python3 -c 'import json,sys,os
 proj,check=sys.argv[1],sys.argv[2]; rc=0
-checks=("route",) if check=="route" else ("drc","lvs")
+# Judge ONLY the report(s) for the REQUESTED check — a stale report from a different
+# check must not poison this one (and --check drc must not require an absent lvs.json).
+checks={"route":("route",),"drc":("drc",),"lvs":("lvs",)}.get(check,("drc","lvs"))
 clean_states={"clean","clean_beol","skipped"}
 for c in checks:
     p=os.path.join(proj,"reports",c+".json")
+    st=None
     if os.path.exists(p):
-        d=json.load(open(p))
-        if d.get("status") not in clean_states: rc=2
+        try: st=json.load(open(p)).get("status")
+        except Exception: st=None
+    if st not in clean_states: rc=2
 sys.exit(rc)' "$PROJECT_DIR" "$CHECK" || exit 2

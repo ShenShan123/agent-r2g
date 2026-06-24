@@ -335,6 +335,22 @@ The knowledge store also feeds the loose-first **Fmax search** (`scripts/reports
     (same firewall philosophy as the loop's other honesty gates). `honesty.py` is the single home of
     those gates (imported by the merge, the CI runner `python3 knowledge/honesty.py --db …`, and
     `tests/test_honesty_invariants.py` — they cannot drift).
+28. **An A/B trial is only honest if the two arms do DIFFERENT work** (2026-06-24 loop-closure audit).
+    `plan_arms_for_candidates` copytrees each subject into an arm dir EXCLUDING `reports/` (as well as
+    `backend/`+`*.gds`): a signoff arm's subject is a previously-FIXED clean project, so copying its
+    clean `reports/drc.json` made `process_one` `_mark_clean` the arm BEFORE `_run_fix` ran → arm A
+    (`R2G_FIX_EXCLUDE`) and arm B (`R2G_FIX_RANK_FIRST`) were byte-identical and the verdict was
+    wall-clock noise → **no nangate45 recipe ever promoted** while `ab_trials` kept growing. A signoff
+    `ab_arm` therefore ALWAYS reaches `_run_fix` (never short-circuits), the success-tie cost tiebreak
+    in `ab_runner.judge_repeated` is variance-aware (combined-stderr; `se==0` is maximal confidence,
+    not none), and an arm that produced no backend ESCALATES instead of ingesting a junk
+    `orfs_status='unknown'` run row (which would clobber a prior real arm via `_arm_metric`'s
+    latest-row query and fake a `loss`). **Honesty check beyond "`ab_trials` non-empty": `promoted`
+    must eventually grow PER-PLATFORM**, and a trial's `metrics_json` arms must not be identical.
+    KNOWN GAP: `_symptom_check` routes only `orfs_stage/route` to the backend arm runner, so TIMING
+    (`period_relax`) and PLACE (`core_util_relief`) recipes run a DRC/LVS arm where they are inert —
+    they cannot earn a real A/B verdict until the router is extended (follow-up). Detail:
+    `references/failure-patterns.md` ("Learning-Loop Closure Failures").
 
 ## Sharing the store across users
 

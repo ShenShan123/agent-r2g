@@ -360,3 +360,15 @@ Returns a list of all known strategies for this symptom, each with its `recipe_s
   explicitly when confirming a new failure class.
 - Journal failures never break the flow; the journal is evidence, not a prerequisite.
 - Only the loop process ingests into `knowledge.sqlite` (single-writer invariant).
+- **A/B arms must do DIFFERENT work** (2026-06-24 loop-closure audit). The arm copytree excludes
+  `reports/` and a signoff `ab_arm` always reaches `_run_fix`, so arm A (`R2G_FIX_EXCLUDE`) and arm B
+  (`R2G_FIX_RANK_FIRST`) genuinely diverge — otherwise both arms inherit a clean verdict, short-circuit
+  before the fixer, and every verdict is wall-clock noise (the bug that kept `promoted` flat at 2/both
+  sky130hd while `ab_trials` grew). The success-tie cost tiebreak is variance-aware (`se==0` = maximal
+  confidence). An arm with no backend ESCALATES (`route_arm_incomplete`), never ingests a junk
+  `unknown` row. **Alarm: `ab_trials` grows but `promoted` is flat for a whole platform.**
+- **A/B coverage gap (follow-up):** `_symptom_check` routes only `orfs_stage/route` symptoms to the
+  backend apply-then-flow arm runner; TIMING (`period_relax`) and PLACE (`core_util_relief`, the
+  FLW-0024 resize) recipes run a `--check both` DRC/LVS arm where the EXCLUDE/RANK_FIRST is a no-op, so
+  they land `inconclusive` regardless of merit. Extending the router to timing/place is tracked in
+  `docs/superpowers/plans/r2g-loop-closure-audit-2026-06-23.md`.

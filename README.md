@@ -399,6 +399,26 @@ shadow  ──(Gate A: learner enqueues)──►  candidate  ──(A/B win)─
 Gate A fires automatically every time `learn_heuristics.learn()` runs (batch or loop).
 Gate B (seeding the dense-reward gradient) is an operator procedure — see `references/engineer-loop.md`.
 
+### Loop-closure correctness (2026-06-24 audit)
+
+An adversarial audit found the loop was **DEGRADED**: it recorded fixes and ran A/B trials but
+**never promoted a nangate45 recipe** (`promoted` flat at 2, both sky130hd, across 8 waves). Root
+cause: A/B arm dirs inherited the subject's *clean* `reports/`, so `process_one` marked each arm
+clean **before the fixer ran** — both arms did byte-identical work and the verdict was wall-clock
+noise. Eight fixes (TDD, two adversarial review rounds) closed it; the first **nangate45 promotion
+ever** (`antenna_diode_repair`, a robust cost win) followed live. Key invariants now enforced:
+
+- A/B arm copytree excludes `reports/`; a signoff `ab_arm` always runs `_run_fix` (arms genuinely diverge).
+- The success-tie cost tiebreak is **variance-aware** (no win/loss flips on jitter; `se==0` = maximal confidence).
+- Incomplete arms **escalate** instead of ingesting junk `orfs_status='unknown'` rows that poison verdicts.
+- FLW-0024 die-resize recoveries are recorded as `fix_events` (visible to learning).
+- `design_class` size band is stable across re-ingest (no candidate respawn).
+
+Known follow-ups: the A/B arm router exercises only **DRC/LVS + route** recipes — **timing/place**
+recipes (period_relax, core_util) are inert in A/B until the router is extended. Full detail:
+`references/failure-patterns.md` ("Learning-Loop Closure Failures") and
+`docs/superpowers/plans/r2g-loop-closure-audit-2026-06-23.md`.
+
 ### Paper-absorption wins (branch `feat/paper-absorption`)
 
 Six capability improvements derived from published AI-EDA literature, all A/B-gated:
