@@ -63,6 +63,33 @@ def test_place_arm_routes_to_backend_runner(tmp_path, monkeypatch):
     assert out is None and seen == {"called": True, "check": "place"}
 
 
+def test_localize_arm_sdc_repoints_to_local(tmp_path):
+    """2026-06-25: an arm copy's config.mk SDC_FILE pins the ORIGINAL design's SDC, so the
+    arm flows at the failing period and period_relax's SDC edit has NO effect (the 22f3e67
+    SDC-pinning bug). _localize_arm_sdc repoints SDC_FILE at the arm's own constraint.sdc."""
+    arm = tmp_path / "d_abB_periodre_0"
+    (arm / "constraints").mkdir(parents=True)
+    (arm / "constraints" / "constraint.sdc").write_text("set clk_period 15.0\n")
+    (arm / "constraints" / "config.mk").write_text(
+        "export DESIGN_NAME = d\n"
+        "export SDC_FILE = /orig/d/constraints/constraint.sdc\n")
+    engineer_loop._localize_arm_sdc(arm)
+    cfg = (arm / "constraints" / "config.mk").read_text()
+    assert str((arm / "constraints" / "constraint.sdc").resolve()) in cfg
+    assert "/orig/d/constraints/constraint.sdc" not in cfg
+
+
+def test_localize_arm_sdc_adds_when_absent(tmp_path):
+    """If config.mk has no SDC_FILE line, _localize_arm_sdc appends one pointing local."""
+    arm = tmp_path / "d_abA_periodre_0"
+    (arm / "constraints").mkdir(parents=True)
+    (arm / "constraints" / "constraint.sdc").write_text("set clk_period 9.0\n")
+    (arm / "constraints" / "config.mk").write_text("export DESIGN_NAME = d\n")
+    engineer_loop._localize_arm_sdc(arm)
+    cfg = (arm / "constraints" / "config.mk").read_text()
+    assert f"SDC_FILE = {(arm / 'constraints' / 'constraint.sdc').resolve()}" in cfg
+
+
 def test_apply_recipe_strategy_place_resizes(tmp_path):
     """arm B of a place trial converts the too-small fixed DIE_AREA -> CORE_UTILIZATION
     (the FLW-0024 recovery) so its place stage completes where arm A's aborts."""

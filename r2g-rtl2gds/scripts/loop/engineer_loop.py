@@ -535,6 +535,24 @@ def process_one(led: Ledger, entry: dict, conn, *,
     return "escalated"
 
 
+def _localize_arm_sdc(dst: Path) -> None:
+    """Repoint an A/B arm copy's config.mk SDC_FILE at its OWN constraints/constraint.sdc.
+    The subject's config.mk pins SDC_FILE to an ABSOLUTE path in the ORIGINAL design dir,
+    so without this the arm's flow (and any period_relax SDC edit) silently use the
+    SUBJECT's SDC at the FAILING period — the relaxed clock has NO effect and a timing arm
+    can never diverge (the 22f3e67 Fmax-pilot SDC-pinning bug, recurring in the A/B arm;
+    2026-06-25). Mirrors fmax_search.clone_variant's repoint."""
+    cfg = dst / "constraints" / "config.mk"
+    sdc = (dst / "constraints" / "constraint.sdc").resolve()
+    if not cfg.is_file() or not sdc.exists():
+        return
+    text = cfg.read_text(encoding="utf-8")
+    new, n = re.subn(r"(?m)^(\s*(?:export\s+)?SDC_FILE\s*=).*$", rf"\g<1> {sdc}", text)
+    if n == 0:
+        new = text.rstrip("\n") + f"\nexport SDC_FILE = {sdc}\n"
+    cfg.write_text(new, encoding="utf-8")
+
+
 def _ab_coverage_gap(conn, key: dict) -> bool:
     """True if an A/B trial for this candidate cannot produce a decisive verdict and so
     must NOT be planned (2026-06-24 audit, bugs #1/#2). Two cases: (1) the strategy
@@ -648,6 +666,10 @@ def plan_arms_for_candidates(led: Ledger, conn, *, n_ab_designs: int = 2,
                         shutil.copytree(src, dst,
                                         ignore=shutil.ignore_patterns(
                                             "backend", "*.gds", "reports"))
+                        # Repoint SDC_FILE at the arm's OWN constraint.sdc so its flow (and
+                        # period_relax's SDC edit) actually take effect, not the subject's
+                        # failing-period SDC (2026-06-25 SDC-pinning fix).
+                        _localize_arm_sdc(dst)
                     led.add({"design": dst.name, "project_path": str(dst),
                              "platform": key["platform"], "kind": "ab_arm",
                              "arm": arm, "strategy": key["strategy"], "repeat": r,
