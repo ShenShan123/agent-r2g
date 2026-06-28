@@ -220,3 +220,42 @@ per the hard rule, NUM_CORES halved not WORKERS). **VERIFY next iteration:** the
 designs reach `clean`/honest-residual, a `synth_memory_relax` fix_event/recipe appears in
 knowledge, and `promoted(nangate45)` keeps growing. Tail-blocking (barrier waves vs a slow
 large-design tail) remains the open structural follow-up.
+
+### 2026-06-28 iteration 2 — live recipe-learning PROVEN + 3 more fixes
+
+Wave 14 was still grinding with the *old* code (its `run` process predates the iter-1 commit),
+so the re-queued pilot + fix wouldn't be exercised until wave 15 (hours away). Drove the proof
+proactively instead: ran one pilot (`verilog_axis_axis_fifo`) through the fixed loop against the
+LIVE store (dedicated 1-design ledger, no campaign-ledger race). **Full closed loop on a recipe
+that did not exist this morning:** fix_log `synth_memory_relax verdict=cleared` → live
+`knowledge.sqlite` gained a `synth_memory_relax|synth|cleared` **fix_event** → `learn_cycle` put
+the recipe in `heuristics.json` AND auto-enqueued an **A/B candidate** (`recipe_status`:
+`nangate45|crypto/large|candidate`, Gate A). honesty 5/5 throughout. That IS "learn from the fix
+trajectory → record it → promote new solutions," demonstrated live.
+
+Three more fixes (all TDD; suite 814→**818**):
+1. `e99a7f6` — **synth_memory_relax verdict = synth cleared, not whole-flow clean.** The cap raise
+   expands RAM→flops, so a memcap design can clear synth yet over-pack at place; tying `cleared`
+   to `result=='clean'` recorded a downstream place failure as the synth fix FAILING (false
+   negative). Now `cleared = _fail_stage != 'synth'` after the retry.
+2. `cbcad40` + `813825a` — **catalog_exhausted escalation records the POST-fix residual.** It used
+   the PRE-fix `status` snapshot (usually `{drc:unknown,lvs:unknown}` before any report exists), so
+   all 184 escalations read identical while their residuals were diverse. Re-read after `_run_fix`;
+   reconcile tool fixed the existing 195 rows in place → real split surfaced (88 drc=stuck/lvs=clean,
+   67 drc=clean/lvs=fail, 29 both, 10 lvs=incomplete; **0 stale false-escalations**). honesty 5/5.
+3. `0773f95` — **pair the cap raise with die auto-size.** Live pilot: cap=65536 cleared synth but
+   the FF-expanded design hit 3072% util → FLW-0024 at place. Now the recovery also converts a
+   fixed DIE_AREA → CORE_UTILIZATION=20. Re-validated live: config gets cap+util both set, DIE_AREA
+   dropped, and the re-flow clears synth AND passes floorplan (no FLW-0024).
+
+**Superseded invariant:** "catalog_exhausted notes carry the signoff status" → "…carry the POST-fix
+residual (the unclearable symptom), not the pre-fix snapshot."
+
+**Open follow-up (iter-3):** wire a **synth backend-abort A/B arm** so `synth_memory_relax` can
+formally PROMOTE (today its auto-enqueued candidate routes to `--check both`, can't diverge on a
+synth-aborting design → accrues ≤`AB_INCONCLUSIVE_MAX` cheap inconclusive trials → `_ab_coverage_gap`
+skips it, never demotes — bounded + honest, but not promoted). The wiring mirrors the place arm:
+`_symptom_check`(synth→'synth'), add 'synth' to the `process_one` backend-abort arm set,
+`_apply_recipe_strategy`(synth → raise cap + die-pair), `_arm_metric`(synth → is_success = synth
+cleared). Deferred deliberately — A/B-arm wiring is where subtle loop bugs hide; it deserves
+dedicated TDD, not a rushed end-of-iteration addition.
