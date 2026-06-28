@@ -134,7 +134,8 @@ def test_process_one_raises_cap_and_recovers(tmp_path, monkeypatch):
         return 2 if flow["n"] == 1 else 0       # memcap first, clean after cap raise
     monkeypatch.setattr(el, "_run_flow", fake_flow)
     monkeypatch.setattr(el, "_ingest", lambda e: None)
-    monkeypatch.setattr(el, "_fail_stage", lambda e: "synth")
+    # synth fails before the retry; after the cap raise the flow is clean (no failing stage)
+    monkeypatch.setattr(el, "_fail_stage", lambda e: "synth" if flow["n"] <= 1 else None)
     monkeypatch.setattr(el, "_signoff_status", lambda e: {"drc": "clean", "lvs": "clean"})
     cleaned = {}
     monkeypatch.setattr(el, "_mark_clean",
@@ -152,6 +153,30 @@ def test_process_one_raises_cap_and_recovers(tmp_path, monkeypatch):
     assert relax[0]["check"] == "orfs_stage"
     assert relax[0]["violation_class"] == "synth"
     assert relax[0]["verdict"] == "cleared"
+
+
+def test_memcap_clears_synth_but_fails_place_records_cleared(tmp_path, monkeypatch):
+    """A memcap design whose cap-raise CLEARS synth but then over-packs at place (the
+    FF-expanded RAM is big): the synth_memory_relax fix must be recorded `cleared` (the
+    synth abort IS gone), NOT `no_change` tied to the downstream place failure -- else the
+    loop learns the recovery fails when it worked. Verdict = (synth got past), not (flow clean)."""
+    p = _mk_project(tmp_path)
+    _seed_synth_fail(p, kind="memcap")
+    flow = {"n": 0}
+
+    def fake_flow(e):
+        flow["n"] += 1
+        return 2                                  # aborts twice: synth memcap, then place
+    # _fail_stage tracks the backend: synth before the retry, place after the cap raise
+    monkeypatch.setattr(el, "_run_flow", fake_flow)
+    monkeypatch.setattr(el, "_ingest", lambda e: None)
+    monkeypatch.setattr(el, "_fail_stage", lambda e: "synth" if flow["n"] <= 1 else "place")
+    el.process_one(_Led(), _entry(p), None)
+    rows = [json.loads(l) for l in
+            (p / "reports" / "fix_log.jsonl").read_text().splitlines() if l.strip()]
+    relax = [r for r in rows if r.get("strategy") == "synth_memory_relax"]
+    assert relax and relax[0]["verdict"] == "cleared"   # synth cleared, despite place fail
+    assert relax[0]["after"] == 0
 
 
 def test_memcap_that_cannot_be_raised_escalates_residual_not_unseen(tmp_path, monkeypatch):

@@ -762,7 +762,14 @@ def process_one(led: Ledger, entry: dict, conn, *,
                 and _raise_synth_memory_cap(entry)):
             led.set_state(design, "fixing")
             result = process_one(led, entry, conn, _resized=True)
-            _record_synth_mem_fix(entry, cleared=(result == "clean"))
+            # The synth fix's verdict is whether the SYNTH abort cleared (the re-flow got
+            # PAST synth), NOT whether the whole flow reached clean. Raising the cap expands
+            # the RAM to flip-flops, so a memcap design can clear synth yet over-pack at
+            # place -- tying 'cleared' to result=='clean' would record that downstream place
+            # failure as the synth fix FAILING (false negative learning that teaches the loop
+            # synth_memory_relax does not work when it does). _fail_stage reflects the retry.
+            synth_cleared = _fail_stage(entry) != "synth"
+            _record_synth_mem_fix(entry, cleared=synth_cleared)
             _ingest(entry)
             return result
         reason, notes = "unseen_crash", f"run_orfs rc={rc}"
