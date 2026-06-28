@@ -64,8 +64,16 @@ class Ledger:
                 if not ln.strip():
                     continue
                 e = json.loads(ln)
-                cur = self._entries.setdefault(e["design"], e)
+                cur = self._entries.setdefault(e["design"], {})
                 cur.update(e)
+                # A 'pending' event is fresh work (e.g. a re-planned A/B arm): drop any
+                # stale 'judged' carried from a PRIOR wave so judge_finished_trials (which
+                # filters `not judged`) RE-judges the re-run. Without this, an A/B candidate
+                # whose arm dirs survive a prior wave re-runs every wave but its new verdict
+                # is NEVER recorded -> it can never promote and _ab_coverage_gap is starved
+                # of the trials it counts (2026-06-27 audit; the large-pin place class).
+                if e.get("state") == "pending":
+                    cur.pop("judged", None)
 
     def _append(self, obj: dict) -> None:
         with self.path.open("a", encoding="utf-8") as f:
@@ -77,7 +85,13 @@ class Ledger:
         e.setdefault("state", "pending")
         e["ts"] = _now()
         with self._lock:
-            self._entries[e["design"]] = dict(self._entries.get(e["design"], {}), **e)
+            cur = self._entries.setdefault(e["design"], {})
+            cur.update(e)
+            # Re-planning an arm whose dir survived a prior wave resets it to 'pending' so it
+            # RE-RUNS; drop the prior wave's stale 'judged' so its new verdict is re-recorded
+            # (mirrors __init__'s reload invariant; 2026-06-27).
+            if e.get("state") == "pending":
+                cur.pop("judged", None)
             self._append(e)
 
     def set_state(self, design: str, state: str, **extra) -> None:
