@@ -1162,6 +1162,19 @@ ORFS default `SYNTH_MEMORY_MAX_BITS = 4096` forces Yosys to refuse inferring mem
 - For designs >128 Kbit memory, raise further or integrate fakeram hard macros (see macro-design flow in SKILL.md).
 - Pair with `CORE_UTILIZATION ≤ 20` because FF-based memories consume many cells.
 
+**Loop auto-handling (2026-06-28, `synth_memory_relax`).** `engineer_loop.process_one` now
+RECOVERS this in-loop instead of escalating it: on a synth abort whose flow.log contains
+`exceeds SYNTH_MEMORY_MAX_BITS`, `_raise_synth_memory_cap` sets the cap to `65536` in
+`constraints/config.mk` and re-flows ONCE. The retry is recorded as a learnable `fix_log` row
+(`strategy='synth_memory_relax'`, `check='orfs_stage'`, `class='synth'`) so the next ingest
+projects it into a `fix_event` → Tier-3 recipe (a cross-design prior, exactly like the FLW-0024
+die-resize). If the raise does not clear it (memory still over budget even at 65536), it escalates
+honestly as `synth_memory_residual` (use a fakeram macro), never `unseen_crash`. Root cause: the
+loop previously collapsed EVERY early synth abort into `unseen_crash` — 15 of 79 nangate45
+"mystery crashes" were really this mechanical, documented cap (2026-06-28 unseen_crash audit).
+Validated on `verilog_axis_axis_fifo`: default-cap synth aborts in 3 s; cap=65536 expands the
+memory to flops and synth proceeds. Tests: `tests/test_synth_abort_classify.py`.
+
 ### Missing `include file
 
 **Symptoms:**
@@ -1178,6 +1191,15 @@ The `copy RTL files` step in `tools/setup_rtl_designs.py` only copies `.v` files
   - Concatenate its contents inline at the top of the first RTL file, or
   - Drop the design from the batch and fetch the original header.
 - `tools/fix_orfs_failures.py` creates empty stub headers as a placeholder, but empty stubs only help if the includes are guards; designs that rely on `` `define MACRO `` macros inside the header will still fail synthesis.
+
+**Loop auto-handling (2026-06-28, `incomplete_missing_header`).** When the harvested RTL is
+genuinely incomplete (the header was never shipped upstream — `setup_rtl_designs.py` already marks
+these `metadata.json status=incomplete_missing_headers`, `harvested_headers=[]`), the loop can't
+synthesize them. `engineer_loop.process_one` now escalates such a synth abort (`_is_synth_missing_header`)
+under the honest reason `incomplete_missing_header`, NOT `unseen_crash` — so the escalation queue
+and the learner are not told this is a novel synth symptom to diagnose. This was the LARGEST slice
+of the misclassified bucket: 48 of 79 nangate45 `unseen_crash` escalations (2026-06-28 audit). These
+need source completion (upstream header fetch), not a flow recipe.
 
 **Stubbable vs unstubbable headers (validated on the rtl_designs_v2 batch — 44/213
 designs hit this):** `setup_rtl_designs.py` now classifies missing `include targets:

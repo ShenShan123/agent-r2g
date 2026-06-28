@@ -544,6 +544,116 @@ def _record_resize_fix(entry: dict, *, cleared: bool) -> None:
         f.write(json.dumps(row, sort_keys=True) + "\n")
 
 
+# ── Synth-stage abort classification + memory-cap recovery ───────────────────
+# An early synth abort (rc!=0 before any reports) is NOT a mystery: the Yosys log
+# names the cause. The loop used to collapse all of them into 'unseen_crash', which
+# hid a MECHANICAL, documented recovery (raise SYNTH_MEMORY_MAX_BITS) for 15 designs
+# and mislabeled 58 deterministic conditions (missing `include header / synth timeout)
+# as crashes -> the learner saw mysteries, not actionable signatures (2026-06-28
+# unseen_crash audit; only ~6 of 79 were genuine downstream crashes). Mirrors the
+# FLW-0024 / PPL-0024 detectors above (signature-keyed read of the newest flow.log).
+_SYNTH_MEM_BITS_RETRY = 65536   # the skill's documented per-memory cap (SKILL.md:634);
+                                # 16x the ORFS default 4096, enough for register files /
+                                # FIFOs that just overflow it, bounded so a huge memory
+                                # cannot explode into millions of flops.
+
+
+def _newest_flow_log(entry: dict) -> str:
+    """Text of the newest backend run's flow.log, or '' (best-effort, never raises).
+    Shared reader for the synth-abort detectors."""
+    proj = Path(entry["project_path"])
+    logs = sorted(proj.glob("backend/RUN_*/flow.log"))
+    if not logs:
+        return ""
+    try:
+        return logs[-1].read_text(errors="ignore")
+    except OSError:
+        return ""
+
+
+def _is_synth_memory_cap(entry: dict) -> bool:
+    """True if synth aborted because an inferred memory exceeds SYNTH_MEMORY_MAX_BITS
+    (Yosys' 'Synthesized memory size N exceeds SYNTH_MEMORY_MAX_BITS'). RECOVERABLE:
+    the ORFS default 4096 is too tight for real register files / FIFOs -- raise the cap
+    and re-flow (SKILL.md:395, failure-patterns.md:1149)."""
+    return "exceeds SYNTH_MEMORY_MAX_BITS" in _newest_flow_log(entry)
+
+
+def _is_synth_missing_header(entry: dict) -> bool:
+    """True if synth aborted on an unresolved `include (Yosys 'Can't open include
+    file'): the harvested RTL never shipped the header -- genuinely INCOMPLETE upstream
+    input, not a crash. setup_rtl_designs.py already flags these (metadata.json
+    status=incomplete_missing_headers); they must escalate honestly, not as a mystery."""
+    return "Can't open include file" in _newest_flow_log(entry)
+
+
+def _is_synth_timeout(entry: dict) -> bool:
+    """True if yosys synthesis hit the run_orfs.sh wrapper timeout (rc=124): the design
+    is large enough that canonicalize/synth did not finish in the budget. Honest reason
+    'synth_timeout' (the operator runbook can raise ORFS_TIMEOUT or simplify), never a
+    mystery crash."""
+    txt = _newest_flow_log(entry)
+    return ("exit code 124" in txt and "synth" in txt) or "do-yosys-canonicalize] Terminated" in txt
+
+
+def _raise_synth_memory_cap(entry: dict, bits: int = _SYNTH_MEM_BITS_RETRY) -> bool:
+    """Memory-cap recovery: set/raise SYNTH_MEMORY_MAX_BITS in constraints/config.mk so
+    Yosys infers the (now too-large-for-4096) memory into flip-flops instead of refusing.
+    Replaces an existing lower value, appends when absent. Returns True iff it raised the
+    cap; a no-op (False) when there is no config.mk, or the cap is already >= `bits`
+    (already raised as far as the loop will go -> a retry would be pointless -> let it
+    escalate as synth_memory_residual)."""
+    cfg = Path(entry["project_path"]) / "constraints" / "config.mk"
+    if not cfg.is_file():
+        return False
+    out, found, raised = [], False, False
+    for ln in cfg.read_text().splitlines():
+        if _config_knob(ln) == "SYNTH_MEMORY_MAX_BITS":
+            found = True
+            try:
+                cur = int(ln.split("=", 1)[1].strip())
+            except (IndexError, ValueError):
+                cur = 0
+            if cur < bits:
+                out.append(f"export SYNTH_MEMORY_MAX_BITS = {bits}")
+                raised = True
+                continue
+            out.append(ln)                       # already >= target -> keep, no-op
+            continue
+        out.append(ln)
+    if not found:
+        out.append(f"export SYNTH_MEMORY_MAX_BITS = {bits}")
+        raised = True
+    if raised:
+        cfg.write_text("\n".join(out) + "\n")
+    return raised
+
+
+def _record_synth_mem_fix(entry: dict, *, cleared: bool) -> None:
+    """Record the SYNTH_MEMORY_MAX_BITS raise as a fix_log row so the next _ingest
+    projects it into fix_events -> a Tier-3 'synth_memory_relax' recipe -- the synth
+    memory-cap recovery becomes VISIBLE to learning (a cross-design prior keyed to the
+    synth symptom), exactly as _record_resize_fix does for the place die-resize. check=
+    'orfs_stage' / class='synth' so symptom.from_fix_log_row keys it under the synth
+    abort symptom. Honest outcome: clean retry -> cleared; a retry that still aborts ->
+    no_change (negative learning)."""
+    proj = Path(entry["project_path"])
+    reports = proj / "reports"
+    reports.mkdir(parents=True, exist_ok=True)
+    runs = sorted(proj.glob("backend/RUN_*"))
+    run_tag = runs[-1].name if runs else "norun"
+    sid = "synthmem_" + hashlib.sha1(f"{proj}:{run_tag}".encode("utf-8")).hexdigest()[:12]
+    row = {
+        "fix_session_id": sid, "iter": 1, "strategy": "synth_memory_relax",
+        "check": "orfs_stage", "violation_class": "synth", "from_stage": "synth",
+        "before": 1, "after": 0 if cleared else 1,
+        "before_status": "fail", "after_status": "clean" if cleared else "fail",
+        "verdict": "cleared" if cleared else "no_change", "ts": _now(),
+    }
+    with (reports / "fix_log.jsonl").open("a", encoding="utf-8") as f:
+        f.write(json.dumps(row, sort_keys=True) + "\n")
+
+
 def _signoff_status(entry: dict) -> dict:
     out = {}
     for check in ("drc", "lvs"):
@@ -641,6 +751,20 @@ def process_one(led: Ledger, entry: dict, conn, *,
             _record_resize_fix(entry, cleared=(result == "clean"))
             _ingest(entry)
             return result
+        # Synth memory-cap (Yosys refuses to infer a memory larger than the default
+        # 4096-bit SYNTH_MEMORY_MAX_BITS): a RECOVERABLE synth abort -- raise the cap
+        # and re-flow ONCE, recorded as a learnable fix. The remedy is documented
+        # (SKILL.md:395, failure-patterns.md:1149) but the loop used to escalate it as
+        # 'unseen_crash', hiding 15 mechanically-fixable designs and a learnable recipe
+        # (2026-06-28 unseen_crash audit). Mirrors the FLW-0024 / PPL-0024 recoveries.
+        if (not _resized and entry.get("kind") != "ab_arm"
+                and _fail_stage(entry) == "synth" and _is_synth_memory_cap(entry)
+                and _raise_synth_memory_cap(entry)):
+            led.set_state(design, "fixing")
+            result = process_one(led, entry, conn, _resized=True)
+            _record_synth_mem_fix(entry, cleared=(result == "clean"))
+            _ingest(entry)
+            return result
         reason, notes = "unseen_crash", f"run_orfs rc={rc}"
         if entry.get("kind") != "ab_arm" and _fail_stage(entry) == "route":
             led.set_state(design, "fixing")
@@ -674,6 +798,28 @@ def process_one(led: Ledger, entry: dict, conn, *,
             reason = "pin_overflow_residual"
             notes = (f"PPL-0024 IO pins exceed die perimeter (rc={rc}); die enlargement "
                      f"(lower CORE_UTILIZATION) did not create enough pin positions")
+        elif (entry.get("kind") != "ab_arm" and _fail_stage(entry) == "synth"
+              and _is_synth_memory_cap(entry)):
+            # memory-cap that survived the cap raise (cells exceed even 65536-bit, or the
+            # cap was already there): an honest residual, NOT an unseen crash.
+            reason = "synth_memory_residual"
+            notes = (f"inferred memory exceeds SYNTH_MEMORY_MAX_BITS (rc={rc}); raising the "
+                     f"cap to {_SYNTH_MEM_BITS_RETRY} did not clear it (use a RAM macro)")
+        elif (entry.get("kind") != "ab_arm" and _fail_stage(entry) == "synth"
+              and _is_synth_missing_header(entry)):
+            # an unresolved `include -- the harvested RTL is INCOMPLETE (the header was
+            # never shipped upstream), not a crash. Honest, distinct from a mystery so
+            # the queue/learner are not told this is a novel synth symptom.
+            reason = "incomplete_missing_header"
+            notes = (f"synth abort (rc={rc}): unresolved `include -- harvested RTL is "
+                     f"missing a header (incomplete upstream; needs source completion)")
+        elif (entry.get("kind") != "ab_arm" and _fail_stage(entry) == "synth"
+              and _is_synth_timeout(entry)):
+            # yosys synthesis hit the run_orfs.sh wrapper timeout -- a large design, not a
+            # crash. Honest reason routes it to the ORFS_TIMEOUT / simplification runbook.
+            reason = "synth_timeout"
+            notes = (f"yosys synthesis timed out (rc={rc}); design too large to canonicalize "
+                     f"in the stage budget (raise ORFS_TIMEOUT or reduce SYNTH_MEMORY_MAX_BITS)")
         led.set_state(design, "escalated", reason=reason)
         if conn is not None:
             import escalations
