@@ -26,7 +26,7 @@ import re
 import subprocess
 import sys
 import threading
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 SKILL_ROOT = Path(__file__).resolve().parents[2]
@@ -1005,14 +1005,26 @@ def ab_drain(ledger_path: Path, *, n_ab_designs: int = 2,
     plan_arms_for_candidates(led, conn, n_ab_designs=n_ab_designs)
     pending = [e for e in led.pending() if e.get("kind") == "ab_arm"]
     workers = max_workers if max_workers is not None else ab_workers()
+    before = conn.execute("SELECT COUNT(*) FROM ab_trials").fetchone()[0]
+    # Judge INCREMENTALLY: a pair's verdict is recorded the instant BOTH its arms reach a
+    # terminal state, instead of waiting for the whole drain to finish. A drain bundles fast
+    # place arms with slow timing/large-rerun arms, and the old end-of-drain judge made a
+    # finished promotion wait hours on the slowest unrelated arm (2026-06-27 latency finding:
+    # wave 11 surfaced its place wins only after a ~12h drain). judge_finished_trials only
+    # acts on pairs whose arms are BOTH terminal (a still-running arm's pair is skipped) and
+    # is idempotent (it marks judged), so per-completion calls never partial-judge or
+    # double-record; the Ledger is in-memory + lock-guarded so the rescans are cheap.
     if workers > 1 and len(pending) > 1:
         with ThreadPoolExecutor(max_workers=workers) as ex:
-            list(ex.map(lambda e: _drain_arm(led, e, db_path), pending))
+            futs = [ex.submit(_drain_arm, led, e, db_path) for e in pending]
+            for f in as_completed(futs):
+                f.result()
+                judge_finished_trials(led, conn)
     else:
         for entry in pending:
             process_one(led, entry, conn)
-    before = conn.execute("SELECT COUNT(*) FROM ab_trials").fetchone()[0]
-    judge_finished_trials(led, conn)
+            judge_finished_trials(led, conn)
+    judge_finished_trials(led, conn)                 # final sweep (covers the empty-pending case)
     after = conn.execute("SELECT COUNT(*) FROM ab_trials").fetchone()[0]
     conn.close()
     return after - before
@@ -1062,8 +1074,15 @@ def _run_parallel(led: Ledger, conn, prev_heur: dict | None, *,
     plan_arms_for_candidates(led, conn)
     arms = [e for e in led.pending() if e.get("kind") == "ab_arm"]
     if arms:
+        # Judge INCREMENTALLY as each arm pair completes (2026-06-27 latency fix): a finished
+        # place win surfaces + promotes mid-drain instead of waiting on the slowest unrelated
+        # arm (a ~12h wave-11 drain hid its promotions until the end). judge_finished_trials
+        # skips pairs not BOTH-terminal and is idempotent, so per-completion calls are safe.
         with ThreadPoolExecutor(max_workers=max_workers) as ex:
-            list(ex.map(lambda e: _safe_process(led, e), arms))
+            futs = [ex.submit(_safe_process, led, e) for e in arms]
+            for f in as_completed(futs):
+                f.result()
+                judge_finished_trials(led, conn)
     judge_finished_trials(led, conn)
 
 
