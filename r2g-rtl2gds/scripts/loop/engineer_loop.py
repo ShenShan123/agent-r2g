@@ -134,6 +134,10 @@ def _run_flow(entry: dict) -> int:
 _PLACE_STRATEGIES = frozenset({"core_util_relief"})
 _TIMING_STRATEGIES = frozenset({"period_relax", "utilization_reduce",
                                 "backend_aware_synth_retune"})
+# synth_memory_relax is a SYNTH backend-abort recovery (raise SYNTH_MEMORY_MAX_BITS +
+# pair a die auto-size): its A/B arm applies the recipe up-front and flows once, like the
+# place/route backend-abort arms, and is judged on 'synth cleared' (2026-06-28).
+_SYNTH_STRATEGIES = frozenset({"synth_memory_relax"})
 # Strategies whose A/B arms CANNOT diverge (no real edit applied) — never plan a trial
 # for them (it can only ever be inconclusive). lvs_resolve_unknown re-inspects with
 # config_edits={} (a no-op), so arm A and arm B do byte-identical work.
@@ -156,6 +160,8 @@ def _symptom_check(conn, symptom_id: str | None, strategy: str | None = None) ->
         return "place"
     if strategy in _TIMING_STRATEGIES:
         return "timing"
+    if strategy in _SYNTH_STRATEGIES:
+        return "synth"
     if not symptom_id:
         return "both"
     row = conn.execute(
@@ -166,6 +172,8 @@ def _symptom_check(conn, symptom_id: str | None, strategy: str | None = None) ->
             return "route"
         if row[1] == "place":
             return "place"
+        if row[1] == "synth":
+            return "synth"
     return "both"
 
 
@@ -197,6 +205,14 @@ def _apply_recipe_strategy(entry: dict) -> None:
     - ROUTE (route_relief / route strategies): seed a fail route.json so diagnose can
       resolve the route strategy (no backend exists yet to extract from), then apply it.
     """
+    if entry.get("strategy") in _SYNTH_STRATEGIES:
+        # SYNTH backend abort: apply the SAME recovery as process_one's in-loop fix -- raise
+        # SYNTH_MEMORY_MAX_BITS AND pair an auto-sized low-util die so the FF-expanded design
+        # clears synth AND places. Arm A (control, no recipe) memcap-aborts at synth; arm B
+        # diverges by getting PAST synth (judged on 'synth cleared', not full signoff).
+        _raise_synth_memory_cap(entry)
+        _resize_to_core_util(entry, util=_SYNTH_MEM_CORE_UTIL)
+        return
     if entry.get("strategy") in _PLACE_STRATEGIES:
         # A PPL-0024 (pin-overflow) subject needs a PERIMETER-targeted die, not the cell-area
         # util lever -- a fixed 0.6x util step undershoots cell-tiny/pin-huge designs so arm B
@@ -702,13 +718,14 @@ def process_one(led: Ledger, entry: dict, conn, *,
     design = entry["design"]
     if entry.get("kind") == "ab_arm":
         _journal_ab_launch(entry)           # Tier B1 — advisory decision telemetry
-    # Backend-abort A/B arm (route congestion OR place FLW-0024 die-too-small): the
-    # flow itself fails at the backend stage, so the signoff "flow -> fix" model does
-    # not apply — route it through the dedicated apply-then-flow arm runner. A TIMING
-    # arm (check='timing') instead reaches a completed flow whose timing MISSES, so it
-    # falls through to the normal signoff path below and is fixed via fix_signoff
-    # --check timing (2026-06-17 route-relief; 2026-06-24 place + timing close).
-    if entry.get("kind") == "ab_arm" and entry.get("check") in ("route", "place"):
+    # Backend-abort A/B arm (route congestion OR place FLW-0024 die-too-small OR synth
+    # memcap): the flow itself fails at the backend stage, so the signoff "flow -> fix"
+    # model does not apply — route it through the dedicated apply-then-flow arm runner. A
+    # TIMING arm (check='timing') instead reaches a completed flow whose timing MISSES, so
+    # it falls through to the normal signoff path below and is fixed via fix_signoff
+    # --check timing (2026-06-17 route-relief; 2026-06-24 place + timing close; 2026-06-28
+    # synth memcap so synth_memory_relax can promote).
+    if entry.get("kind") == "ab_arm" and entry.get("check") in ("route", "place", "synth"):
         _process_backend_ab_arm(led, entry, conn)
         return None
     led.set_state(design, "flow")
@@ -1067,7 +1084,28 @@ def _ondisk_timing(project_path: str) -> tuple[str | None, float | None]:
     return tier, wns
 
 
-def _arm_metric(conn, project_path: str, *, timing: bool = False) -> dict | None:
+def _synth_cleared_ondisk(project_path: str) -> bool:
+    """True iff the arm's newest backend run got PAST synth (synth stage status 0). Arm A
+    (control) of a synth_memory_relax trial memcap-aborts at synth (status 2) -> False; arm
+    B (recipe: raise cap + die-pair) clears it -> True. The judge metric for a synth arm,
+    analogous to the timing arm's wns: judge on the symptom the recipe FIXES, since a
+    synth-recovered FF-memory design may still carry downstream DRC/LVS residuals that would
+    tie both arms on the generic is_success (2026-06-28)."""
+    logs = sorted(Path(project_path).glob("backend/RUN_*/stage_log.jsonl"))
+    if not logs:
+        return False
+    try:
+        rows = [json.loads(ln) for ln in logs[-1].read_text().splitlines() if ln.strip()]
+    except Exception:
+        return False
+    for r in rows:
+        if r.get("stage") == "synth":
+            return r.get("status") in (0, "0", "pass")
+    return False
+
+
+def _arm_metric(conn, project_path: str, *, timing: bool = False,
+                synth: bool = False) -> dict | None:
     """Latest run row for an arm dir -> the metric dict judge_repeated consumes
     (or None if the arm produced no judgeable run). outcome_score is captured as
     an ORDERING HINT only — the verdict never depends on it (invariant H4).
@@ -1099,6 +1137,11 @@ def _arm_metric(conn, project_path: str, *, timing: bool = False) -> dict | None
             # (2026-06-25). The verdict is the timing_check.json tier / ppa setup_wns.
             tier, wns = _ondisk_timing(project_path)
         success = (tier in ("clean", "minor")) or (wns is not None and wns >= 0)
+    elif synth:
+        # synth_memory_relax fixes the SYNTH memcap abort: judge on whether the flow got
+        # PAST synth, not full signoff (an FF-expanded design may carry downstream DRC/LVS
+        # residuals that would tie both arms on is_success — the timing-arm lesson).
+        success = _synth_cleared_ondisk(project_path)
     else:
         success = knowledge_db.is_success(r)
     return {"is_success": bool(success),
@@ -1123,7 +1166,8 @@ def judge_finished_trials(led: Ledger, conn) -> None:
         # A timing recipe's arms both reach a GDS (a timing miss never aborts the flow),
         # so judge on the ingested timing verdict (wns_ns/timing_tier), not is_success.
         timing = strat in _TIMING_STRATEGIES
-        samples = {arm: [_arm_metric(conn, e["project_path"], timing=timing)
+        synth = strat in _SYNTH_STRATEGIES
+        samples = {arm: [_arm_metric(conn, e["project_path"], timing=timing, synth=synth)
                          for e in entries]
                    for arm, entries in pair.items()}
         # If an arm produced NO judgeable run at all (incomplete clone/flow — see
