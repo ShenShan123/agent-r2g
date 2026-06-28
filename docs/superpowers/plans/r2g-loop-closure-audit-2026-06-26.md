@@ -321,3 +321,30 @@ not false), 6 `symmetric_matcher` (known KLayout noise), 1 `generic`, and the 1 
 **Open (iter-5):** confirm wave 15's re-queued designs reach a terminal verdict + the
 `synth_memory_relax` A/B trial records a WIN → `promoted(nangate45) > 7`; scale the re-queue to the
 remaining 11 memcap. Tail-blocking (FF-expanded flows are slow) still bounds throughput.
+
+### 2026-06-28 iteration 5 — found WHY synth_memory_relax never promoted: planning-loop fragility
+
+Across iters 1-4 the `synth_memory_relax` candidate kept "about to promote next wave" but stayed at
+**0 A/B trials** for 5+ hours of wave 15. Root cause (commit `ce13f97`): `plan_arms_for_candidates`
+called `ab_runner.plan_trial` with **no try/except**. `plan_trial` reads state that races the
+campaign's concurrent `heuristics.json`/ingest writes and throws TRANSIENTLY (caught in the wild as
+an intermittent `KeyError 'design'`; a clean re-run resolves the candidate's 2 subjects fine). One
+crashing candidate aborts the WHOLE planning loop → every candidate after it is never planned.
+`synth_memory_relax` is the **LAST of 33** pending candidates, so any transient crash earlier in the
+list stranded it on every drain. A *new* shape of the "ab_trials grows but a recipe never promotes"
+alarm — planning fragility, not arm non-divergence. Fix: isolate each candidate (skip + log a crash,
+stay `candidate`, re-plan next drain, never demote). TDD `test_plan_arms_isolation.py`; suite 826→827.
+The diagnostic that nailed it: the candidate IS in `pending_candidates`, `plan_trial` returns OK
+standalone, yet 0 ledger arm entries and 0 planning log lines (success appends silently, skips log →
+neither trace = the loop never reached it).
+
+**Second finding (deferred to iter-6): synth symptom is over-coarse.** Keyed only `{orfs_stage,
+synth}`, it conflates memcap/timeout/missing-header, so `plan_trial` resolves a timeout subject
+(`verilog_ethernet_arp`) for the memcap recipe → both arms time out (7200s) → inconclusive + ~8h
+wasted per drain. In-loop application is signature-gated (correct); only A/B subject selection is
+coarse. Fix = memcap-specific symptom predicate. Deferred (careful symptom-keying).
+
+Also cleaned up the orphaned iter-2 pilot `*_synth_me_*` arm dirs (8 dirs, no backend, from the
+pilot's separate ledger). **Open (iter-6):** with the planning isolation fixed, the campaign's next
+drain (wave 16+) plans + judges `synth_memory_relax` → expect a WIN (arm A memcap-abort loses to arm
+B) → `promoted(nangate45) > 7`; do the coarseness fix first to avoid the arp-timeout waste.

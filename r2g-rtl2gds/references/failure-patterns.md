@@ -2139,3 +2139,30 @@ in-memory AND after reload; a terminal judge-mark still sticks). Suite 798→801
 a prior-wave `judged=True`, a re-plan left `state=pending judged=True` and the judge's candidate list was
 empty — the re-run was invisible. The fix self-heals on the next fresh wave: its reload + re-plan clears
 `judged`, the large-pin arm re-runs the perimeter die, and the win is finally recorded → promotion.
+
+### Sub-variant: a crashing `plan_trial` strands every candidate after it (2026-06-28)
+
+A new shape of "`ab_trials` grows but a recipe never promotes" — root cause is **planning-loop
+fragility**, not arm non-divergence. `plan_arms_for_candidates` called `ab_runner.plan_trial(...)`
+with **no try/except**. `plan_trial` reads state that can race the campaign's concurrent
+`heuristics.json` / ingest writes and throw transiently (caught in the wild as an intermittent
+`KeyError 'design'`; a clean re-run of the same candidate resolves its subjects fine). One crashing
+candidate **aborts the entire planning loop**, so every candidate AFTER it is never planned on that
+drain. `synth_memory_relax` — the **LAST of 33 pending candidates** — sat at 0 A/B trials for hours:
+any transient crash earlier in the list blocked it every drain, so a perfectly-plannable recipe could
+never reach a verdict or promote. Tell-tale: a candidate is in `recipe_lifecycle.pending_candidates`,
+`plan_trial` succeeds when run standalone, yet there are **zero** arm entries for it in the ledger and
+**no** planning log line (success appends silently; the skip paths log — so *neither* trace means the
+loop never reached it). **Fix:** wrap `plan_trial` in try/except — a crashing candidate is skipped +
+logged (stays `candidate`, re-plans next drain), never aborts the loop, never demotes. Tests:
+`tests/test_plan_arms_isolation.py` (a crasher as the FIRST of two candidates no longer strands the
+second). Suite 826→827.
+
+**Related follow-up (symptom over-coarse, iter-6):** the synth-abort symptom is keyed only by
+`{check=orfs_stage, class=synth}`, so it conflates synth **memcap** / **timeout** / **missing-header**
+aborts under one `symptom_id`. `plan_trial` then resolves a timeout subject (`verilog_ethernet_arp`)
+for the memcap recipe `synth_memory_relax`, whose cap-raise can't help a timeout → both arms time out
+(7200s each) → inconclusive, wasting ~8h of arm flows per drain. The in-loop *application* is correctly
+signature-gated (`_is_synth_memory_cap`), so this is an A/B-efficiency bug, not a correctness one. The
+fix is a memcap-specific symptom predicate (or a recipe-applicability subject filter) — careful
+symptom-keying work, deferred to do deliberately.
