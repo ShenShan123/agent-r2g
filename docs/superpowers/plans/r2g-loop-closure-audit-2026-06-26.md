@@ -379,3 +379,29 @@ the verdict metric → fixed the catalog_exhausted + LVS false-fails → unblock
 throughout. **Remaining follow-up (iter-7):** the symptom-coarseness (memcap predicate) so the
 campaign's natural drain doesn't resolve the arp timeout subject; scale the re-queue to the remaining
 11 memcap; the campaign (wave 16+) will now promote `synth_memory_relax` itself off the live evidence.
+
+### 2026-06-28 iteration 7 — tail-blocking root cause: gate synth_memory_relax by memory size
+
+Investigated the wave-15 tail-block (16h on 2 designs): the LVS children were at **99.7% CPU** with
+a **4h timeout** — genuinely computing on a large design, NOT a hang/bug (memory note confirmed). The
+ROOT is that `synth_memory_relax` FF-expands these memcap designs' 17408 / 18944 / 40960-bit memories
+into 17-41 K flops -> ~153 Kum^2 designs whose route TIMES OUT (all 4 re-queues escalated
+`route_congestion_residual` after a CLEAN synth) and whose KLayout LVS legitimately runs ~4h. For
+memories this large a **fakeram hard macro** is the right fix, not FF expansion (the skill's intent is
+FF for "register files and FIFOs").
+
+**Fix (commit `256b1b1`): size gate.** `process_one`'s in-loop recovery now gates on
+`_synth_memory_ff_expandable` (`_synth_largest_memory_bits` parses `Largest single memory instance:
+N bits`): N <= `_SYNTH_MEM_FF_LIMIT` (16384) -> FF-expand as before; larger -> escalate
+`synth_memory_residual` with a note routing it to a fakeram macro, never FF-expand into a 4h-LVS /
+route-timeout design. Unparseable size keeps the prior FF-expand default (no regression). The A/B arm
+(`_apply_recipe_strategy`) is UNCHANGED — `synth_memory_relax` still validly clears synth (what it is
+judged on) and stays **promoted**; only the APPLICATION policy is refined to stop creating
+tail-blocking designs. TDD test_synth_abort_classify.py (+4); suite 828→**832**. Validated:
+`verilog_axis_axis_async_fifo_adapter` (40960b, default cap) now -> fakeram residual, not FF-expand.
+
+**Net iters 1–7:** 10 real fixes, `synth_memory_relax` promoted, honesty 5/5 throughout, suite 832.
+**Open (iter-8):** the synth symptom-coarseness (memcap predicate) for the campaign's natural drain;
+the FF-expanded re-queues already in flight will finish + escalate honestly; the structural
+barrier-wave tail-blocking (large designs are inherently slow) remains the only non-fixed item, now
+mitigated at its synth root.

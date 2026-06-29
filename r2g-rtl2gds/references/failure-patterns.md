@@ -1193,6 +1193,16 @@ loop previously collapsed EVERY early synth abort into `unseen_crash` — 15 of 
 Validated on `verilog_axis_axis_fifo`: default-cap synth aborts in 3 s; cap=65536 expands the
 memory to flops and synth proceeds. Tests: `tests/test_synth_abort_classify.py`.
 
+**Size gate (2026-06-28 iter-7).** FF-expansion is the RIGHT fix only for MODEST memories. A large
+memory (this corpus: 17408 / 18944 / 40960 bits) FF-expands into 17-41 K flops -> a ~153 Kum^2 design
+whose route TIMES OUT and whose KLayout LVS legitimately runs ~4h at 99% CPU, tail-blocking the
+campaign on a design that mostly never signs off (all 4 memcap re-queues escalated
+`route_congestion_residual` after a CLEAN synth). The in-loop recovery now gates on
+`_synth_memory_ff_expandable` (parses `Largest single memory instance: N bits`): N <=
+`_SYNTH_MEM_FF_LIMIT` (16384) -> FF-expand; larger -> escalate `synth_memory_residual` routed to a
+fakeram HARD MACRO, never FF-expand into a tail-blocking design. The A/B arm is unchanged (the recipe
+still validly clears synth and stays promoted; only the APPLICATION policy is refined).
+
 ### Missing `include file
 
 **Symptoms:**
