@@ -405,3 +405,18 @@ tail-blocking designs. TDD test_synth_abort_classify.py (+4); suite 828→**832*
 the FF-expanded re-queues already in flight will finish + escalate honestly; the structural
 barrier-wave tail-blocking (large designs are inherently slow) remains the only non-fixed item, now
 mitigated at its synth root.
+
+### 2026-06-28 iteration 8 — pushed all 17 commits; re-queued STALE pin_overflow escalations
+
+Pushed iters 1–7 (17 commits, 996b0ed..3cfe16f) to origin/main. Then a fresh bug-hunt in the
+`pin_overflow_residual` bucket (30) found they are all **STALE**: created 2026-06-26 23:xx, BEFORE
+the perimeter-targeted die fix `a359a2c` (2026-06-27 22:43), so they escalated under the OLD
+util-only PPL-0024 handler (their configs still show `CORE_UTILIZATION`, not an explicit perimeter
+die). The perimeter fix sizes a die to the placer's exact demand (iccad2015_unit04: 6761 pins →
+3786um perimeter → a ~1109um die that fits them) and is tested + proven-live on
+`verilog_ethernet_ip_demux`. So these are recoverable by re-queuing — the same
+stale-escalation-predating-a-fix pattern as the synth re-queue. Re-queued a pilot of 8 real-IP
+`verilog_*` designs (smaller/standard, less tail-block risk than the 6761-pin contest designs);
+wave 16 (fresh process, all fixes loaded) recovers them via the perimeter die. **VERIFY iter-9:** the
+8 reach clean/honest-residual; scale to the 12 iccad2015 + 10 others if clean. Wave 15's tail is
+down to 1 design (wb2axip_axivdisplay LVS hit its 4h timeout); wave 16 imminent.
