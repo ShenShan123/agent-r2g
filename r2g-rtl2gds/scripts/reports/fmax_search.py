@@ -206,6 +206,8 @@ def search(project: Path, platform: str, *, seed_period: float,
         res["fmax_predicted_signoff_period"] = res["t_star"]
     else:
         report["labels"] = [f"status: {res['status']}"]
+        if res.get("reason"):                     # surface WHY (floorplan_unconstrained, ...)
+            report["reason"] = res["reason"]
     out = Path(project) / "reports" / "fmax_search.json"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(report, indent=2), encoding="utf-8")

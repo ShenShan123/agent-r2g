@@ -102,3 +102,34 @@ def test_search_loop_inconclusive_propagates():
         return {"place_ws": None, "place_tns": None, "status": "inconclusive"}
     res = fm.search_loop(seed_period=10.0, floorplan_probe=fp, place_probe=pl, model=None)
     assert res["status"] == "inconclusive"
+
+
+# ── 2026-06-29: null floorplan slack must NOT abort to 'error' (26 clean designs lost Fmax) ──
+def test_search_loop_falls_back_to_place_on_null_floorplan():
+    """A pre-place floorplan stage that yields NO slack (common for sequential designs) must
+    fall back to the place root-find, not abort to 'error'."""
+    _, pl = _oracle(true_fmax_period=5.0)
+    res = fm.search_loop(seed_period=10.0, floorplan_probe=lambda p: None,
+                         place_probe=pl, model=None)
+    assert res["status"] == "ok"                       # recovered via the place loop
+    assert res["t_star"] == pytest.approx(5.1, abs=0.2)
+
+
+def test_search_loop_unconstrained_floorplan_is_not_error():
+    """A genuinely unconstrained design (no constraining timing path, e.g. combinational) is
+    'unconstrained' -- an honest 'no Fmax to search', NOT 'error'."""
+    _, pl = _oracle(true_fmax_period=5.0)
+    res = fm.search_loop(seed_period=10.0, floorplan_probe=lambda p: 1e31,  # > UNCONSTRAINED
+                         place_probe=pl, model=None)
+    assert res["status"] == "unconstrained"
+    assert res.get("reason") == "floorplan_unconstrained"
+
+
+def test_search_loop_place_null_slack_is_inconclusive_not_crash():
+    """place yields a null slack without classifying inconclusive -> honest 'inconclusive',
+    never a None-arithmetic crash."""
+    res = fm.search_loop(seed_period=10.0, floorplan_probe=lambda p: (p - 5.0) + 0.3,
+                         place_probe=lambda p: {"place_ws": None, "place_tns": None, "status": "pass"},
+                         model=None)
+    assert res["status"] == "inconclusive"
+    assert res.get("reason") == "place_no_slack"

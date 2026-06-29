@@ -102,21 +102,32 @@ def search_loop(seed_period, floorplan_probe, place_probe, model=None, *,
 
     fp_ws = floorplan_probe(t_ref)
     log.append({"stage": "floorplan", "period": t_ref, "ws": fp_ws})
-    if fp_ws is None or fp_ws > UNCONSTRAINED:
-        return {"status": "error", "reason": "floorplan_unconstrained", "log": log}
-
-    fmax_fp = estimate_fmax_fp(t_ref, fp_ws)
-    if abs(fmax_fp - t_ref) > 0.5 * t_ref:
-        # Bad seed: jump to the corrected center and re-probe floorplan once.
-        t_ref = max(fmax_fp + d_fp_fin(fmax_fp, model), floor)
-        fp_ws = floorplan_probe(t_ref)
-        log.append({"stage": "floorplan_restart", "period": t_ref, "ws": fp_ws})
-        if fp_ws is None or fp_ws > UNCONSTRAINED:
-            return {"status": "error", "reason": "floorplan_unconstrained", "log": log}
+    if fp_ws is not None and fp_ws > UNCONSTRAINED:
+        # No constraining timing path (e.g. combinational logic): there is no Fmax to search.
+        # An HONEST distinct status -- NOT 'error' (which read as a tool failure and silently
+        # gave 26 CLEAN designs no Fmax at all; 2026-06-29).
+        return {"status": "unconstrained", "reason": "floorplan_unconstrained", "log": log}
+    if fp_ws is None:
+        # The pre-place floorplan stage yielded NO slack (common for sequential designs whose
+        # timing is only meaningful post-placement) -> do NOT abort: skip the floorplan
+        # early-look and seed the place root-find from the seed period, which reads the more
+        # reliable POST-PLACE slack (recovers Fmax for r8051_core, RISC-V cores, ...; 2026-06-29).
+        t_ref = max(float(seed_period), floor)
+    else:
         fmax_fp = estimate_fmax_fp(t_ref, fp_ws)
-
-    # Bracket center = predicted-signoff closing period (pre-absorb erosion).
-    t_ref = max(fmax_fp + d_fp_fin(fmax_fp, model), floor)
+        if abs(fmax_fp - t_ref) > 0.5 * t_ref:
+            # Bad seed: jump to the corrected center and re-probe floorplan once.
+            t_ref = max(fmax_fp + d_fp_fin(fmax_fp, model), floor)
+            fp_ws = floorplan_probe(t_ref)
+            log.append({"stage": "floorplan_restart", "period": t_ref, "ws": fp_ws})
+            if fp_ws is not None and fp_ws > UNCONSTRAINED:
+                return {"status": "unconstrained", "reason": "floorplan_unconstrained", "log": log}
+            fmax_fp = estimate_fmax_fp(t_ref, fp_ws) if fp_ws is not None else None
+        if fmax_fp is None:                       # restart also null -> fall back to seed period
+            t_ref = max(float(seed_period), floor)
+        else:
+            # Bracket center = predicted-signoff closing period (pre-absorb erosion).
+            t_ref = max(fmax_fp + d_fp_fin(fmax_fp, model), floor)
     if tol is None:
         tol = max(0.1, 0.02 * t_ref)
 
@@ -127,9 +138,14 @@ def search_loop(seed_period, floorplan_probe, place_probe, model=None, *,
                     "ws": r.get("place_ws"), "status": r.get("status")})
         if r.get("status") == "inconclusive":
             return {"status": "inconclusive", "period": t_ref, "log": log}
+        place_ws = r.get("place_ws")
+        if place_ws is None:
+            # place yielded no slack but did not classify inconclusive -> cannot root-find; honest
+            return {"status": "inconclusive", "reason": "place_no_slack", "period": t_ref, "log": log}
+        if place_ws > UNCONSTRAINED:
+            return {"status": "unconstrained", "reason": "place_unconstrained", "period": t_ref, "log": log}
         if r.get("status") == "pass":
             last_pass = t_ref
-        place_ws = r.get("place_ws")
         t_next = (t_ref - place_ws) + d_pl_fin(t_ref, model)
         if abs(t_next - t_ref) < tol:
             t_ref = max(t_next, floor)
