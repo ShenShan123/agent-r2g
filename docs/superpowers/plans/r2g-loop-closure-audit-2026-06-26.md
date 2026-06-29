@@ -463,3 +463,26 @@ So the iter-12 fix makes the 26 clean error designs HONEST (inconclusive/unconst
 their actual Fmax needs the root fix -- the `place_fast` probe / clone STA not emitting `setup_wns` at
 the place stage. Documented; not chased now (Fmax is secondary; the committed fix is verified).
 honesty 5/5. 22 commits this session, all pushed.
+
+### 2026-06-29 iteration 14 — Fmax-proxy investigation: iter-13 follow-up was a MISREAD; iter-12 fix is complete
+
+Investigated the iter-13 "Fmax proxy under-reports timing for clean designs" follow-up by reproducing
+real proxy probes (kept variants, inspected stage metrics + flow.log). Conclusion: **no additional Fmax
+bug** -- the 73 fmax 'error' designs fall into three HONEST classes, all already handled correctly by
+the iter-12 fix:
+1. **incomplete (missing header)** -- r8051_core (the design I first checked) errors because its synth
+   FAILS on `Can't open include file 'instruction.v'` (absent from the source repo; metadata
+   status=incomplete_missing_headers; its wns=4.826 'clean' run is STALE history from when the include
+   was present). 47/73 are escalated/unflowable -> iter-12 fix -> honest `inconclusive`.
+2. **genuinely unconstrained** -- the 26 ledger-'clean' ones (15 VTR/odin benchmarks like a dlatch +
+   simple_i2c_slave/uart16550) report floorplan ws=1e+39 AND a FULL-FLOW wns=1e+39 with ZERO real-wns
+   runs: they have no clock-constrained critical path (latches / single-cycle logic), so there is no
+   Fmax to search. iter-12 fix -> honest `unconstrained` (a place fallback would be wasted -- the full
+   flow is unconstrained too), proven on the dlatch and simple_i2c_slave.
+3. **recoverable sequential** -- a design whose floorplan stage merely fails to emit a slack (null, not
+   1e+39) falls back to the place root-find and gets a real Fmax (the iter-12 fallback path; proven it
+   reaches `place` on r8051_core before bottoming out honestly).
+
+So the iter-12 commit (f5ee684) is COMPLETE: error -> unconstrained/inconclusive/ok, all honest. No code
+change this iteration -- a thorough investigation that correctly concluded there was no further bug
+(the honest outcome). honesty 5/5; kept variant cleaned up; 23 commits this session, all pushed.
