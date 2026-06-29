@@ -236,3 +236,65 @@ def test_synth_timeout_escalates_timeout_not_unseen(tmp_path, monkeypatch):
     led = _Led()
     el.process_one(led, _entry(p), None)
     assert [r for (s, r) in led.states if s == "escalated"] == ["synth_timeout"]
+
+
+# ── memory-size gate: FF-expand modest memories, fakeram (residual) for large ones ──
+def _seed_memcap_with_size(p, bits):
+    run = p / "backend" / "RUN_2026-06-28_00-00-00"
+    run.mkdir(parents=True)
+    (run / "stage_log.jsonl").write_text('{"stage":"synth","status":2}\n')
+    (run / "flow.log").write_text(
+        f"Largest single memory instance: {bits} bits (module m)\n"
+        "Error: Synthesized memory size 4096 exceeds SYNTH_MEMORY_MAX_BITS\n")
+
+
+def test_synth_largest_memory_bits_parses(tmp_path):
+    p = _mk_project(tmp_path)
+    _seed_memcap_with_size(p, 40960)
+    assert el._synth_largest_memory_bits({"project_path": str(p)}) == 40960
+    assert el._synth_memory_ff_expandable({"project_path": str(p)}) is False   # > limit
+
+
+def test_synth_memory_ff_expandable_modest_and_unparseable(tmp_path):
+    p = _mk_project(tmp_path)
+    _seed_memcap_with_size(p, 8192)
+    assert el._synth_memory_ff_expandable({"project_path": str(p)}) is True    # <= limit
+    # unparseable size -> default expandable (do not regress the prior FF-expand behavior)
+    (p / "backend" / "RUN_2026-06-28_00-00-00" / "flow.log").write_text(
+        "Error: Synthesized memory size 4096 exceeds SYNTH_MEMORY_MAX_BITS\n")
+    assert el._synth_largest_memory_bits({"project_path": str(p)}) is None
+    assert el._synth_memory_ff_expandable({"project_path": str(p)}) is True
+
+
+def test_large_memcap_escalates_fakeram_not_ff_expand(tmp_path, monkeypatch):
+    """A memcap whose memory is too LARGE to FF-expand must NOT raise the cap (FF expansion
+    would tail-block on a 4h-LVS route-timeout design); escalate synth_memory_residual
+    routed to a fakeram macro -- never FF-expand it (2026-06-28 iter-7)."""
+    p = _mk_project(tmp_path)
+    _seed_memcap_with_size(p, 40960)
+    flows = {"n": 0}
+    monkeypatch.setattr(el, "_run_flow", lambda e: (flows.__setitem__("n", flows["n"] + 1) or 2))
+    monkeypatch.setattr(el, "_ingest", lambda e: None)
+    monkeypatch.setattr(el, "_fail_stage", lambda e: "synth")
+    led = _Led()
+    el.process_one(led, _entry(p), None)
+    assert flows["n"] == 1                                       # NO recovery retry
+    assert [r for (s, r) in led.states if s == "escalated"] == ["synth_memory_residual"]
+    assert "SYNTH_MEMORY_MAX_BITS" not in (p / "constraints" / "config.mk").read_text()
+
+
+def test_modest_memcap_still_ff_expands_and_recovers(tmp_path, monkeypatch):
+    """Regression: a MODEST memcap (<= limit) still FF-expands + recovers (the gate must
+    not block the cases the recipe was built for)."""
+    p = _mk_project(tmp_path)
+    _seed_memcap_with_size(p, 8192)
+    flows = {"n": 0}
+    monkeypatch.setattr(el, "_run_flow",
+                        lambda e: (flows.__setitem__("n", flows["n"] + 1) or (2 if flows["n"] == 1 else 0)))
+    monkeypatch.setattr(el, "_ingest", lambda e: None)
+    monkeypatch.setattr(el, "_fail_stage", lambda e: "synth" if flows["n"] <= 1 else None)
+    monkeypatch.setattr(el, "_signoff_status", lambda e: {"drc": "clean", "lvs": "clean"})
+    monkeypatch.setattr(el, "_mark_clean", lambda led, conn, d, note: None)
+    el.process_one(_Led(), _entry(p), None)
+    assert flows["n"] == 2                                       # FF-expanded + retried
+    assert "SYNTH_MEMORY_MAX_BITS = 65536" in (p / "constraints" / "config.mk").read_text()

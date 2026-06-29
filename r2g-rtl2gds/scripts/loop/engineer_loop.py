@@ -613,6 +613,32 @@ def _is_synth_memory_cap(entry: dict) -> bool:
     return "exceeds SYNTH_MEMORY_MAX_BITS" in _newest_flow_log(entry)
 
 
+# Above this many bits, FF-expanding the memory is the WRONG fix: it inflates the design
+# into thousands of flops (a 17-41 Kbit memory -> a ~153 Kum^2 design) whose route TIMES OUT
+# and whose KLayout LVS legitimately runs ~4h at 99% CPU -- tail-blocking the campaign for a
+# design that mostly does not even sign off. Such a memory needs a fakeram HARD MACRO, not FF
+# expansion (the skill's own intent is FF for "register files and FIFOs"). The recipe stays
+# valid + promoted (it DOES clear the synth memcap; that is what the A/B arm validates); we
+# only refine the in-loop APPLICATION policy to escalate these honestly (2026-06-28 iter-7,
+# after the 17408/18944/40960-bit memcap re-queues tail-blocked wave 15 on 4h LVS).
+_SYNTH_MEM_FF_LIMIT = 16384
+
+
+def _synth_largest_memory_bits(entry: dict) -> int | None:
+    """Largest inferred memory size (bits) from the yosys log's 'Largest single memory
+    instance: N bits' line, or None if absent/unparseable. Lets the loop FF-expand only
+    modest memories and route a large one to a fakeram macro instead."""
+    m = re.findall(r"Largest single memory instance:\s*(\d+)\s*bits", _newest_flow_log(entry))
+    return max(int(x) for x in m) if m else None
+
+
+def _synth_memory_ff_expandable(entry: dict) -> bool:
+    """True iff the memcap is small enough that FF-expansion is the right fix (<= the FF
+    limit, or the size is unparseable -> keep the prior FF-expand default, do not regress)."""
+    n = _synth_largest_memory_bits(entry)
+    return n is None or n <= _SYNTH_MEM_FF_LIMIT
+
+
 def _is_synth_missing_header(entry: dict) -> bool:
     """True if synth aborted on an unresolved `include (Yosys 'Can't open include
     file'): the harvested RTL never shipped the header -- genuinely INCOMPLETE upstream
@@ -794,6 +820,7 @@ def process_one(led: Ledger, entry: dict, conn, *,
         # (2026-06-28 unseen_crash audit). Mirrors the FLW-0024 / PPL-0024 recoveries.
         if (not _resized and entry.get("kind") != "ab_arm"
                 and _fail_stage(entry) == "synth" and _is_synth_memory_cap(entry)
+                and _synth_memory_ff_expandable(entry)
                 and _raise_synth_memory_cap(entry)):
             # Pair the cap raise with an auto-sized low-util die: the FF-expanded memory
             # bloats the design (a 4096->65536-bit RAM is ~16x the cells), so a fixed
@@ -850,11 +877,20 @@ def process_one(led: Ledger, entry: dict, conn, *,
                      f"(lower CORE_UTILIZATION) did not create enough pin positions")
         elif (entry.get("kind") != "ab_arm" and _fail_stage(entry) == "synth"
               and _is_synth_memory_cap(entry)):
-            # memory-cap that survived the cap raise (cells exceed even 65536-bit, or the
-            # cap was already there): an honest residual, NOT an unseen crash.
+            # memory-cap NOT FF-expanded -- either the memory is too LARGE to FF-expand
+            # (> _SYNTH_MEM_FF_LIMIT: FF expansion would inflate it into thousands of flops,
+            # a design that route-times-out + runs ~4h LVS and mostly never signs off -- it
+            # needs a fakeram HARD MACRO), or the cap raise did not clear it. Either way an
+            # honest residual, NOT an unseen crash, routed to the fakeram lever.
+            _mem = _synth_largest_memory_bits(entry)
             reason = "synth_memory_residual"
-            notes = (f"inferred memory exceeds SYNTH_MEMORY_MAX_BITS (rc={rc}); raising the "
-                     f"cap to {_SYNTH_MEM_BITS_RETRY} did not clear it (use a RAM macro)")
+            if _mem is not None and _mem > _SYNTH_MEM_FF_LIMIT:
+                notes = (f"inferred memory {_mem} bits > FF-expand limit {_SYNTH_MEM_FF_LIMIT} "
+                         f"(rc={rc}); FF expansion would tail-block on a route-timeout/4h-LVS "
+                         f"design -- use a fakeram hard macro")
+            else:
+                notes = (f"inferred memory exceeds SYNTH_MEMORY_MAX_BITS (rc={rc}); raising the "
+                         f"cap to {_SYNTH_MEM_BITS_RETRY} did not clear it (use a RAM macro)")
         elif (entry.get("kind") != "ab_arm" and _fail_stage(entry) == "synth"
               and _is_synth_missing_header(entry)):
             # an unresolved `include -- the harvested RTL is INCOMPLETE (the header was
