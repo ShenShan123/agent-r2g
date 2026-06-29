@@ -119,10 +119,25 @@ def _script(env_key: str, default: Path) -> str:
     return os.environ.get(env_key, str(default))
 
 
+_SYNTH_ARM_TIMEOUT = 1800   # synth A/B arm: bound the synth stage (a memcap arm B's
+                            # FF-expanded synth is minutes; a wrong timeout subject won't burn 2h)
+
+
 def _run_flow(entry: dict) -> int:
+    env = os.environ.copy()
+    # A SYNTH backend-abort A/B arm is judged ONLY on 'synth cleared' (_arm_metric synth=True),
+    # so it does NOT need to flow place/route -- run synth-ONLY. arm B (recipe) clears synth in
+    # MINUTES, vs the HOURS the FF-expanded memory takes to place/route -- which it route-fails
+    # anyway (the recovered memcap designs escalate route_congestion_residual after a successful
+    # synth). This makes the synth A/B trial fast AND bounds a wrong-but-resolved synth-timeout
+    # subject's cost via a tight stage timeout (2026-06-28; the symptom-coarseness that resolves
+    # a timeout subject for the memcap recipe is the deeper follow-up).
+    if entry.get("kind") == "ab_arm" and entry.get("check") == "synth":
+        env["ORFS_STAGES"] = "synth"
+        env["ORFS_TIMEOUT"] = str(_SYNTH_ARM_TIMEOUT)
     return subprocess.run(
         ["bash", _script("R2G_LOOP_RUN_FLOW", FLOW / "run_orfs.sh"),
-         entry["project_path"], entry["platform"]]).returncode
+         entry["project_path"], entry["platform"]], env=env).returncode
 
 
 # Recipe strategy classes the inline A/B harness drives through a DEDICATED divergent

@@ -113,6 +113,34 @@ class _RowConn:
         return C()
 
 
+# ── synth A/B arm runs SYNTH-ONLY (judged on synth-cleared, not full signoff) ──
+def test_synth_arm_runs_synth_only(tmp_path, monkeypatch):
+    import subprocess
+    captured = {}
+
+    class _R:
+        returncode = 0
+    def fake_run(cmd, *a, **kw):
+        captured["env"] = kw.get("env") or {}
+        return _R()
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    # a SYNTH ab_arm -> synth-only + bounded timeout
+    el._run_flow({"project_path": str(tmp_path), "platform": "nangate45",
+                  "kind": "ab_arm", "check": "synth", "strategy": "synth_memory_relax"})
+    assert captured["env"].get("ORFS_STAGES") == "synth"
+    assert captured["env"].get("ORFS_TIMEOUT") == str(el._SYNTH_ARM_TIMEOUT)
+
+    # a NORMAL design (or a place/route arm) -> full flow, no stage restriction
+    captured.clear()
+    el._run_flow({"project_path": str(tmp_path), "platform": "nangate45"})
+    assert "ORFS_STAGES" not in captured["env"]
+    captured.clear()
+    el._run_flow({"project_path": str(tmp_path), "platform": "nangate45",
+                  "kind": "ab_arm", "check": "place", "strategy": "core_util_relief"})
+    assert "ORFS_STAGES" not in captured["env"]
+
+
 # ── end-to-end (flows-free): a synth A/B pair records a WIN so the recipe can promote ──
 def test_synth_ab_trial_records_win(tmp_path, monkeypatch):
     import ab_runner
