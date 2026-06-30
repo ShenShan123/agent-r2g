@@ -1,5 +1,6 @@
 """Tests for the Fmax search orchestrator (I/O parts mocked)."""
 from __future__ import annotations
+import pytest
 import fmax_search as fs
 
 
@@ -58,6 +59,78 @@ def test_search_with_injected_probes_writes_report(tmp_path, monkeypatch):
     assert rpt["winner"]["period"] == result["t_star"]
     assert "Fmax_predicted_signoff" in rpt["labels"][0]
     assert any("CTS-skew-unmodeled" in l for l in rpt["labels"])
+
+
+def _mk_base(tmp_path):
+    base = tmp_path / "design_cases" / "alu"
+    (base / "constraints").mkdir(parents=True)
+    (base / "reports").mkdir(parents=True)
+    (base / "constraints" / "config.mk").write_text("export DESIGN_NAME = alu\n", encoding="utf-8")
+    (base / "constraints" / "constraint.sdc").write_text("set clk_period 10.0\n", encoding="utf-8")
+    return base
+
+
+# ---- BUG #3 (2026-06-30): asap7 liberty time_unit=1ps -> Fmax must be normalized to GHz ----
+
+def test_platform_time_unit_ns():
+    assert fs._platform_time_unit_ns("asap7") == 0.001       # 1ps
+    assert fs._platform_time_unit_ns("nangate45") == 1.0     # 1ns
+    assert fs._platform_time_unit_ns("sky130hd") == 1.0
+    assert fs._platform_time_unit_ns("unknown_future") == 1.0  # safe default
+
+
+def test_build_labels_nangate45_unchanged():
+    # ns platform (tu=1.0): identical to the historical behavior (1/t_star GHz, period t_star ns).
+    res = {"t_star": 5.0, "t_place_proxy": 4.5, "fmax_place_proxy": 1.0 / 4.5}
+    labels = fs.build_labels(res, "default-static", False, 1.0)
+    assert "0.2" in labels[0] and "period 5 ns" in labels[0]   # 1/5 = 0.2 GHz
+
+
+def test_build_labels_asap7_normalizes_1000x():
+    # asap7 (tu=0.001): t_star=409.6 is PICOSECONDS -> 0.4096 ns -> 2.441 GHz, NOT 0.00244.
+    res = {"t_star": 409.6, "t_place_proxy": 380.0, "fmax_place_proxy": 1.0 / 380.0}
+    labels = fs.build_labels(res, "default-static", False, 0.001)
+    assert "2.441" in labels[0], labels[0]        # 1/(409.6*0.001) GHz
+    assert "0.4096" in labels[0], labels[0]        # period in ns
+    assert "0.00244" not in labels[0]              # the 1000x-low bug value is GONE
+
+
+def test_search_asap7_records_realistic_ghz(tmp_path):
+    import json, fmax_model as fm
+    base = _mk_base(tmp_path)
+    # True closing period 400 in the platform STA unit (ps for asap7).
+    def fp(period): return (period - 400.0) + 0.3
+    def pl(period):
+        ws = period - 400.0
+        return {"place_ws": ws, "place_tns": 0.0, "status": fm.classify_probe(ws, 0.0, period)}
+    result = fs.search(base, platform="asap7", seed_period=10.0,
+                       floorplan_probe=fp, place_probe=pl, model=None,
+                       model_provenance="default-static")
+    assert result["status"] == "ok"
+    w = json.loads((base / "reports" / "fmax_search.json").read_text())["winner"]
+    # raw STA-unit period preserved (this is what rewrite_clk_period writes to the SDC + seeds next search)
+    assert w["period"] == result["t_star"]
+    # human-facing fields normalized to ns/GHz via the 1ps factor
+    assert w["period_ns"] == pytest.approx(w["period"] * 0.001)
+    assert w["fmax_predicted_signoff"] == pytest.approx(1.0 / (w["period"] * 0.001))
+    # realistic 7nm Fmax (~GHz), NOT the 1000x-low ~0.002 GHz the bug produced
+    assert w["fmax_predicted_signoff"] > 1.0
+
+
+def test_search_nangate45_fmax_unchanged(tmp_path):
+    import json, fmax_model as fm
+    base = _mk_base(tmp_path)
+    def fp(period): return (period - 5.0) + 0.3
+    def pl(period):
+        ws = period - 5.0
+        return {"place_ws": ws, "place_tns": 0.0, "status": fm.classify_probe(ws, 0.0, period)}
+    result = fs.search(base, platform="nangate45", seed_period=10.0,
+                       floorplan_probe=fp, place_probe=pl, model=None,
+                       model_provenance="default-static")
+    w = json.loads((base / "reports" / "fmax_search.json").read_text())["winner"]
+    # ns platform: tu=1.0 -> period_ns == period and fmax == 1/period (byte-identical behavior)
+    assert w["period_ns"] == pytest.approx(w["period"])
+    assert w["fmax_predicted_signoff"] == pytest.approx(1.0 / w["period"])
 
 
 def test_confirm_grid_picks_looser_pass_edge():

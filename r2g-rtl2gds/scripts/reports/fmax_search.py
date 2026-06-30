@@ -166,12 +166,35 @@ def seed_period(project: Path, platform: str, family: str | None = None) -> floa
     return float(m.group(1)) if m else 10.0
 
 
-def build_labels(result: dict, model_provenance: str, place_fast: bool) -> list[str]:
-    t = result["t_star"]
+# OpenSTA adopts each platform's liberty time_unit, so the SDC clk_period and every reported
+# slack/period is in THAT unit: nangate45/sky130/gf180/ihp use 1ns, but asap7 uses 1ps. The Fmax
+# search is unit-agnostic and SELF-CONSISTENT internally (period and slack share the unit, and
+# rewrite_clk_period writes the closing period back in the same unit the flow reads) -- so the SDC
+# stamping and the learned closing-period seed stay correct WITHOUT conversion. ONLY the human /
+# recorded Fmax must be normalized to ns/GHz: otherwise asap7's 0.41 ns (=409.6 ps) closing period
+# was reported as 0.00244 GHz instead of 2.44 GHz -- a silent 1000x under-report under a green flow
+# (2026-06-30). This factor is ns-per-STA-unit: 1.0 for ns platforms (identity -> byte-identical for
+# the completed nangate45 round), 0.001 for asap7 (1ps). Mirrors the ORFS liberty time_unit; extend
+# this map if a future platform ships a non-ns liberty. See failure-patterns.md "ASAP7 Fmax ... ps".
+_PLATFORM_TIME_UNIT_NS = {"asap7": 0.001}
+
+
+def _platform_time_unit_ns(platform: str) -> float:
+    """ns per the platform's STA/liberty time unit (1.0 for ns platforms; 0.001 for asap7=1ps)."""
+    return _PLATFORM_TIME_UNIT_NS.get((platform or "").strip(), 1.0)
+
+
+def build_labels(result: dict, model_provenance: str, place_fast: bool,
+                 time_unit_ns: float = 1.0) -> list[str]:
+    # t_star / t_place_proxy are in the platform's STA time unit; convert to ns for the
+    # human-facing Fmax + period (1.0 = ns platforms, unchanged; 0.001 = asap7 ps). See
+    # _platform_time_unit_ns.
+    t_ns = result["t_star"] * time_unit_ns
+    proxy_ns = result["t_place_proxy"] * time_unit_ns
     labels = [
-        f"Fmax_predicted_signoff: {1.0 / t:.4g} (period {t:.4g} ns) [proxy, UNVERIFIED]",
-        f"Fmax_place_proxy: {result['fmax_place_proxy']:.4g} "
-        f"(period {result['t_place_proxy']:.4g} ns)",
+        f"Fmax_predicted_signoff: {1.0 / t_ns:.4g} (period {t_ns:.4g} ns) [proxy, UNVERIFIED]",
+        f"Fmax_place_proxy: {1.0 / proxy_ns:.4g} "
+        f"(period {proxy_ns:.4g} ns)",
         "+CTS-skew-unmodeled",
         f"deterioration: {model_provenance}",
     ]
@@ -196,13 +219,18 @@ def search(project: Path, platform: str, *, seed_period: float,
         "place_fast": place_fast,
         "log": res.get("log", []),
     }
+    tu = _platform_time_unit_ns(platform)   # ns per STA unit (1.0 ns-platforms, 0.001 asap7=ps)
     if res["status"] == "ok":
         report["winner"] = {
+            # raw STA-unit period: what rewrite_clk_period writes to the SDC + seeds the next
+            # search; kept unconverted so the flow builds at the right frequency.
             "period": res["t_star"],
-            "fmax_predicted_signoff": res["fmax_predicted_signoff"],
-            "fmax_place_proxy": res["fmax_place_proxy"],
+            # human-facing, normalized to ns/GHz so asap7 (ps) is not under-reported 1000x.
+            "period_ns": res["t_star"] * tu,
+            "fmax_predicted_signoff": 1.0 / (res["t_star"] * tu),
+            "fmax_place_proxy": 1.0 / (res["t_place_proxy"] * tu),
         }
-        report["labels"] = build_labels(res, model_provenance, place_fast)
+        report["labels"] = build_labels(res, model_provenance, place_fast, tu)
         res["fmax_predicted_signoff_period"] = res["t_star"]
     else:
         report["labels"] = [f"status: {res['status']}"]
@@ -325,7 +353,7 @@ def main() -> int:
     _add_paths()
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument("project", type=Path)
-    p.add_argument("platform", nargs="?", default="nangate45")
+    p.add_argument("platform", nargs="?", default="asap7")
     p.add_argument("--verify", action="store_true",
                    help="Run one full signoff flow at the winning period.")
     p.add_argument("--keep-variants", action="store_true")

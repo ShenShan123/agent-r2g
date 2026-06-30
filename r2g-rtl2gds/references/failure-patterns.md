@@ -1216,7 +1216,7 @@ and the parse logic is split into a unit-testable `parse_setup_args(argv)`. Both
 Regression: `tests/test_setup_platform_cli.py` (8 cases: normalizer + parse outcome, space + equals).
 Validated end-to-end: `--platform asap7 --force` re-pointed 708 designs (was 0).
 
-### ASAP7 Fmax under-reported 1000× — picosecond liberty time-unit (2026-06-30, FIX PENDING)
+### ASAP7 Fmax under-reported 1000× — picosecond liberty time-unit (2026-06-30, FIXED)
 
 **Symptoms:**
 - Every asap7 design's Fmax comes back absurdly slow: `Fmax ~ 0.00244 GHz (period 409.6 ns)` — i.e.
@@ -1234,17 +1234,25 @@ column. For asap7 (t in ps) this is 1000× wrong (409.6 ps = 0.41 ns = 2.44 GHz,
 nangate45 never exposed it because its unit IS ns, so `1/period[ns]=GHz` happened to be correct. ASAP7 is
 the first ps-unit platform run through the proxy.
 
-**Why deferred (not yet fixed):** a correct fix must convert at FOUR boundaries, each a no-op identity
-when `time_unit_ns == 1.0` (so nangate45 is provably byte-identical) and active for asap7
-(`time_unit_ns = 0.001`):
-1. `run_probe` slack read: STA-unit slack → ns (`ws * time_unit_ns`).
-2. `seed_period`: nominal SDC `clk_period` (STA units) → ns; learned `closing_period` stored in ns.
-3. `clone_variant`/`rewrite_clk_period`: internal ns period → STA units when writing the SDC the flow reads.
-4. recording: `fmax_ghz = 1/period_ns`; store true ns in `clock_period_ns`.
-Resolve `time_unit_ns` from the platform liberty `time_unit` (default 1.0). Touching the proven timing
-core demands TDD that asserts nangate45 unchanged + asap7 corrected — do it as a dedicated pass, not a
-rushed tail-edit. The already-recorded asap7 Fmax is RECOVERABLE (multiply period by `time_unit_ns`,
-recompute GHz), so a campaign may run in the meantime; reconcile after the fix.
+**Fix (2026-06-30, reporting-boundary normalization, NOT a search-core rewrite):** the search,
+SDC stamping, and closing-period seed are SELF-CONSISTENT in the STA unit (the flow builds at the
+right frequency), and the stored `clock_period_ns` is read back by `seed_period` in that same unit —
+so converting the *internal* period would force touching the proven timing core (and couples the seed
+to the DB). The minimal, low-risk fix normalizes ONLY the human/recorded Fmax at the orchestrator
+boundary in `fmax_search.py`:
+- `_platform_time_unit_ns(platform)` returns ns-per-STA-unit (`1.0` for ns platforms — identity, so
+  nangate45 is byte-identical; `0.001` for asap7=1ps). Map mirrors the ORFS liberty `time_unit`.
+- `build_labels` and `search()`'s `winner` now report `fmax_predicted_signoff = 1/(t_star*tu)` (realistic
+  GHz) and add `period_ns = t_star*tu`, while keeping the raw STA-unit `period` (what `rewrite_clk_period`
+  writes + seeds the next search). `fm.search_loop` stays unit-agnostic.
+- Tests: `test_fmax_search.py::{test_platform_time_unit_ns, test_build_labels_asap7_normalizes_1000x,
+  test_search_asap7_records_realistic_ghz, test_search_nangate45_fmax_unchanged}`.
+**Residual (documented, not a lie):** the DB `clock_period_ns` column still holds the STA-unit period for
+asap7 (ps) — self-consistent per platform (only `seed_period` reads it back, never cross-platform) and
+NOT honesty-gated; the authoritative recorded Fmax is `reports/fmax_search.json` `winner` (now correct).
+A full all-internal-ns normalization (convert at `run_probe`/`seed_period`/`rewrite_clk_period` too) is a
+deeper follow-up only if a consumer ever needs honest ns in that column. Any asap7 Fmax recorded BEFORE
+this fix is recoverable: multiply the raw period by `time_unit_ns`.
 
 ### FLW-0024: Place density exceeds 1.0
 
