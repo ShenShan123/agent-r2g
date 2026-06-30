@@ -1163,6 +1163,36 @@ and the parse logic is split into a unit-testable `parse_setup_args(argv)`. Both
 Regression: `tests/test_setup_platform_cli.py` (8 cases: normalizer + parse outcome, space + equals).
 Validated end-to-end: `--platform asap7 --force` re-pointed 708 designs (was 0).
 
+### ASAP7 Fmax under-reported 1000× — picosecond liberty time-unit (2026-06-30, FIX PENDING)
+
+**Symptoms:**
+- Every asap7 design's Fmax comes back absurdly slow: `Fmax ~ 0.00244 GHz (period 409.6 ns)` — i.e.
+  single-digit MHz on a 7nm node. `reports/fmax_search.json` `winner.fmax_predicted_signoff` ~0.002–0.006.
+- The flow itself is FINE (GDS + DRC clean); only the *recorded Fmax number* is wrong.
+
+**Root Cause (confirmed):** ASAP7 liberty is `time_unit : "1ps"` (nangate45/sky130 use `1ns`). OpenSTA
+adopts the liberty time unit, so the SDC `create_clock -period 10.0` means 10 **ps** and all reported
+slacks/periods are in **ps**. `fmax_search.py`/`fmax_model.py` are unit-agnostic internally (period and
+slack share whatever unit STA emits — self-consistent, so the search converges and the SDC stamped back
+by `rewrite_clk_period` is correct, and the asap7 *flow builds at the right frequency*). BUT the
+human/recorded outputs assume **ns**: `build_labels` does `1.0/t` GHz and labels "ns"; the winner
+`fmax_predicted_signoff = 1/t`; `record_verify_triple` stores the ps value into the `clock_period_ns`
+column. For asap7 (t in ps) this is 1000× wrong (409.6 ps = 0.41 ns = 2.44 GHz, recorded as 0.00244 GHz).
+nangate45 never exposed it because its unit IS ns, so `1/period[ns]=GHz` happened to be correct. ASAP7 is
+the first ps-unit platform run through the proxy.
+
+**Why deferred (not yet fixed):** a correct fix must convert at FOUR boundaries, each a no-op identity
+when `time_unit_ns == 1.0` (so nangate45 is provably byte-identical) and active for asap7
+(`time_unit_ns = 0.001`):
+1. `run_probe` slack read: STA-unit slack → ns (`ws * time_unit_ns`).
+2. `seed_period`: nominal SDC `clk_period` (STA units) → ns; learned `closing_period` stored in ns.
+3. `clone_variant`/`rewrite_clk_period`: internal ns period → STA units when writing the SDC the flow reads.
+4. recording: `fmax_ghz = 1/period_ns`; store true ns in `clock_period_ns`.
+Resolve `time_unit_ns` from the platform liberty `time_unit` (default 1.0). Touching the proven timing
+core demands TDD that asserts nangate45 unchanged + asap7 corrected — do it as a dedicated pass, not a
+rushed tail-edit. The already-recorded asap7 Fmax is RECOVERABLE (multiply period by `time_unit_ns`,
+recompute GHz), so a campaign may run in the meantime; reconcile after the fix.
+
 ### FLW-0024: Place density exceeds 1.0
 
 **Symptoms:**
