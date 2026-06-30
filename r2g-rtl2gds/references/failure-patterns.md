@@ -1134,6 +1134,35 @@ The power delivery network (PDN) grid cannot fit within the die/core area. `SYNT
 
 These six patterns account for every failure in the 495-design batch completion report (`docs/batch_orfs_completion_report.md`) and are fully addressed by `tools/fix_orfs_failures.py`.
 
+### Platform re-target CLI mismatch — `--platform asap7` silently a no-op (2026-06-30)
+
+**Symptoms:**
+- Bootstrapping a NEW platform round (Step 1b): `python3 tools/setup_rtl_designs.py --platform asap7 --force`
+  prints `Setting up 1 designs (force=True)... Done: 0 set up, 1 skipped, 0 errors` and **exits 0**.
+- No `config.mk` is re-pointed: `grep -l 'PLATFORM *= *asap7' design_cases/*/constraints/config.mk` returns 0;
+  every project still says the OLD platform. `build_pending_ledger.py --platform asap7` then enumerates
+  0 designs ("round complete!", false) — or, if you skip the grep, the round silently builds the OLD PDK.
+
+**Root Cause:**
+`setup_rtl_designs.py` used a hand-rolled `for arg in sys.argv` parser that matched only the `=` form
+(`--platform=asap7`). The documented invocations — SKILL Step 1b, `build_pending_ledger.py`'s header,
+and the `/r2g-debug` command — all use the **space form** (`--platform asap7`). With the space form,
+`--platform` matched no branch (silently ignored) and the value `asap7` fell through to the
+`elif not arg.startswith("--")` positional-design branch → `selected=["asap7"]`, `platform_override=None`.
+So the whole-corpus PDK re-target became a no-op while still exiting 0. The `--platform` feature was
+added but never validated as documented (its sibling `build_pending_ledger.py` uses `argparse`, which
+accepts both forms, hiding the asymmetry).
+
+**Why it is dangerous:** it is the silent "never re-point ONLY the ledger" footgun in reverse — NEITHER
+config.mk nor (correctly) the ledger gets re-pointed, and nothing errors. An "asap7 campaign" would have
+rebuilt nangate45, teaching the loop lies under an asap7 label.
+
+**Fix (commit on the asap7 round branch):** `setup_rtl_designs.py` now normalizes argv with
+`_normalize_value_flags` (rewrites `--flag value` → `--flag=value` for `--designs/--designs-file/--platform/--rtl-dir`)
+and the parse logic is split into a unit-testable `parse_setup_args(argv)`. Both arg forms now work.
+Regression: `tests/test_setup_platform_cli.py` (8 cases: normalizer + parse outcome, space + equals).
+Validated end-to-end: `--platform asap7 --force` re-pointed 708 designs (was 0).
+
 ### FLW-0024: Place density exceeds 1.0
 
 **Symptoms:**
@@ -2195,3 +2224,32 @@ root-cause line. Test: `tests/test_safe_process_records_traceback.py`. (NOTE: th
 escalations are *ledger-only* — `_safe_process` has no knowledge-DB conn — so they don't fabricate a
 `failure_event`; honesty parity is unaffected. A genuinely synth-aborted design like these re-queues
 to its honest `synth_memory_residual` reason once its log is fully written.)
+
+### Detecting the gap directly: `tools/check_db_integrity.py` (both-DBs cross-check, 2026-06-30)
+
+Every closure failure above is ultimately *the two memory DBs disagreeing about what happened* —
+`knowledge.sqlite` (what RESULTED) and `journal.sqlite` (what was DONE) drifting out of step.
+`honesty.py` polices only the knowledge side (it is deliberately journal-free so it runs over a
+fresh clone in CI), so the *cross-DB* drift was invisible to the gate. `tools/check_db_integrity.py`
+closes that hole: it **imports `honesty.run_all`** (so the knowledge verdict can never drift from
+CI) and adds the journal/cross-DB invariants on top, one PASS/WARN/ALARM line per code:
+
+- **`H:*` (ALARM)** — the five knowledge honesty gates, over the whole committed store.
+- **`J1`/`J2` (ALARM)** — journal writer alive; and no project has a knowledge run + journal actions
+  yet **zero** back-filled `run_id` (ingest must link the ledger to the result).
+- **`L1`/`L2`/`L3` (WARN)** — every `ab_trials` symptom has an `ab_launch` action, every `promoted`
+  recipe a `promote` action, every open symptom-escalation an `escalate` action: i.e. each knowledge
+  MOVE left a journal trace. Directional ⊇ (the ledger may hold more — re-launches/re-promotions).
+- **`J4` (WARN)** — no journal `run_id` dangles (resolves to a real `knowledge.runs` row).
+- **`K3` (WARN)** — per-platform `ab_trials`>0 but `promoted`=0 with ≥3 inconclusive (the 2026-06-24
+  identical-arms stall).
+
+**Severity contract:** knowledge is the source of truth + sole learner input, so its dishonesty is an
+ALARM (exit 1, stop and fix). The journal is best-effort/lossy/gitignored, so a move it failed to
+record is a WARN (exit 0, a lead) — never a fabricated lesson. Run it after every wave:
+`python3 tools/check_db_integrity.py --platform nangate45` (honesty gates stay global; the trend +
+correspondence checks scope to the platform). The `/r2g-debug` command wires it into Step 0/2/4.
+Known-benign WARNs on the live store at first wiring: one `sky130hd density_relief` promotion that
+**predates** the 2026-06-17 promote/ab_launch journaling (L1/L2), and two nangate45 journal `run_id`s
+whose projects were wiped in the 2026-06-19 `design_cases` purge (J4). Test:
+`tests/test_check_db_integrity.py`.

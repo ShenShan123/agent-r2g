@@ -540,8 +540,17 @@ def _is_vhdl_only(src_dir):
     return vhd > 0 and vhd > ver
 
 
-def setup_one_design(design_name, force=False):
-    """Set up a single design from rtl_designs/ into design_cases/."""
+def setup_one_design(design_name, force=False, platform_override=None):
+    """Set up a single design from rtl_designs/ into design_cases/.
+
+    ``platform_override`` (e.g. "asap7") forces the target PDK for THIS run,
+    ignoring the per-design ``design_meta.json`` platform. This is how a whole-
+    corpus technology re-target (a "new round" on a different node) is driven:
+    every project's config.mk is regenerated with ``export PLATFORM = <override>``.
+    Sizing is CORE_UTILIZATION-based (ORFS auto-sizes the die), so it is platform-
+    agnostic and safe to re-point. Re-pointing ONLY the campaign ledger would be a
+    lie: run_orfs.sh builds against config.mk's PLATFORM, not the ledger field.
+    """
     src_dir = RTL_DESIGNS_DIR / design_name
     meta_path = src_dir / "design_meta.json"
 
@@ -558,7 +567,7 @@ def setup_one_design(design_name, force=False):
         meta = json.load(f)
 
     top_module = meta.get("top", design_name)
-    platform = meta.get("platform", "nangate45")
+    platform = platform_override or meta.get("platform", "nangate45")
 
     project_dir = DESIGN_CASES_DIR / design_name
 
@@ -732,17 +741,56 @@ def setup_one_design(design_name, force=False):
     }
 
 
-def main():
+# Value-taking CLI flags accept BOTH `--flag value` (space) and `--flag=value` forms. The
+# hand-rolled parser below historically understood only the `=` form, but the documented
+# invocations (SKILL Step 1b, build_pending_ledger.py's header, /r2g-debug) use the SPACE
+# form -- so a bare `--platform asap7` fell through to the positional-design branch, left
+# platform_override=None, and the whole-corpus PDK re-target became a SILENT no-op
+# (config.mk stayed on the old platform; exit 0). See references/failure-patterns.md
+# "Platform re-target CLI mismatch (silent no-op)".
+_VALUE_FLAGS = ("--designs", "--designs-file", "--platform", "--rtl-dir")
+
+
+def _normalize_value_flags(argv, value_flags=_VALUE_FLAGS):
+    """Rewrite `--flag value` to `--flag=value` for the given value-taking flags so the
+    parser accepts both the space-separated and `=` forms. A trailing flag with no
+    following value is left unchanged (the parser then ignores it, exactly as before)."""
+    out, i = [], 0
+    while i < len(argv):
+        a = argv[i]
+        if a in value_flags and i + 1 < len(argv):
+            out.append(f"{a}={argv[i + 1]}")
+            i += 2
+        else:
+            out.append(a)
+            i += 1
+    return out
+
+
+def parse_setup_args(argv):
+    """Parse setup_rtl_designs CLI args (both `--flag value` and `--flag=value` forms).
+
+    Returns ``(force, selected, platform_override)``. Mutates the module global
+    RTL_DESIGNS_DIR for ``--rtl-dir`` (preserving historical behavior). Split out of
+    main() so the space/equals parsing is unit-testable without filesystem side effects.
+    """
     global RTL_DESIGNS_DIR
-    force = "--force" in sys.argv
+    args = _normalize_value_flags(argv)
+    force = "--force" in args
     selected = None
     designs_file = None
+    platform_override = None
 
-    for arg in sys.argv[1:]:
+    for arg in args:
         if arg.startswith("--designs="):
             selected = arg.split("=", 1)[1].split(",")
         elif arg.startswith("--designs-file="):
             designs_file = arg.split("=", 1)[1]
+        elif arg.startswith("--platform="):
+            # Force this PDK for the whole corpus (a technology re-target / "new
+            # round"), overriding each design_meta.json platform. config.mk gets
+            # `export PLATFORM = <this>`. Pair with --force to regenerate.
+            platform_override = arg.split("=", 1)[1].strip()
         elif arg.startswith("--rtl-dir="):
             # Source RTL directory override (default is the unified rtl_designs/).
             # Accepts an absolute path or a name relative to the repo root.
@@ -763,6 +811,12 @@ def main():
                 names.append(line)
         selected = names
 
+    return force, selected, platform_override
+
+
+def main():
+    force, selected, platform_override = parse_setup_args(sys.argv[1:])
+
     DESIGN_CASES_DIR.mkdir(parents=True, exist_ok=True)
 
     # Enumerate designs
@@ -774,7 +828,8 @@ def main():
             if d.is_dir() and (d / "design_meta.json").exists()
         ])
 
-    print(f"Setting up {len(designs)} designs (force={force})...")
+    plat_note = f", platform={platform_override} (forced)" if platform_override else ""
+    print(f"Setting up {len(designs)} designs (force={force}{plat_note})...")
 
     results = {"ok": 0, "skip": 0, "error": 0}
     errors = []
@@ -785,7 +840,7 @@ def main():
     size_stats = defaultdict(int)
 
     for i, name in enumerate(designs):
-        r = setup_one_design(name, force=force)
+        r = setup_one_design(name, force=force, platform_override=platform_override)
         results[r["status"]] += 1
 
         if r["status"] == "ok":
