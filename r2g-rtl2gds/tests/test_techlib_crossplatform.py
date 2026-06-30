@@ -138,6 +138,16 @@ def regenerated(tmp_path_factory) -> Path:
         capture_output=True,
         text=True,
     )
+    if proc.returncode == 77:
+        # rc=77 is the helper's "frozen INPUT artifact absent" sentinel: a campaign
+        # re-target (/r2g-debug Step 1b re-points + re-flows design_cases/) consumed the
+        # pinned RUN dirs this byte-diff gate regenerates from. That is environmental input
+        # drift, NOT an extractor regression -- skip, don't hard-error. Restore with
+        # tools/regen_extract_baseline.sh once the relevant designs are flowed again.
+        sys.stderr.write(proc.stdout)
+        sys.stderr.write(proc.stderr)
+        pytest.skip("techlib baseline INPUT artifacts absent (campaign consumed design_cases/ "
+                    "pinned RUN dirs); run tools/regen_extract_baseline.sh to restore")
     if proc.returncode != 0:
         # Surface helper output so a regen failure is debuggable, not a silent skip.
         sys.stderr.write(proc.stdout)

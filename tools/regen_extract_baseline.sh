@@ -62,13 +62,18 @@ for pin in "${PINS[@]}"; do
   echo
   echo "=== $design ($platform) :: $run ==="
 
+  # Exit 77 (the autotools "skip" convention) when a frozen INPUT artifact is absent.
+  # A campaign re-target (/r2g-debug Step 1b re-points + re-flows the WHOLE design_cases/
+  # corpus) legitimately consumes these pinned RUN dirs -- that is "cannot regenerate the
+  # baseline", NOT "the extractor regressed", so the byte-diff gate must SKIP, not fail.
+  # (The master-mismatch check below stays exit 2 = a genuinely wrong/corrupt pinned run.)
   if [[ ! -d "$run_dir" ]]; then
-    echo "  ERROR: pinned backend run missing: $run_dir" >&2
-    exit 2
+    echo "  SKIP: pinned backend run absent (campaign consumed design_cases/?): $run_dir" >&2
+    exit 77
   fi
   if [[ ! -f "$def" ]]; then
-    echo "  ERROR: pinned DEF missing: $def" >&2
-    exit 2
+    echo "  SKIP: pinned DEF absent (campaign consumed design_cases/?): $def" >&2
+    exit 77
   fi
   # Master sanity-check: guards against a re-pinned run silently changing PDK.
   if ! grep -q -- "$expect_master" "$def"; then
