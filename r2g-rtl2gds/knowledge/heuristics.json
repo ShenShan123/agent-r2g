@@ -1,9 +1,9 @@
 {
-  "generated_at": "2026-06-29T11:45:06Z",
-  "source_run_count": 2286,
+  "generated_at": "2026-06-30T04:52:05Z",
+  "source_run_count": 2322,
   "min_successful_runs_required": 3,
   "schema_version": 3,
-  "generation": 2746,
+  "generation": 2876,
   "families": {
     "rv32i": {
       "platforms": {
@@ -210,9 +210,9 @@
     "riscv32i": {
       "platforms": {
         "nangate45": {
-          "sample_size": 24,
-          "success_count": 13,
-          "success_rate": 0.5416666666666666,
+          "sample_size": 28,
+          "success_count": 17,
+          "success_rate": 0.6071428571428571,
           "core_utilization": {
             "min_safe": 10.0,
             "max_safe": 25.0,
@@ -224,7 +224,7 @@
             "median": 0.2
           },
           "typical_cell_count": 1536,
-          "p90_elapsed_s": 1062.0,
+          "p90_elapsed_s": 771.0,
           "fix_recipes": {
             "drc": {
               "beol": {
@@ -240,7 +240,7 @@
               },
               "null": {
                 "strategies": {},
-                "n_sessions": 5
+                "n_sessions": 13
               },
               "METAL4_ANTENNA": {
                 "strategies": {
@@ -383,7 +383,7 @@
               },
               "null": {
                 "strategies": {},
-                "n_sessions": 101
+                "n_sessions": 117
               }
             },
             "lvs": {
@@ -725,9 +725,9 @@
     "axi": {
       "platforms": {
         "nangate45": {
-          "sample_size": 52,
+          "sample_size": 56,
           "success_count": 34,
-          "success_rate": 0.6538461538461539,
+          "success_rate": 0.6071428571428571,
           "core_utilization": {
             "min_safe": 10.0,
             "max_safe": 25.0,
@@ -768,6 +768,10 @@
                   }
                 },
                 "n_sessions": 1
+              },
+              "METAL3_ANTENNA": {
+                "strategies": {},
+                "n_sessions": 8
               }
             },
             "orfs": {
@@ -894,7 +898,7 @@
               },
               "null": {
                 "strategies": {},
-                "n_sessions": 72
+                "n_sessions": 80
               }
             },
             "lvs": {
@@ -1527,7 +1531,7 @@
               },
               "null": {
                 "strategies": {},
-                "n_sessions": 70
+                "n_sessions": 78
               }
             },
             "lvs": {
@@ -2173,9 +2177,9 @@
     "e203": {
       "platforms": {
         "nangate45": {
-          "sample_size": 12,
-          "success_count": 8,
-          "success_rate": 0.6666666666666666,
+          "sample_size": 16,
+          "success_count": 12,
+          "success_rate": 0.75,
           "core_utilization": {
             "min_safe": 25.0,
             "max_safe": 25.0,
@@ -2203,7 +2207,7 @@
               },
               "null": {
                 "strategies": {},
-                "n_sessions": 2
+                "n_sessions": 10
               },
               "METAL4_ANTENNA": {
                 "strategies": {
@@ -2475,9 +2479,9 @@
     "iccad2015": {
       "platforms": {
         "nangate45": {
-          "sample_size": 212,
-          "success_count": 168,
-          "success_rate": 0.7924528301886793,
+          "sample_size": 224,
+          "success_count": 180,
+          "success_rate": 0.8035714285714286,
           "core_utilization": {
             "min_safe": 5.0,
             "max_safe": 20.0,
@@ -2489,12 +2493,12 @@
             "median": 0.2
           },
           "typical_cell_count": 20160,
-          "p90_elapsed_s": 3816.0,
+          "p90_elapsed_s": 3879.0,
           "closing_period": {
             "min": 13.380230000000001,
             "p10": 13.43665,
             "median": 15.962645,
-            "n": 104
+            "n": 112
           },
           "slack_deterioration": {
             "d_fp_pl": {
@@ -2503,9 +2507,9 @@
             },
             "d_pl_fin": {
               "ns_p90": -0.16469999999999985,
-              "pct_p90": -0.003049601959583585
+              "pct_p90": -0.0027286675321609795
             },
-            "n": 104
+            "n": 112
           },
           "fix_recipes": {
             "timing": {
@@ -2536,21 +2540,21 @@
               "timing": {
                 "strategies": {
                   "utilization_reduce": {
-                    "attempts": 104,
+                    "attempts": 112,
                     "successes": 0,
-                    "failures": 96,
+                    "failures": 104,
                     "wins": 8,
                     "median_reduction_pct": 0.0
                   },
                   "period_relax": {
-                    "attempts": 52,
+                    "attempts": 56,
                     "successes": 0,
-                    "failures": 52,
+                    "failures": 56,
                     "wins": 0,
                     "median_reduction_pct": 0.0
                   }
                 },
-                "n_sessions": 120
+                "n_sessions": 128
               }
             },
             "drc": {
@@ -2591,7 +2595,7 @@
               },
               "null": {
                 "strategies": {},
-                "n_sessions": 205
+                "n_sessions": 215
               },
               "METAL5_ANTENNA": {
                 "strategies": {
@@ -2642,14 +2646,14 @@
               "place": {
                 "strategies": {
                   "core_util_relief": {
-                    "attempts": 24,
+                    "attempts": 26,
                     "successes": 2,
-                    "failures": 22,
+                    "failures": 24,
                     "wins": 0,
                     "median_reduction_pct": 0.0
                   }
                 },
-                "n_sessions": 24
+                "n_sessions": 26
               }
             }
           }
@@ -4116,8 +4120,8 @@
       "platforms": {
         "nangate45": {
           "sample_size": 30,
-          "success_count": 14,
-          "success_rate": 0.4666666666666667,
+          "success_count": 16,
+          "success_rate": 0.5333333333333333,
           "core_utilization": {
             "min_safe": 15.0,
             "max_safe": 25.0,
@@ -4165,6 +4169,18 @@
               "METAL4_ANTENNA": {
                 "strategies": {
                   "antenna_diode_repair": {
+                    "attempts": 3,
+                    "successes": 3,
+                    "failures": 0,
+                    "wins": 0,
+                    "median_reduction_pct": 1.0
+                  }
+                },
+                "n_sessions": 3
+              },
+              "METAL5_ANTENNA": {
+                "strategies": {
+                  "antenna_diode_repair": {
                     "attempts": 1,
                     "successes": 1,
                     "failures": 0,
@@ -4178,25 +4194,25 @@
             "lvs": {
               "null": {
                 "strategies": {},
-                "n_sessions": 1
+                "n_sessions": 3
               },
               "real_connectivity": {
                 "strategies": {},
-                "n_sessions": 1
+                "n_sessions": 2
               }
             },
             "orfs_stage": {
               "place": {
                 "strategies": {
                   "core_util_relief": {
-                    "attempts": 3,
-                    "successes": 0,
-                    "failures": 3,
+                    "attempts": 6,
+                    "successes": 2,
+                    "failures": 4,
                     "wins": 0,
                     "median_reduction_pct": 0.0
                   }
                 },
-                "n_sessions": 3
+                "n_sessions": 6
               }
             }
           }
@@ -4224,8 +4240,8 @@
       "platforms": {
         "nangate45": {
           "sample_size": 25,
-          "success_count": 10,
-          "success_rate": 0.4,
+          "success_count": 11,
+          "success_rate": 0.44,
           "core_utilization": {
             "min_safe": 20.0,
             "max_safe": 20.0,
@@ -4257,6 +4273,18 @@
               "METAL5_ANTENNA": {
                 "strategies": {
                   "antenna_diode_repair": {
+                    "attempts": 3,
+                    "successes": 1,
+                    "failures": 0,
+                    "wins": 2,
+                    "median_reduction_pct": 0.9934426229508196
+                  }
+                },
+                "n_sessions": 3
+              },
+              "METAL4_ANTENNA": {
+                "strategies": {
+                  "antenna_diode_repair": {
                     "attempts": 1,
                     "successes": 1,
                     "failures": 0,
@@ -4270,21 +4298,25 @@
             "lvs": {
               "real_connectivity": {
                 "strategies": {},
-                "n_sessions": 1
+                "n_sessions": 2
+              },
+              "null": {
+                "strategies": {},
+                "n_sessions": 2
               }
             },
             "orfs_stage": {
               "place": {
                 "strategies": {
                   "core_util_relief": {
-                    "attempts": 3,
-                    "successes": 0,
-                    "failures": 3,
+                    "attempts": 6,
+                    "successes": 1,
+                    "failures": 5,
                     "wins": 0,
                     "median_reduction_pct": 0.0
                   }
                 },
-                "n_sessions": 3
+                "n_sessions": 6
               }
             }
           }
@@ -4457,9 +4489,9 @@
     "wb2axip": {
       "platforms": {
         "nangate45": {
-          "sample_size": 107,
+          "sample_size": 108,
           "success_count": 63,
-          "success_rate": 0.5887850467289719,
+          "success_rate": 0.5833333333333334,
           "core_utilization": {
             "min_safe": 25.0,
             "max_safe": 25.0,
@@ -4497,7 +4529,7 @@
               },
               "null": {
                 "strategies": {},
-                "n_sessions": 38
+                "n_sessions": 39
               },
               "METAL5_ANTENNA": {
                 "strategies": {
@@ -4635,13 +4667,13 @@
     "wbi2c": {
       "platforms": {
         "nangate45": {
-          "sample_size": 3,
-          "success_count": 3,
-          "success_rate": 1.0,
+          "sample_size": 6,
+          "success_count": 4,
+          "success_rate": 0.6666666666666666,
           "core_utilization": {
             "min_safe": 10.0,
             "max_safe": 25.0,
-            "median": 17.5
+            "median": 25.0
           },
           "place_density_lb_addon": {
             "min_safe": 0.2,
@@ -4659,6 +4691,24 @@
                     "successes": 1,
                     "failures": 0,
                     "wins": 0
+                  }
+                },
+                "n_sessions": 1
+              },
+              "null": {
+                "strategies": {},
+                "n_sessions": 3
+              }
+            },
+            "orfs_stage": {
+              "place": {
+                "strategies": {
+                  "core_util_relief": {
+                    "attempts": 1,
+                    "successes": 0,
+                    "failures": 1,
+                    "wins": 0,
+                    "median_reduction_pct": 0.0
                   }
                 },
                 "n_sessions": 1
@@ -4977,6 +5027,10 @@
                   }
                 },
                 "n_sessions": 1
+              },
+              "null": {
+                "strategies": {},
+                "n_sessions": 1
               }
             }
           }
@@ -5000,6 +5054,24 @@
                     "wins": 0
                   }
                 },
+                "n_sessions": 1
+              },
+              "METAL6_ANTENNA": {
+                "strategies": {
+                  "antenna_diode_repair": {
+                    "attempts": 1,
+                    "successes": 1,
+                    "failures": 0,
+                    "wins": 0,
+                    "median_reduction_pct": 1.0
+                  }
+                },
+                "n_sessions": 1
+              }
+            },
+            "lvs": {
+              "real_connectivity": {
+                "strategies": {},
                 "n_sessions": 1
               }
             }
@@ -5802,6 +5874,10 @@
                   }
                 },
                 "n_sessions": 3
+              },
+              "null": {
+                "strategies": {},
+                "n_sessions": 2
               }
             },
             "orfs": {
@@ -5828,6 +5904,20 @@
                   }
                 },
                 "n_sessions": 1
+              }
+            },
+            "orfs_stage": {
+              "synth": {
+                "strategies": {
+                  "synth_memory_relax": {
+                    "attempts": 2,
+                    "successes": 2,
+                    "failures": 0,
+                    "wins": 0,
+                    "median_reduction_pct": 1.0
+                  }
+                },
+                "n_sessions": 2
               }
             }
           }
@@ -7102,6 +7192,7 @@
         "axilite2axi",
         "axilsafety",
         "axilsingle",
+        "axiluart",
         "axilupsz",
         "axilxbar",
         "axim2wbsp",
@@ -7126,6 +7217,7 @@
         "axis_wb_master",
         "axisbroadcast",
         "axisgfsm",
+        "axisi2c",
         "axispacker",
         "axissafety",
         "axisswitch",
@@ -7237,7 +7329,9 @@
         "iocpu2",
         "ip",
         "ip_64",
+        "ip_arb_mux",
         "ip_eth_tx_64",
+        "ip_mux",
         "le",
         "lfsr",
         "lfsr_crc",
@@ -7391,6 +7485,8 @@
         "uart_top",
         "uart_transmitter",
         "uart_wb",
+        "udp_arb_mux",
+        "udp_mux",
         "usb",
         "usb_cdc",
         "usb_cdc_core",
@@ -7404,14 +7500,17 @@
         "wb_reg",
         "wbc2pipeline",
         "wbdown",
+        "wbi2cslave",
         "wbm2axisp",
         "wbp2classic",
         "wbqspiflash",
         "wbsafety",
         "wbxbar",
-        "wishbone_master"
+        "wbxclk",
+        "wishbone_master",
+        "zipdma"
       ],
-      "n_sessions": 1106,
+      "n_sessions": 1182,
       "strategies": {
         "lvs_resolve_unknown": {
           "attempts": 7,
@@ -7596,26 +7695,29 @@
         "eth_arb_mux",
         "eth_mux",
         "ip",
+        "ip_mux",
         "msrv32_csr_file",
         "test",
         "top",
         "traffic_control",
         "tx_container",
+        "udp_arb_mux",
+        "udp_demux",
         "udp_ip_tx_64"
       ],
-      "n_sessions": 13,
+      "n_sessions": 16,
       "strategies": {
         "antenna_diode_repair": {
-          "attempts": 13,
-          "successes": 13,
+          "attempts": 16,
+          "successes": 14,
           "failures": 0,
-          "wins": 0,
+          "wins": 2,
           "by_platform": {
             "nangate45": {
-              "attempts": 13,
-              "successes": 13,
+              "attempts": 16,
+              "successes": 14,
               "failures": 0,
-              "wins": 0
+              "wins": 2
             }
           }
         }
@@ -7639,19 +7741,20 @@
         "mem",
         "stream_register",
         "test",
-        "top"
+        "top",
+        "wbuart"
       ],
-      "n_sessions": 15,
+      "n_sessions": 16,
       "strategies": {
         "antenna_diode_repair": {
-          "attempts": 15,
-          "successes": 15,
+          "attempts": 16,
+          "successes": 16,
           "failures": 0,
           "wins": 0,
           "by_platform": {
             "nangate45": {
-              "attempts": 15,
-              "successes": 15,
+              "attempts": 16,
+              "successes": 16,
               "failures": 0,
               "wins": 0
             }
@@ -7703,8 +7806,10 @@
         "ex2EP16_fir",
         "exc",
         "ftdi_if",
+        "ip_demux",
         "ip_eth_rx_64",
         "irq_ctrl",
+        "lli2cm",
         "mac1",
         "ptp_td_leaf",
         "riscv_alu4b",
@@ -7721,11 +7826,13 @@
         "timer",
         "top",
         "twoR_twoW",
+        "udp_demux",
         "udp_ip_tx_64",
         "wb_adapter",
-        "wbqspiflash"
+        "wbqspiflash",
+        "wbuart"
       ],
-      "n_sessions": 58,
+      "n_sessions": 62,
       "strategies": {}
     },
     "1948e34056c1690f": {
@@ -7779,24 +7886,27 @@
         "aes_decipher_block",
         "axi_interconnect",
         "axil_interconnect",
+        "ip_arb_mux",
+        "ip_demux",
         "ip_eth_rx_64",
         "myproject_mux_6432_8_1_1",
         "ptp_td_leaf",
         "sirv_gnrl_icb_arbt",
         "test",
-        "top"
+        "top",
+        "udp_mux"
       ],
-      "n_sessions": 11,
+      "n_sessions": 14,
       "strategies": {
         "antenna_diode_repair": {
-          "attempts": 11,
-          "successes": 10,
+          "attempts": 14,
+          "successes": 13,
           "failures": 0,
           "wins": 1,
           "by_platform": {
             "nangate45": {
-              "attempts": 11,
-              "successes": 10,
+              "attempts": 14,
+              "successes": 13,
               "failures": 0,
               "wins": 1
             }
@@ -7937,20 +8047,21 @@
         "twoR_twoW",
         "udp_arb_mux",
         "udp_demux",
-        "udp_mux"
+        "udp_mux",
+        "wbi2cslave"
       ],
-      "n_sessions": 77,
+      "n_sessions": 86,
       "strategies": {
         "core_util_relief": {
-          "attempts": 77,
-          "successes": 15,
-          "failures": 62,
+          "attempts": 86,
+          "successes": 18,
+          "failures": 68,
           "wins": 0,
           "by_platform": {
             "nangate45": {
-              "attempts": 77,
-              "successes": 15,
-              "failures": 62,
+              "attempts": 86,
+              "successes": 18,
+              "failures": 68,
               "wins": 0
             }
           }
@@ -7986,32 +8097,32 @@
       "evidence_designs": [
         "test"
       ],
-      "n_sessions": 120,
+      "n_sessions": 128,
       "strategies": {
         "utilization_reduce": {
-          "attempts": 104,
+          "attempts": 112,
           "successes": 0,
-          "failures": 96,
+          "failures": 104,
           "wins": 8,
           "by_platform": {
             "nangate45": {
-              "attempts": 104,
+              "attempts": 112,
               "successes": 0,
-              "failures": 96,
+              "failures": 104,
               "wins": 8
             }
           }
         },
         "period_relax": {
-          "attempts": 52,
+          "attempts": 56,
           "successes": 0,
-          "failures": 52,
+          "failures": 56,
           "wins": 0,
           "by_platform": {
             "nangate45": {
-              "attempts": 52,
+              "attempts": 56,
               "successes": 0,
-              "failures": 52,
+              "failures": 56,
               "wins": 0
             }
           }
@@ -8061,19 +8172,20 @@
         "axivcamera",
         "axivdisplay",
         "axivfifo",
-        "uart2axi4"
+        "uart2axi4",
+        "zipdma"
       ],
-      "n_sessions": 8,
+      "n_sessions": 10,
       "strategies": {
         "synth_memory_relax": {
-          "attempts": 8,
-          "successes": 8,
+          "attempts": 10,
+          "successes": 10,
           "failures": 0,
           "wins": 0,
           "by_platform": {
             "nangate45": {
-              "attempts": 8,
-              "successes": 8,
+              "attempts": 10,
+              "successes": 10,
               "failures": 0,
               "wins": 0
             }
@@ -9104,52 +9216,52 @@
         "nangate45": {
           "strategies": {
             "antenna_diode_repair": {
-              "attempts": 13,
-              "successes": 13,
+              "attempts": 16,
+              "successes": 14,
               "failures": 0,
-              "wins": 0,
-              "mean_outcome_score": 0.8141025641025641
+              "wins": 2,
+              "mean_outcome_score": 0.8262659380692168
             }
           },
-          "n_sessions": 13
+          "n_sessions": 16
         },
         "*": {
           "strategies": {
             "antenna_diode_repair": {
-              "attempts": 13,
-              "successes": 13,
+              "attempts": 16,
+              "successes": 14,
               "failures": 0,
-              "wins": 0,
-              "mean_outcome_score": 0.8141025641025641
+              "wins": 2,
+              "mean_outcome_score": 0.8262659380692168
             }
           },
-          "n_sessions": 13
+          "n_sessions": 16
         }
       },
       "crypto/small": {
         "nangate45": {
           "strategies": {
             "antenna_diode_repair": {
-              "attempts": 2,
-              "successes": 2,
+              "attempts": 4,
+              "successes": 3,
               "failures": 0,
-              "wins": 0,
-              "mean_outcome_score": 0.5833333333333334
+              "wins": 1,
+              "mean_outcome_score": 0.7305555555555556
             }
           },
-          "n_sessions": 2
+          "n_sessions": 4
         },
         "*": {
           "strategies": {
             "antenna_diode_repair": {
-              "attempts": 2,
-              "successes": 2,
+              "attempts": 4,
+              "successes": 3,
               "failures": 0,
-              "wins": 0,
-              "mean_outcome_score": 0.5833333333333334
+              "wins": 1,
+              "mean_outcome_score": 0.7305555555555556
             }
           },
-          "n_sessions": 2
+          "n_sessions": 4
         }
       },
       "bus_heavy/small": {
@@ -9203,6 +9315,32 @@
           },
           "n_sessions": 1
         }
+      },
+      "bus_heavy/medium": {
+        "nangate45": {
+          "strategies": {
+            "antenna_diode_repair": {
+              "attempts": 1,
+              "successes": 0,
+              "failures": 0,
+              "wins": 1,
+              "mean_outcome_score": 0.8813661202185792
+            }
+          },
+          "n_sessions": 1
+        },
+        "*": {
+          "strategies": {
+            "antenna_diode_repair": {
+              "attempts": 1,
+              "successes": 0,
+              "failures": 0,
+              "wins": 1,
+              "mean_outcome_score": 0.8813661202185792
+            }
+          },
+          "n_sessions": 1
+        }
       }
     },
     "84ffbb174a5ee2b7": {
@@ -9236,26 +9374,26 @@
         "nangate45": {
           "strategies": {
             "antenna_diode_repair": {
-              "attempts": 15,
-              "successes": 15,
+              "attempts": 16,
+              "successes": 16,
               "failures": 0,
               "wins": 0,
-              "mean_outcome_score": 0.8633333333333333
+              "mean_outcome_score": 0.8458333333333333
             }
           },
-          "n_sessions": 15
+          "n_sessions": 16
         },
         "*": {
           "strategies": {
             "antenna_diode_repair": {
-              "attempts": 15,
-              "successes": 15,
+              "attempts": 16,
+              "successes": 16,
               "failures": 0,
               "wins": 0,
-              "mean_outcome_score": 0.8633333333333333
+              "mean_outcome_score": 0.8458333333333333
             }
           },
-          "n_sessions": 15
+          "n_sessions": 16
         }
       },
       "logic/small": {
@@ -9340,26 +9478,26 @@
         "nangate45": {
           "strategies": {
             "antenna_diode_repair": {
-              "attempts": 1,
-              "successes": 1,
+              "attempts": 2,
+              "successes": 2,
               "failures": 0,
               "wins": 0,
               "mean_outcome_score": 0.5833333333333334
             }
           },
-          "n_sessions": 1
+          "n_sessions": 2
         },
         "*": {
           "strategies": {
             "antenna_diode_repair": {
-              "attempts": 1,
-              "successes": 1,
+              "attempts": 2,
+              "successes": 2,
               "failures": 0,
               "wins": 0,
               "mean_outcome_score": 0.5833333333333334
             }
           },
-          "n_sessions": 1
+          "n_sessions": 2
         }
       },
       "bus_heavy/medium": {
@@ -9626,26 +9764,26 @@
         "nangate45": {
           "strategies": {
             "antenna_diode_repair": {
-              "attempts": 11,
-              "successes": 10,
+              "attempts": 14,
+              "successes": 13,
               "failures": 0,
               "wins": 1,
-              "mean_outcome_score": 0.8253530710213879
+              "mean_outcome_score": 0.8376777451712898
             }
           },
-          "n_sessions": 11
+          "n_sessions": 14
         },
         "*": {
           "strategies": {
             "antenna_diode_repair": {
-              "attempts": 11,
-              "successes": 10,
+              "attempts": 14,
+              "successes": 13,
               "failures": 0,
               "wins": 1,
-              "mean_outcome_score": 0.8253530710213879
+              "mean_outcome_score": 0.8376777451712898
             }
           },
-          "n_sessions": 11
+          "n_sessions": 14
         }
       },
       "crypto/medium": {
@@ -9678,52 +9816,52 @@
         "nangate45": {
           "strategies": {
             "antenna_diode_repair": {
-              "attempts": 1,
-              "successes": 1,
+              "attempts": 3,
+              "successes": 3,
               "failures": 0,
               "wins": 0,
-              "mean_outcome_score": 0.5833333333333334
+              "mean_outcome_score": 0.7828682170542636
             }
           },
-          "n_sessions": 1
+          "n_sessions": 3
         },
         "*": {
           "strategies": {
             "antenna_diode_repair": {
-              "attempts": 1,
-              "successes": 1,
+              "attempts": 3,
+              "successes": 3,
               "failures": 0,
               "wins": 0,
-              "mean_outcome_score": 0.5833333333333334
+              "mean_outcome_score": 0.7828682170542636
             }
           },
-          "n_sessions": 1
+          "n_sessions": 3
         }
       },
       "bus_heavy/small": {
         "nangate45": {
           "strategies": {
             "antenna_diode_repair": {
-              "attempts": 3,
-              "successes": 3,
+              "attempts": 4,
+              "successes": 4,
               "failures": 0,
               "wins": 0,
-              "mean_outcome_score": 0.8732142857142857
+              "mean_outcome_score": 0.8757440476190477
             }
           },
-          "n_sessions": 3
+          "n_sessions": 4
         },
         "*": {
           "strategies": {
             "antenna_diode_repair": {
-              "attempts": 3,
-              "successes": 3,
+              "attempts": 4,
+              "successes": 4,
               "failures": 0,
               "wins": 0,
-              "mean_outcome_score": 0.8732142857142857
+              "mean_outcome_score": 0.8757440476190477
             }
           },
-          "n_sessions": 3
+          "n_sessions": 4
         }
       },
       "bus_heavy/medium": {
@@ -9948,52 +10086,52 @@
         "nangate45": {
           "strategies": {
             "core_util_relief": {
-              "attempts": 32,
+              "attempts": 33,
               "successes": 4,
-              "failures": 28,
+              "failures": 29,
               "wins": 0,
-              "mean_outcome_score": 0.7473931109480642
+              "mean_outcome_score": 0.7499973601112542
             }
           },
-          "n_sessions": 32
+          "n_sessions": 33
         },
         "*": {
           "strategies": {
             "core_util_relief": {
-              "attempts": 32,
+              "attempts": 33,
               "successes": 4,
-              "failures": 28,
+              "failures": 29,
               "wins": 0,
-              "mean_outcome_score": 0.7473931109480642
+              "mean_outcome_score": 0.7499973601112542
             }
           },
-          "n_sessions": 32
+          "n_sessions": 33
         }
       },
       "*": {
         "nangate45": {
           "strategies": {
             "core_util_relief": {
-              "attempts": 77,
-              "successes": 15,
-              "failures": 62,
+              "attempts": 86,
+              "successes": 18,
+              "failures": 68,
               "wins": 0,
-              "mean_outcome_score": 0.7154674288769692
+              "mean_outcome_score": 0.778628426481401
             }
           },
-          "n_sessions": 77
+          "n_sessions": 86
         },
         "*": {
           "strategies": {
             "core_util_relief": {
-              "attempts": 77,
-              "successes": 15,
-              "failures": 62,
+              "attempts": 86,
+              "successes": 18,
+              "failures": 68,
               "wins": 0,
-              "mean_outcome_score": 0.7154674288769692
+              "mean_outcome_score": 0.778628426481401
             }
           },
-          "n_sessions": 77
+          "n_sessions": 86
         }
       },
       "logic/small": {
@@ -10026,104 +10164,104 @@
         "nangate45": {
           "strategies": {
             "core_util_relief": {
-              "attempts": 7,
+              "attempts": 9,
               "successes": 0,
-              "failures": 7,
+              "failures": 9,
               "wins": 0,
-              "mean_outcome_score": 0.5190476190476191
+              "mean_outcome_score": 0.6111111111111112
             }
           },
-          "n_sessions": 7
+          "n_sessions": 9
         },
         "*": {
           "strategies": {
             "core_util_relief": {
-              "attempts": 7,
+              "attempts": 9,
               "successes": 0,
-              "failures": 7,
+              "failures": 9,
               "wins": 0,
-              "mean_outcome_score": 0.5190476190476191
+              "mean_outcome_score": 0.6111111111111112
             }
           },
-          "n_sessions": 7
+          "n_sessions": 9
         }
       },
       "bus_heavy/medium": {
         "nangate45": {
           "strategies": {
             "core_util_relief": {
-              "attempts": 5,
+              "attempts": 6,
               "successes": 0,
-              "failures": 5,
+              "failures": 6,
               "wins": 0,
-              "mean_outcome_score": 0.7403610138544444
+              "mean_outcome_score": 0.8718673293960079
             }
           },
-          "n_sessions": 5
+          "n_sessions": 6
         },
         "*": {
           "strategies": {
             "core_util_relief": {
-              "attempts": 5,
+              "attempts": 6,
               "successes": 0,
-              "failures": 5,
+              "failures": 6,
               "wins": 0,
-              "mean_outcome_score": 0.7403610138544444
+              "mean_outcome_score": 0.8718673293960079
             }
           },
-          "n_sessions": 5
+          "n_sessions": 6
         }
       },
       "bus_heavy/small": {
         "nangate45": {
           "strategies": {
             "core_util_relief": {
-              "attempts": 7,
-              "successes": 1,
+              "attempts": 8,
+              "successes": 2,
               "failures": 6,
               "wins": 0,
-              "mean_outcome_score": 0.7818027210884354
+              "mean_outcome_score": 0.8757440476190477
             }
           },
-          "n_sessions": 7
+          "n_sessions": 8
         },
         "*": {
           "strategies": {
             "core_util_relief": {
-              "attempts": 7,
-              "successes": 1,
+              "attempts": 8,
+              "successes": 2,
               "failures": 6,
               "wins": 0,
-              "mean_outcome_score": 0.7818027210884354
+              "mean_outcome_score": 0.8757440476190477
             }
           },
-          "n_sessions": 7
+          "n_sessions": 8
         }
       },
       "crypto/small": {
         "nangate45": {
           "strategies": {
             "core_util_relief": {
-              "attempts": 8,
-              "successes": 0,
-              "failures": 8,
+              "attempts": 12,
+              "successes": 2,
+              "failures": 10,
               "wins": 0,
-              "mean_outcome_score": 0.5333333333333333
+              "mean_outcome_score": 0.8645822566752799
             }
           },
-          "n_sessions": 8
+          "n_sessions": 12
         },
         "*": {
           "strategies": {
             "core_util_relief": {
-              "attempts": 8,
-              "successes": 0,
-              "failures": 8,
+              "attempts": 12,
+              "successes": 2,
+              "failures": 10,
               "wins": 0,
-              "mean_outcome_score": 0.5333333333333333
+              "mean_outcome_score": 0.8645822566752799
             }
           },
-          "n_sessions": 8
+          "n_sessions": 12
         }
       },
       "logic/tiny": {
@@ -10226,80 +10364,80 @@
         "nangate45": {
           "strategies": {
             "utilization_reduce": {
-              "attempts": 104,
+              "attempts": 112,
               "successes": 0,
-              "failures": 96,
+              "failures": 104,
               "wins": 8,
               "mean_outcome_score": 0.35
             },
             "period_relax": {
-              "attempts": 52,
+              "attempts": 56,
               "successes": 0,
-              "failures": 52,
+              "failures": 56,
               "wins": 0,
               "mean_outcome_score": 0.35
             }
           },
-          "n_sessions": 104
+          "n_sessions": 112
         },
         "*": {
           "strategies": {
             "utilization_reduce": {
-              "attempts": 104,
+              "attempts": 112,
               "successes": 0,
-              "failures": 96,
+              "failures": 104,
               "wins": 8,
               "mean_outcome_score": 0.35
             },
             "period_relax": {
-              "attempts": 52,
+              "attempts": 56,
               "successes": 0,
-              "failures": 52,
+              "failures": 56,
               "wins": 0,
               "mean_outcome_score": 0.35
             }
           },
-          "n_sessions": 104
+          "n_sessions": 112
         }
       },
       "*": {
         "nangate45": {
           "strategies": {
             "utilization_reduce": {
-              "attempts": 104,
+              "attempts": 112,
               "successes": 0,
-              "failures": 96,
+              "failures": 104,
               "wins": 8,
               "mean_outcome_score": 0.35
             },
             "period_relax": {
-              "attempts": 52,
+              "attempts": 56,
               "successes": 0,
-              "failures": 52,
+              "failures": 56,
               "wins": 0,
               "mean_outcome_score": 0.35
             }
           },
-          "n_sessions": 104
+          "n_sessions": 112
         },
         "*": {
           "strategies": {
             "utilization_reduce": {
-              "attempts": 104,
+              "attempts": 112,
               "successes": 0,
-              "failures": 96,
+              "failures": 104,
               "wins": 8,
               "mean_outcome_score": 0.35
             },
             "period_relax": {
-              "attempts": 52,
+              "attempts": 56,
               "successes": 0,
-              "failures": 52,
+              "failures": 56,
               "wins": 0,
               "mean_outcome_score": 0.35
             }
           },
-          "n_sessions": 104
+          "n_sessions": 112
         }
       }
     },
@@ -10388,52 +10526,52 @@
         "nangate45": {
           "strategies": {
             "synth_memory_relax": {
-              "attempts": 8,
-              "successes": 8,
+              "attempts": 10,
+              "successes": 10,
               "failures": 0,
               "wins": 0,
-              "mean_outcome_score": 0.7374985445371628
+              "mean_outcome_score": 0.7666655022963969
             }
           },
-          "n_sessions": 8
+          "n_sessions": 10
         },
         "*": {
           "strategies": {
             "synth_memory_relax": {
-              "attempts": 8,
-              "successes": 8,
+              "attempts": 10,
+              "successes": 10,
               "failures": 0,
               "wins": 0,
-              "mean_outcome_score": 0.7374985445371628
+              "mean_outcome_score": 0.7666655022963969
             }
           },
-          "n_sessions": 8
+          "n_sessions": 10
         }
       },
       "bus_heavy/large": {
         "nangate45": {
           "strategies": {
             "synth_memory_relax": {
-              "attempts": 5,
-              "successes": 5,
+              "attempts": 7,
+              "successes": 7,
               "failures": 0,
               "wins": 0,
-              "mean_outcome_score": 0.7899999999999999
+              "mean_outcome_score": 0.8166666666666667
             }
           },
-          "n_sessions": 5
+          "n_sessions": 7
         },
         "*": {
           "strategies": {
             "synth_memory_relax": {
-              "attempts": 5,
-              "successes": 5,
+              "attempts": 7,
+              "successes": 7,
               "failures": 0,
               "wins": 0,
-              "mean_outcome_score": 0.7899999999999999
+              "mean_outcome_score": 0.8166666666666667
             }
           },
-          "n_sessions": 5
+          "n_sessions": 7
         }
       }
     }
