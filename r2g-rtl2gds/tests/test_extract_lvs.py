@@ -443,6 +443,27 @@ def test_stale_skip_marker_loses_to_fresh_klayout_log(tmp_path):
     assert result["status"] != "skipped", result    # KLayout verdict parsed instead
 
 
+def test_run_lvs_klayout_lvs_file_resolution_tolerates_no_match(tmp_path):
+    """run_lvs.sh resolves KLAYOUT_LVS_FILE via a grep pipeline under `set -euo pipefail`.
+    A no-LVS-deck platform (asap7) has NO KLAYOUT_LVS_FILE in its platform config.mk, so grep
+    exits 1; WITHOUT a trailing `|| true` the failed pipeline ABORTS run_lvs.sh BEFORE its
+    graceful no-deck skip path -> asap7 LVS never writes lvs_result.json=skipped and a lingering
+    prior-platform lvsdb is parsed as a false 'clean' (LVS leg of the 2026-06-30 fabricated-clean
+    bug). Extract the ACTUAL assignment line from run_lvs.sh and prove it survives a no-match
+    config under the script's own shell options (removing `|| true` re-breaks this)."""
+    run_lvs = Path(__file__).resolve().parents[1] / "scripts" / "flow" / "run_lvs.sh"
+    line = next(l for l in run_lvs.read_text().splitlines()
+                if l.strip().startswith("KLAYOUT_LVS_FILE=$("))
+    plat = tmp_path / "platdir"
+    plat.mkdir()
+    (plat / "config.mk").write_text("export DESIGN_NAME = demo\n")   # NO KLAYOUT_LVS_FILE
+    snippet = (f'set -euo pipefail\nPLATFORM_DIR="{plat}"\n{line}\n'
+               'echo "resolved=[${KLAYOUT_LVS_FILE}]"\n')
+    r = subprocess.run(["bash", "-c", snippet], capture_output=True, text=True)
+    assert r.returncode == 0, f"run_lvs.sh KLAYOUT_LVS_FILE line aborts on no-match: {r.stderr}"
+    assert "resolved=[]" in r.stdout, r.stdout
+
+
 # ---------------------------------------------------------------------------
 # match-then-writer-crash: a false lvs=fail (2026-06-28 PicoRV32_Based_SoC_fifo_basic)
 # ---------------------------------------------------------------------------

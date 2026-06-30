@@ -553,10 +553,15 @@ Yosys crash, typically caused by very large designs or specific RTL constructs t
      tree; `setup_rtl_designs.py --force` does `mkdir(exist_ok=True)`), so the prior platform's
      clean/clean survives and short-circuits the fresh-signoff path. `ingest_run.py` then persists
      the stale verdict into committed `knowledge.sqlite`.
-  2. Even if the gate fell through, asap7 LVS would still record `clean` not `skipped`:
-     `run_lvs.sh` writes the asap7 skip ONLY to `lvs/lvs_result.json`, and `extract_lvs.py` honored
-     that skip marker only when NO KLayout log was present — but a lingering June-19 nangate45
-     `lvs/6_lvs.log` made it re-derive the stale KLayout verdict into `reports/lvs.json`.
+  2. Even after the gate falls through, asap7 LVS would STILL record `clean` not `skipped`, via
+     two further holes that the gate fix exposed:
+     - `run_lvs.sh` resolved `KLAYOUT_LVS_FILE` with `KLAYOUT_LVS_FILE=$(grep … platform/config.mk …)`;
+       asap7's config has no such line, so under `set -euo pipefail` the no-match grep ABORTED
+       run_lvs.sh **before** its graceful no-deck skip path — so `lvs/lvs_result.json=skipped` was
+       never written. `fix_signoff._ensure_baseline` swallows the abort (`RUN_LVS … || true`), then
+       `extract_lvs` parsed the lingering June-19 `lvs/6_lvs.lvsdb` into a false `clean`.
+     - `extract_lvs.py` honored the skip marker only when NO KLayout log was present — a lingering
+       nangate45 `lvs/6_lvs.log` would have defeated even a written skip marker.
 - **Fix (2026-06-30, branch r2g-debug/asap7-round):**
   1. `_run_flow` now DELETES `reports/{drc,lvs,rcx,route,timing_check}.json` before re-flowing —
      the single upstream chokepoint every campaign flow passes through (and upstream of every
@@ -565,11 +570,16 @@ Yosys crash, typically caused by very large designs or specific RTL constructs t
      platform-correct signoff, and ingest only ever reads fresh-or-absent reports. Platform-agnostic
      (also closes intra-platform reflow staleness). Arm dirs already exclude `reports/`, so it is a
      no-op for A/B arms.
-  2. `extract_lvs.py` skip gate now uses **mtime-precedence** (honor the skip marker when it is at
+  2. `run_lvs.sh`'s `KLAYOUT_LVS_FILE=$(grep …)` now ends with `|| true` so a no-match grep on a
+     no-deck platform no longer aborts under `set -euo pipefail` — the graceful skip path is now
+     reachable and writes `lvs/lvs_result.json=skipped`.
+  3. `extract_lvs.py` skip gate now uses **mtime-precedence** (honor the skip marker when it is at
      least as fresh as the newest KLayout artifact), mirroring the netgen-vs-KLayout precedence — so
-     a fresh asap7 skip beats a lingering nangate45 `6_lvs.log` → honest `lvs=skipped`.
-  - Tests: `test_engineer_loop.py::test_run_flow_invalidates_stale_signoff_reports`,
-    `test_extract_lvs.py::test_fresh_skip_marker_beats_stale_klayout_log` (+ converse).
+     the fresh asap7 skip beats a lingering nangate45 `6_lvs.log` → honest `lvs=skipped`.
+  - Validated end-to-end on apb_master: fresh asap7 signoff → `drc` honest verdict + `lvs=skipped`.
+    Tests: `test_engineer_loop.py::test_run_flow_invalidates_stale_signoff_reports`,
+    `test_extract_lvs.py::test_fresh_skip_marker_beats_stale_klayout_log` (+ converse),
+    `test_extract_lvs.py::test_run_lvs_klayout_lvs_file_resolution_tolerates_no_match`.
 - **Skill-level alarm:** a `clean` run whose `reports/*.json` is OLDER than its own
   `backend/RUN_*/results/6_final.gds`, or an asap7/no-LVS-deck design recording `lvs=clean` instead
   of `lvs=skipped`, means a stale prior-platform report was trusted. Known gap (follow-up): the loop

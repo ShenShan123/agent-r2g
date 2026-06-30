@@ -7,7 +7,7 @@ set -euo pipefail
 # Results are collected into <project-dir>/lvs/
 
 PROJECT_DIR="${1:-}"
-PLATFORM="${2:-nangate45}"
+PLATFORM="${2:-asap7}"
 # Derive FLOW_VARIANT from project directory basename (matching run_orfs.sh logic)
 if [[ -n "${3:-}" ]]; then
   FLOW_VARIANT="$3"
@@ -54,9 +54,17 @@ if [[ ! -f "$GDS_FILE" ]]; then
   exit 1
 fi
 
-# Check if LVS rule file exists for this platform
+# Check if LVS rule file exists for this platform.
+# `|| true`: on a platform whose config.mk has NO KLAYOUT_LVS_FILE (e.g. asap7), grep exits
+# 1; under `set -euo pipefail` (line 2) the failed pipeline would ABORT run_lvs.sh BEFORE the
+# graceful no-deck skip path below (line ~81) -- so asap7 LVS never wrote
+# lvs/lvs_result.json=skipped, and _ensure_baseline (which swallows the abort with its own
+# `|| true`) then let extract_lvs parse a STALE prior-platform 6_lvs.lvsdb into reports/lvs.json
+# as a false 'clean' (the LVS leg of the 2026-06-30 fabricated-clean bug, surfaced once the
+# stale-report gate fix routed asap7 through run_lvs.sh). Tolerate the no-match so the skip
+# path is reachable. See references/failure-patterns.md "Stale prior-platform signoff report".
 PLATFORM_DIR="$FLOW_DIR/platforms/$PLATFORM"
-KLAYOUT_LVS_FILE=$(grep 'KLAYOUT_LVS_FILE' "$PLATFORM_DIR/config.mk" 2>/dev/null | head -1 | sed 's/.*=\s*//' | sed "s|\$(PLATFORM_DIR)|$PLATFORM_DIR|g" | tr -d ' ')
+KLAYOUT_LVS_FILE=$(grep 'KLAYOUT_LVS_FILE' "$PLATFORM_DIR/config.mk" 2>/dev/null | head -1 | sed 's/.*=\s*//' | sed "s|\$(PLATFORM_DIR)|$PLATFORM_DIR|g" | tr -d ' ' || true)
 
 # Resolve the actual file path
 KLAYOUT_LVS_RESOLVED=""
