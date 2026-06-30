@@ -125,6 +125,27 @@ _SYNTH_ARM_TIMEOUT = 1800   # synth A/B arm: bound the synth stage (a memcap arm
 
 
 def _run_flow(entry: dict) -> int:
+    # Invalidate STALE project-local signoff verdicts BEFORE re-flowing. reports/{drc,lvs,
+    # rcx,route,timing_check}.json are written ONLY by extract_*.py (via fix_signoff); a
+    # re-flow -- especially a /r2g-debug platform RE-TARGET (config.mk nangate45 -> asap7) --
+    # produces a NEW layout that makes any pre-existing verdict stale, yet nothing else
+    # deletes them (run_orfs.sh clean_all wipes only ORFS's internal build tree;
+    # setup_rtl_designs.py --force does mkdir(exist_ok=True)). Left in place, the first-pass
+    # clean gate (_signoff_status, ~line 918) reads the stale prior-platform clean/clean and
+    # _mark_clean's WITHOUT running fresh signoff -- the 2026-06-30 fabricated-clean bug (all
+    # 19 asap7 "clean" rows inherited June-19 nangate45 verdicts). Deleting here is the single
+    # upstream chokepoint every campaign flow passes through: it forces _signoff_status ->
+    # unknown (so the gate falls through to _run_fix -> fix_signoff._ensure_baseline, which
+    # runs FRESH platform-correct signoff) AND means every downstream _ingest reads only
+    # fresh-or-absent reports. Platform-agnostic by design. (Arm dirs already exclude reports/
+    # in the copytree, so this is a no-op for A/B arms.) See references/failure-patterns.md
+    # "Stale prior-platform signoff report read as first-pass clean (2026-06-30)".
+    _reports = Path(entry["project_path"]) / "reports"
+    for _name in ("drc", "lvs", "rcx", "route", "timing_check"):
+        try:
+            (_reports / f"{_name}.json").unlink(missing_ok=True)
+        except OSError:
+            pass
     env = os.environ.copy()
     # A SYNTH backend-abort A/B arm is judged ONLY on 'synth cleared' (_arm_metric synth=True),
     # so it does NOT need to flow place/route -- run synth-ONLY. arm B (recipe) clears synth in
@@ -1451,7 +1472,7 @@ def _fmax_one(entry: dict, *, place_fast: bool = True) -> float | str | None:
     # No usable winner on disk yet -> run the proxy search (bounded cost; no --verify).
     if not isinstance(period, (int, float)):
         fmax = _script("R2G_LOOP_FMAX", REPORTS / "fmax_search.py")
-        cmd = [sys.executable, fmax, str(proj), entry.get("platform", "nangate45")]
+        cmd = [sys.executable, fmax, str(proj), entry.get("platform", "asap7")]
         if place_fast:
             cmd.append("--place-fast")
         subprocess.run(cmd)
@@ -1548,7 +1569,7 @@ def main(argv=None) -> int:
     pa = sub.add_parser("add")
     pa.add_argument("--ledger", required=True, type=Path)
     pa.add_argument("--project", required=True)
-    pa.add_argument("--platform", default="nangate45")
+    pa.add_argument("--platform", default="asap7")
     ps = sub.add_parser("status")
     ps.add_argument("--ledger", required=True, type=Path)
     pd = sub.add_parser("ab-drain", help="fire A/B trials for pending candidates")

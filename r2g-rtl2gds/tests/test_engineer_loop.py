@@ -46,6 +46,30 @@ def test_process_one_clean_path(tmp_path, monkeypatch):
     assert ("flow", "d0") in calls and ("ingest", "d0") in calls
 
 
+def test_run_flow_invalidates_stale_signoff_reports(tmp_path, monkeypatch):
+    """A re-flow MUST delete stale project-local signoff verdicts so the first-pass clean gate
+    cannot _mark_clean from a PRIOR platform's reports -- the 2026-06-30 fabricated-clean bug
+    (a /r2g-debug asap7 re-target inherited June-19 nangate45 reports/{drc,lvs}.json=clean and
+    19 designs were marked clean WITHOUT running fresh asap7 signoff). _run_flow is the upstream
+    chokepoint: after it deletes them, _signoff_status returns unknown and the gate falls
+    through to _run_fix -> fix_signoff._ensure_baseline (fresh platform-correct signoff)."""
+    proj = tmp_path / "proj"
+    (proj / "reports").mkdir(parents=True)
+    stale = ("drc", "lvs", "rcx", "route", "timing_check")
+    for chk in stale:
+        (proj / "reports" / f"{chk}.json").write_text('{"status": "clean"}', encoding="utf-8")
+
+    class _R:                      # minimal CompletedProcess stand-in (no real ORFS flow)
+        returncode = 0
+    monkeypatch.setattr(engineer_loop.subprocess, "run", lambda *a, **k: _R())
+
+    rc = engineer_loop._run_flow({"project_path": str(proj), "platform": "asap7"})
+    assert rc == 0
+    for chk in stale:
+        assert not (proj / "reports" / f"{chk}.json").exists(), \
+            f"{chk}.json was NOT invalidated before re-flow (stale-clean short-circuit risk)"
+
+
 def test_process_one_fix_path_then_escalate(tmp_path, monkeypatch):
     """Violations + fix loop fails to clear -> escalated, loop continues."""
     import knowledge_db

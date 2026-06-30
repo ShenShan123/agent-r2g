@@ -252,12 +252,22 @@ def main():
 
     lvs_dir = project_root / 'lvs'
 
-    # Honor a fresh skip marker only if no actual LVS log exists. Stale
-    # `lvs_result.json` files from a previous run (when the platform had no
-    # rules) must NOT override a successful new LVS log/lvsdb.
+    # Honor a skip marker when it is at least as FRESH as the newest KLayout artifact --
+    # i.e. the MOST-RECENT LVS run was the skip (no .lylvs rule for this platform). The old
+    # gate ("honor skip only if NO 6_lvs.log/lvs_run.log present") was defeated by a platform
+    # RE-TARGET: a fresh asap7 skip (run_lvs.sh:87 rewrites lvs_result.json on every run) was
+    # IGNORED because a lingering June-19 nangate45 6_lvs.log made log_present=True, so extract
+    # re-derived the STALE nangate45 KLayout verdict into reports/lvs.json (the LVS leg of the
+    # 2026-06-30 fabricated-clean bug). Use the same mtime-precedence as the netgen path below.
+    # nangate45 (KLayout LVS) never writes lvs_result.json, so skip_file is absent and this
+    # branch never fires -> byte-identical. See failure-patterns.md "Stale prior-platform
+    # signoff report read as first-pass clean".
     skip_file = lvs_dir / 'lvs_result.json'
-    log_present = (lvs_dir / '6_lvs.log').exists() or (lvs_dir / 'lvs_run.log').exists()
-    if skip_file.exists() and not log_present:
+    _skip_klayout_mtime = max(
+        (p.stat().st_mtime for p in (lvs_dir / '6_lvs.lvsdb', lvs_dir / '6_lvs.log',
+                                     lvs_dir / 'lvs_run.log') if p.exists()),
+        default=0.0)
+    if skip_file.exists() and skip_file.stat().st_mtime >= _skip_klayout_mtime:
         try:
             skip_data = json.loads(skip_file.read_text(encoding='utf-8'))
             if skip_data.get('status') == 'skipped':

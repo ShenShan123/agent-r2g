@@ -408,6 +408,41 @@ def test_netgen_takes_precedence_when_fresher(tmp_path):
     assert result.get("tool") == "netgen", result
 
 
+def test_fresh_skip_marker_beats_stale_klayout_log(tmp_path):
+    """Platform RE-TARGET (nangate45 -> asap7): run_lvs.sh rewrites lvs/lvs_result.json=
+    skipped on every asap7 run (no .lylvs deck), but a lingering June-19 nangate45 6_lvs.log
+    remains on disk. The FRESH skip marker must win -> status='skipped', NOT the stale KLayout
+    verdict. This is the LVS leg of the 2026-06-30 fabricated-clean bug: the old gate ('honor
+    skip only if no log present') was defeated by the lingering log and re-derived the stale
+    nangate45 verdict. Mtime-precedence guard."""
+    proj = _make_project(tmp_path, log_6_lvs="netlists don't match\n")   # stale nangate45 log
+    lvs_dir = proj / "lvs"
+    (lvs_dir / "lvs_result.json").write_text(
+        json.dumps({"status": "skipped",
+                    "reason": "No LVS rules available for platform asap7"}),
+        encoding="utf-8")
+    os.utime(lvs_dir / "6_lvs.log", (1_000_000, 1_000_000))          # stale KLayout
+    os.utime(lvs_dir / "lvs_result.json", (2_000_000, 2_000_000))    # fresh skip
+    out = tmp_path / "lvs.json"
+    result = _run_script(proj, out)
+    assert result["status"] == "skipped", result
+
+
+def test_stale_skip_marker_loses_to_fresh_klayout_log(tmp_path):
+    """Converse: a STALE asap7 skip marker must NOT override a FRESH KLayout LVS run (the
+    design re-targeted back to a KLayout-LVS platform). Most-recent tool wins -> the KLayout
+    verdict is parsed, not the stale skip."""
+    proj = _make_project(tmp_path, log_6_lvs="netlists don't match\n")   # fresh KLayout fail
+    lvs_dir = proj / "lvs"
+    (lvs_dir / "lvs_result.json").write_text(
+        json.dumps({"status": "skipped", "reason": "stale prior round"}), encoding="utf-8")
+    os.utime(lvs_dir / "lvs_result.json", (1_000_000, 1_000_000))    # stale skip
+    os.utime(lvs_dir / "6_lvs.log", (2_000_000, 2_000_000))          # fresh KLayout
+    out = tmp_path / "lvs.json"
+    result = _run_script(proj, out)
+    assert result["status"] != "skipped", result    # KLayout verdict parsed instead
+
+
 # ---------------------------------------------------------------------------
 # match-then-writer-crash: a false lvs=fail (2026-06-28 PicoRV32_Based_SoC_fifo_basic)
 # ---------------------------------------------------------------------------

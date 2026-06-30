@@ -535,6 +535,49 @@ Yosys crash, typically caused by very large designs or specific RTL constructs t
   a `stop_unknown` DRC verdict in a `fix_log` is the alarm that the baseline run was
   skipped.
 
+### Stale prior-platform signoff report read as first-pass clean (2026-06-30)
+
+- **Symptom:** a platform RE-TARGET round (`/r2g-debug PLATFORM=asap7` re-points the whole
+  corpus's `config.mk` nangate45→asap7 and re-flows) marks designs **clean WITHOUT running
+  asap7 signoff**. The `runs` rows read `drc=clean, lvs=clean, rcx=NULL`, but `reports/drc.json`
+  and `reports/lvs.json` are dated to the PRIOR (nangate45) round and no fresh KLayout DRC
+  (`*.lyrdb`) or asap7 LVS-skip marker exists. On the first asap7 wave **all 19 "clean" rows
+  were fabricated this way** (every one's `reports/drc.json` was older than its own asap7
+  `6_final.gds`). The honesty.py gates stayed green — they verify fail/event parity, not whether
+  a *clean* verdict is real — so only an mtime cross-check (report vs the current GDS) exposes it.
+- **Root cause (two compounding holes):**
+  1. `engineer_loop._signoff_status` reads `reports/{drc,lvs}.json` with **no freshness/platform
+     check**; the process_one first-pass gate `_mark_clean`s when both are clean — BEFORE `_run_fix`
+     (hence before `fix_signoff._ensure_baseline`, the only GDS-mtime staleness guard, ever runs).
+     Nothing deletes `reports/*.json` on a re-flow (`run_orfs.sh clean_all` wipes only ORFS's build
+     tree; `setup_rtl_designs.py --force` does `mkdir(exist_ok=True)`), so the prior platform's
+     clean/clean survives and short-circuits the fresh-signoff path. `ingest_run.py` then persists
+     the stale verdict into committed `knowledge.sqlite`.
+  2. Even if the gate fell through, asap7 LVS would still record `clean` not `skipped`:
+     `run_lvs.sh` writes the asap7 skip ONLY to `lvs/lvs_result.json`, and `extract_lvs.py` honored
+     that skip marker only when NO KLayout log was present — but a lingering June-19 nangate45
+     `lvs/6_lvs.log` made it re-derive the stale KLayout verdict into `reports/lvs.json`.
+- **Fix (2026-06-30, branch r2g-debug/asap7-round):**
+  1. `_run_flow` now DELETES `reports/{drc,lvs,rcx,route,timing_check}.json` before re-flowing —
+     the single upstream chokepoint every campaign flow passes through (and upstream of every
+     `_ingest`). A re-flow makes any prior verdict stale by construction, so `_signoff_status`
+     now returns `unknown`, the gate falls through to `_run_fix` → `_ensure_baseline` → FRESH
+     platform-correct signoff, and ingest only ever reads fresh-or-absent reports. Platform-agnostic
+     (also closes intra-platform reflow staleness). Arm dirs already exclude `reports/`, so it is a
+     no-op for A/B arms.
+  2. `extract_lvs.py` skip gate now uses **mtime-precedence** (honor the skip marker when it is at
+     least as fresh as the newest KLayout artifact), mirroring the netgen-vs-KLayout precedence — so
+     a fresh asap7 skip beats a lingering nangate45 `6_lvs.log` → honest `lvs=skipped`.
+  - Tests: `test_engineer_loop.py::test_run_flow_invalidates_stale_signoff_reports`,
+    `test_extract_lvs.py::test_fresh_skip_marker_beats_stale_klayout_log` (+ converse).
+- **Skill-level alarm:** a `clean` run whose `reports/*.json` is OLDER than its own
+  `backend/RUN_*/results/6_final.gds`, or an asap7/no-LVS-deck design recording `lvs=clean` instead
+  of `lvs=skipped`, means a stale prior-platform report was trusted. Known gap (follow-up): the loop
+  does not yet positively re-run RCX, so asap7 clean rows carry `rcx=NULL` (honest absence, not a
+  false `complete`); other read-only reporting tools (`tools/run_signoff.sh`,
+  `aggregate_signoff_results.py`, the dashboard) share the unguarded-read class but are off the
+  learning path.
+
 ### Re-running signoff after ORFS scratch dirs were cleaned
 
 - **Symptom:** `run_drc.sh` reports `ERROR: ORFS config not found at .../config.mk` or "Running DRC for design: top" with a GDS path that points to a *different* project (e.g., `iccad2015_unit02_in2`'s GDS gets picked up for `button_controller` because both have `DESIGN_NAME=top`). Make may also start re-running place/cts/route, taking 30+ minutes for a "DRC" invocation.
