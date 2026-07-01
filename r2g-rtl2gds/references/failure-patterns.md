@@ -2351,6 +2351,20 @@ escalations are *ledger-only* — `_safe_process` has no knowledge-DB conn — s
 `failure_event`; honesty parity is unaffected. A genuinely synth-aborted design like these re-queues
 to its honest `synth_memory_residual` reason once its log is fully written.)
 
+- **Root-cause instance (2026-06-30): a `worker_exc:ValueError` that was a LATENT escalation-reason gap.**
+  Two asap7 designs escalated `worker_exc:ValueError` with note `ValueError: unknown escalation reason:
+  synth_memory_residual`. `process_one` legitimately emits `reason="synth_memory_residual"`
+  (engineer_loop.py:912, the synth_memory_relax residual added 2026-06-28), but `synth_memory_residual`
+  was **missing from `escalations.REASONS`** — so `open_escalation` raised `ValueError` (escalations.py:73),
+  the worker crashed, and the design was mislabeled `worker_exc:ValueError`, burying the honest reason.
+  This is the EXACT "emitted by process_one but never registered here" latent-crash class the
+  `place_density_residual` comment in `escalations.py` already flagged (2026-06-23). **Fix:** add
+  `synth_memory_residual` to `escalations.REASONS`. Test: `tests/test_escalations.py::
+  test_synth_memory_residual_is_valid_reason`. Reconcile: re-queued the 2 mislabeled designs (fixed code
+  escalates them honestly). **Lesson:** any new escalation reason the loop emits MUST be added to
+  `escalations.REASONS` in the SAME change, or it is a latent worker crash that fires only when that
+  residual occurs.
+
 ### Sub-variant: A/B re-plan resets clean arms before judge → candidate never promotes (2026-06-30)
 
 - **Symptom:** a fresh-platform round (asap7) LEARNS candidates (`recipe_status` candidate>0) and the

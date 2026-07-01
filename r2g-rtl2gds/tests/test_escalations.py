@@ -57,6 +57,20 @@ def test_route_congestion_residual_is_valid_reason(tmp_path):
     assert escalations.list_open(conn)[0]["escalation_id"] == eid
 
 
+def test_synth_memory_residual_is_valid_reason(tmp_path):
+    """process_one escalates `synth_memory_residual` when synth_memory_relax cannot clear
+    a too-large memory (needs a fakeram macro) — engineer_loop.py:912. It MUST be in REASONS,
+    else open_escalation raises ValueError, the worker crashes, and the design is mislabeled
+    `worker_exc:ValueError` (burying the honest reason). Same latent-crash class as the
+    2026-06-23 place_density_residual gap (2026-06-30)."""
+    conn = _conn(tmp_path)
+    eid = escalations.open_escalation(
+        conn, design="uart2axi4_x", project_path="/p/uart2axi4_x", run_id="r1",
+        reason="synth_memory_residual", notes="memory too large even at cap; needs fakeram")
+    assert escalations.list_open(conn)[0]["escalation_id"] == eid
+    assert "synth_memory_residual" in escalations.REASONS
+
+
 def test_resolve_for_design_closes_all_open(tmp_path):
     """When a later run drives a design clean, every open escalation for it is
     auto-drained so the queue is not a graveyard of superseded aborts (2026-06-17)."""

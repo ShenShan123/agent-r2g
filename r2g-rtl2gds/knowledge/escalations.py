@@ -38,7 +38,15 @@ REASONS = ("unknown_symptom", "catalog_exhausted", "unseen_crash",
            # die lever (CORE_UTILIZATION) is exhausted (place_density_residual was emitted
            # by process_one since 2026-06-23 but never registered here — a latent crash on
            # the rare FLW-0024 residual; pin_overflow_residual added 2026-06-26).
-           "place_density_residual", "pin_overflow_residual")
+           "place_density_residual", "pin_overflow_residual",
+           # A synth abort whose synth_memory_relax recovery (raise SYNTH_MEMORY_MAX_BITS +
+           # re-flow) could NOT clear it — the memory is too large to FF-expand and needs a
+           # fakeram hard macro (engineer_loop.py process_one, 2026-06-28). KNOWN, recipe-backed
+           # residual — NOT an unseen crash. Emitted by the loop since 2026-06-28 but never
+           # registered here → open_escalation raised ValueError → the worker CRASHED and the
+           # design was mislabeled `worker_exc:ValueError`, burying the honest reason (the EXACT
+           # latent-crash class documented for place_density_residual above; fixed 2026-06-30).
+           "synth_memory_residual")
 
 
 def _now() -> str:
