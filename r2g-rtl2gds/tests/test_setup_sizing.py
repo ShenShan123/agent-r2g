@@ -55,3 +55,36 @@ def test_no_bucket_emits_a_fixed_die_area(tmp_path):
         cfg, _ = _gen(tmp_path / f"n{n}", _mk_rtl(tmp_path / f"n{n}", n))
         assert "DIE_AREA" not in cfg, f"{n}-line design got a fixed DIE_AREA"
         assert "CORE_UTILIZATION" in cfg
+
+
+def _gen_platform(tmp_path, rtl, platform):
+    proj = tmp_path / "proj"
+    (proj / "constraints").mkdir(parents=True)
+    cfg_path, _complexity, _cat = srd.generate_config_mk(
+        proj, "demo", platform, [rtl], None)
+    return Path(cfg_path).read_text()
+
+
+def test_sky130_wires_feedthrough_hook(tmp_path):
+    # sky130 uses Netgen LVS: ORFS global_place `remove_buffers` merges `assign out = in`
+    # port-feedthrough nets onto ONE net -> SPICE can't express it -> Netgen "Top level
+    # cell failed pin matching" (top_pin_mismatch). buffer_port_feedthroughs.tcl (wired as
+    # POST_GLOBAL_PLACE_TCL) splits them. mk_sky130_project.py wires it; the
+    # setup_rtl_designs.py re-point path MUST too or a whole re-pointed round's feedthrough
+    # designs top_pin_mismatch with no hook (2026-07-01 parity gap: picorv32_mem_adapter,
+    # sirv_gnrl_icb_arbt). Mirrors the known PDN-floor parity gap. See failure-patterns.md.
+    cfg = _gen_platform(tmp_path, _mk_rtl(tmp_path, 20), "sky130hd")
+    assert "POST_GLOBAL_PLACE_TCL" in cfg
+    assert "buffer_port_feedthroughs.tcl" in cfg
+
+
+def test_sky130hs_wires_feedthrough_hook(tmp_path):
+    cfg = _gen_platform(tmp_path, _mk_rtl(tmp_path, 20), "sky130hs")
+    assert "buffer_port_feedthroughs.tcl" in cfg
+
+
+def test_nangate45_omits_feedthrough_hook(tmp_path):
+    # KLayout-LVS platforms (nangate45/asap7/gf180/ihp) don't need the sky130-specific
+    # Netgen feedthrough hook -- wiring it there would be dead config noise.
+    cfg = _gen_platform(tmp_path, _mk_rtl(tmp_path, 20), "nangate45")
+    assert "POST_GLOBAL_PLACE_TCL" not in cfg

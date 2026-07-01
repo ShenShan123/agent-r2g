@@ -1103,6 +1103,32 @@ strategy_ids: [netgen_diode_normalize, buffer_port_feedthroughs]
    Both were LVS-setup/representation residuals, not layout defects. The PD flow itself was
    flawless across the wave: 0 DRC fails, 0 crashes, 0 timeouts.
 
+6. **The feedthrough hook was ORPHANED from the `setup_rtl_designs.py` re-point path (found
+   2026-07-01, /r2g-debug sky130hd round; FIXED `tools/setup_rtl_designs.py`).** The port-feedthrough
+   fix (cause 5) is wired ONLY by `tools/mk_sky130_project.py` (`export POST_GLOBAL_PLACE_TCL =
+   …/buffer_port_feedthroughs.tcl`). But a `/r2g-debug` platform round is bootstrapped by
+   `tools/setup_rtl_designs.py --platform sky130hd --force`, whose `generate_config_mk` did NOT
+   emit that line — so every re-pointed design's config.mk lacked the hook. Feedthrough designs
+   (`picorv32_mem_adapter`, `sirv_gnrl_icb_arbt`) therefore hit `global_place`'s `remove_buffers`,
+   merged their `assign out = in` ports onto one net, and Netgen honestly reported
+   `top_pin_mismatch` ("Netlists match uniquely with port errors" + "Top level cell failed pin
+   matching") — DRC clean, LVS mismatch, escalated `catalog_exhausted`. The honesty gates cannot
+   see this (the design is honestly `mismatch`, honestly escalated); it surfaces only by tracing an
+   individual escalation to "is the documented fix actually wired for THIS setup path?". The symptom
+   `top_pin_mismatch` carried `strategies: {}` in heuristics.json because the 2026-06-11 fix was
+   validated by hand, never recorded as a `fix_event`, so the learner never attached it.
+   **This is the SAME parity class as the PDN-floor gap** (`setup_rtl_designs.py` omits config.mk
+   provisions `mk_sky130_project.py` includes). **Fix:** `generate_config_mk` now emits
+   `POST_GLOBAL_PLACE_TCL = …/buffer_port_feedthroughs.tcl` for `platform in (sky130hd, sky130hs)`
+   (KLayout-LVS platforms don't need it). TDD: `tests/test_setup_sizing.py::test_sky130_wires_feedthrough_hook`
+   (+ sky130hs + nangate45-omits). Suite green (6/6 setup_sizing, 34/34 related). **OPEN Layer-2
+   follow-up:** this round's already-generated 671 pending configs were written PRE-fix, so they
+   still lack the hook — a re-pointed round needs EITHER a between-waves targeted config.mk re-point
+   for pending (not in-flow) designs, OR loop-side recovery (detect `top_pin_mismatch` → add hook →
+   re-flow, mirroring the FLW-0024/PPL-0024/PDN-0185 loop self-heal pattern). End-to-end validation:
+   re-flowed `picorv32_mem_adapter` with the hook added to its config.mk (in-progress at writing;
+   verify LVS `top_pin_mismatch → clean`).
+
 6. **`extract_lvs.py` clobbered a clean Netgen verdict on DRC-fail designs (2026-06-13,
    FIXED).** `extract_lvs.py` is a *KLayout* lvsdb/log parser. A Netgen run leaves NO KLayout
    artifacts (`6_lvs.lvsdb`/`6_lvs.log`/`lvs_run.log` all absent) — only

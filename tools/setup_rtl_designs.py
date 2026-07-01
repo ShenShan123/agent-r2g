@@ -459,6 +459,25 @@ def generate_config_mk(project_dir, design_name, platform, rtl_files, sdc_path,
     if unresolved:
         include_line = f"\nexport VERILOG_INCLUDE_DIRS = {project_dir / 'rtl'}"
 
+    # Port-feedthrough policy (sky130 Netgen LVS only, 2026-07-01 parity fix): ORFS
+    # global_place runs `remove_buffers`, merging `assign out = in` port-feedthrough nets
+    # onto ONE net. SPICE cannot express two top-level ports on one node, so Magic keeps
+    # only one name and Netgen reports "Top level cell failed pin matching"
+    # (mismatch_class=top_pin_mismatch) even though every device/net matches uniquely --
+    # picorv32_mem_adapter / sirv_gnrl_icb_arbt this round. buffer_port_feedthroughs.tcl
+    # (POST_GLOBAL_PLACE_TCL hook, no-op for feedthrough-free designs) splits them.
+    # mk_sky130_project.py already wires this; the setup_rtl_designs.py re-point path did
+    # NOT -> a whole re-pointed sky130 round's feedthrough designs top_pin_mismatch with no
+    # hook to prevent it (same class as the known PDN-floor parity gap). KLayout-LVS
+    # platforms (nangate45/asap7/gf180/ihp) don't need it. See references/failure-patterns.md
+    # "sky130 Netgen LVS: top-level pin-matching residuals".
+    fdbuf_line = ""
+    if platform in ("sky130hd", "sky130hs"):
+        _fdbuf_hook = (Path(__file__).resolve().parent.parent
+                       / "r2g-rtl2gds" / "scripts" / "flow" / "orfs_hooks"
+                       / "buffer_port_feedthroughs.tcl")
+        fdbuf_line = f"\nexport POST_GLOBAL_PLACE_TCL = {_fdbuf_hook}"
+
     content = f"""export DESIGN_NAME = {design_name}
 export PLATFORM    = {platform}
 
@@ -468,7 +487,7 @@ export SDC_FILE      = {sdc_path}
 {sizing}
 export PLACE_DENSITY_LB_ADDON = {place_density}
 
-export ABC_AREA = 1{mem_line}{include_line}
+export ABC_AREA = 1{mem_line}{include_line}{fdbuf_line}
 """
     config_path = project_dir / "constraints" / "config.mk"
     config_path.write_text(content, encoding="utf-8")
