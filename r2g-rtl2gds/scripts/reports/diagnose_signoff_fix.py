@@ -555,7 +555,7 @@ def _load_recipes(proj: Path, *, check: str, drc: dict, lvs: dict,
         # knowledge_db unavailable: degrade to the writer's primary path (dir
         # basename split), which is where most harvested designs land.
         fam = (proj.name or design_name or "").split("_", 1)[0].lower()
-    plat = cfg.get("PLATFORM", "nangate45")
+    plat = cfg.get("PLATFORM", "asap7")
     data = json.loads(hp.read_text(encoding="utf-8"))
     entry = (data.get("families", {}).get(fam, {})
              .get("platforms", {}).get(plat, {}).get("fix_recipes"))
@@ -735,7 +735,7 @@ def main(argv=None) -> int:
     exclude = [x for x in args.exclude.split(",") if x]
     # Symptom-first lookup (spec 2026-06-09): prefer the symptom-indexed recipe +
     # pooled cross-platform prior; fall back to the legacy family/platform recipe.
-    plat = cfg.get("PLATFORM", "nangate45")
+    plat = cfg.get("PLATFORM", "asap7")
     # Decision-8 indexed lookup first (engineer-loop §5.7): exact (symptom,
     # design_class, platform) -> pooled class -> pooled platform; only PROMOTED
     # recipes rank live. Falls back to the symptom/family path when absent.

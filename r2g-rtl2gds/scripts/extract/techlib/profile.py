@@ -9,7 +9,7 @@ across three unrelated places:
   * **well-tap / endcap master substrings** — ``_PLATFORM_TAP_EXTRA`` + the base
     ``["TAP"]`` in ``techlib.liberty`` (identical to ``features/lib_db.py``).
   * **cell-type strategy** (curated nangate map vs. a runtime-built map) — the
-    ``(platform or "nangate45").lower() == "nangate45"`` test in
+    ``(platform or "asap7").lower() == "nangate45"`` test in
     ``techlib.cell_types.resolve_cell_type_map``.
   * **congestion's nangate routing-layer fallback** — ``techlib.lef.DEFAULT_LAYER_INFO``
     (the per-layer pitch/direction table used when a tech LEF yields no routing layers).
@@ -121,7 +121,7 @@ def _tap_patterns_for(platform: str) -> Tuple[str, ...]:
 
 # The six ORFS platforms this checkout ships. nangate45 uses the curated cell-type map
 # (cell_type_strategy="curated"), mirroring resolve_cell_type_map's
-# `(platform or "nangate45").lower() == "nangate45"` test; everyone else is "runtime".
+# `(platform or "asap7").lower() == "nangate45"` test; everyone else is "runtime".
 _ORFS_PLATFORMS = ("nangate45", "sky130hd", "sky130hs", "asap7", "gf180", "ihp-sg13g2")
 
 

@@ -293,14 +293,14 @@ def _resolve_supply_voltage(pwr: str, platform: str) -> str:
     return profile.get_profile(platform).supply_voltage_str
 
 
-def resolve(config_mk: str, platform: str = "nangate45") -> dict[str, str]:
+def resolve(config_mk: str, platform: str = "asap7") -> dict[str, str]:
     """Resolve the six platform vars, returning an ordered-by-contract dict.
 
     Keys: LIB_FILES, TECH_LEF, SC_LEF, ADDITIONAL_LIBS, ADDITIONAL_LEFS, SUPPLY_VOLTAGE.
     Values preserve any trailing whitespace from the make expansion (the contract). This
     is the Python API; ``main()`` prints these as ``KEY=VALUE`` lines.
     """
-    platform = platform or "nangate45"
+    platform = platform or "asap7"
     config_mk = _abs_config(config_mk)
     flow_dir = _flow_dir()
     # platform_dir anchors the glob fallbacks under $FLOW_DIR/platforms/<plat>. With no

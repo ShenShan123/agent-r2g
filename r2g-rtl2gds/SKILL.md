@@ -20,7 +20,7 @@ metadata:
   warnings:
     - Core skill operations are file-based and safe
     - Backend runs invoke make inside ORFS and may take several minutes
-    - Default platform is nangate45; change PLATFORM in config.mk for other PDKs
+    - Default platform is asap7; change PLATFORM in config.mk for other PDKs
     - DRC uses KLayout (all platforms) or Magic (sky130 only); LVS uses KLayout or Netgen (sky130 only)
     - RCX uses OpenRCX via OpenROAD
     - LVS/DRC gracefully skip when rules are absent for a platform
@@ -67,7 +67,7 @@ cp references/env.local.sh.template references/env.local.sh
 
 ### Available platforms
 
-`nangate45`, `sky130hd`, `sky130hs`, `asap7`, `gf180`, `ihp-sg13g2` (default: `nangate45`).
+`nangate45`, `sky130hd`, `sky130hs`, `asap7`, `gf180`, `ihp-sg13g2` (default: `asap7`).
 
 ## Workflow
 

@@ -72,7 +72,7 @@ def main() -> int:
 
     pf = sub.add_parser("family", help="Look up heuristics for one family/platform")
     pf.add_argument("family")
-    pf.add_argument("--platform", default="nangate45")
+    pf.add_argument("--platform", default="asap7")
     pf.add_argument("--heuristics", type=Path, default=DEFAULT_HEURISTICS_PATH)
 
     pl = sub.add_parser("list", help="List known (family, platform) pairs")

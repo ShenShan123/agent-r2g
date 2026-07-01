@@ -60,7 +60,7 @@ _ORFS_STAGES = frozenset(
 
 # Skill default platform (matches scripts/flow/_env.sh and live ingest), used as
 # the last-resort bucket for records whose design dir has no resolvable PLATFORM.
-_DEFAULT_PLATFORM = "nangate45"
+_DEFAULT_PLATFORM = "asap7"
 
 
 def _now() -> str:

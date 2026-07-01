@@ -82,7 +82,7 @@ def _recommend_for_pair(pair: dict[str, Any], use_learned: bool,
     size_class is 'unknown'. We never crash on a missing project.
     """
     design = pair["design_name"]
-    platform = pair.get("platform", "nangate45")
+    platform = pair.get("platform", "asap7")
 
     real_proj = None
     if projects_root is not None:
@@ -120,7 +120,7 @@ def _recommend_for_pair(pair: dict[str, Any], use_learned: bool,
 def _render_config_mk(pair: dict[str, Any], arm: str, rec: dict[str, Any]) -> str:
     """Render a config.mk body with the EVAL_ARM marker + recommended knobs."""
     design = pair["design_name"]
-    platform = pair.get("platform", "nangate45")
+    platform = pair.get("platform", "asap7")
     family = pair.get("family", "")
     cell_count = rec.get("cell_count", 0)
     recs = rec.get("recommendations", {})
@@ -185,7 +185,7 @@ def cmd_emit(args: argparse.Namespace) -> int:
         cell_count = recs_by_arm["learned"].get("cell_count", 0)
         plan_entries.append({
             "design_name": design,
-            "platform": pair.get("platform", "nangate45"),
+            "platform": pair.get("platform", "asap7"),
             "family": pair.get("family", ""),
             "cell_count": cell_count if cell_count else None,
             "cell_count_known": bool(cell_count),
@@ -479,7 +479,7 @@ def _discover_designs(arms_dir: Path) -> list[str]:
 
 def _platform_of(arm_dir: Path) -> str:
     cfg = suggest_config.parse_config_mk(arm_dir / "constraints" / "config.mk")
-    return cfg.get("PLATFORM", "nangate45")
+    return cfg.get("PLATFORM", "asap7")
 
 
 def _evaluate_design(arms_dir: Path, design: str) -> dict[str, Any]:

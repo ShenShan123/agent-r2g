@@ -10,7 +10,7 @@ set -euo pipefail
 # Set ORFS_MAX_CPUS to limit CPU cores (default: all available).
 
 PROJECT_DIR="${1:-}"
-PLATFORM="${2:-nangate45}"
+PLATFORM="${2:-asap7}"
 # Derive FLOW_VARIANT from project directory basename to isolate ORFS work dirs
 # per project config (e.g., swerv_cfg1 vs swerv_cfg2 get separate directories).
 # This prevents directory collisions when multiple configs share the same DESIGN_NAME.

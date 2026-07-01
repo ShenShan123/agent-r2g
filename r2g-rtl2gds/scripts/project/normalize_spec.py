@@ -25,7 +25,7 @@ functional_requirements:
   - fill me
 timing_target: 10
 target_flow: orfs
-target_platform: nangate45
+target_platform: asap7
 verification_targets:
   - reset behavior
 assumptions:

@@ -197,7 +197,7 @@ def build_runtime_map(lib_db, sc_lib_paths=None):
 
 def resolve_cell_type_map(platform, lib_db, sc_lib_paths=None):
     """Select the curated nangate45 map or a liberty-derived map for other platforms."""
-    if (platform or "nangate45").lower() == "nangate45":
+    if (platform or "asap7").lower() == "nangate45":
         return NANGATE45_CELL_TYPE_MAPPING
     return build_runtime_map(lib_db, sc_lib_paths)
 

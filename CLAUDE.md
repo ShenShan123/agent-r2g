@@ -53,7 +53,7 @@ iverilog/vvp, verilator, klayout, magic, netgen-lvs, opensta, sky130A PDK. Verif
 sky130A PDK is staged at `/proj/workarea/user5/sky130_pdk/share/pdk/sky130A`; all pinned in
 `references/env.local.sh` and green in `check_env.sh` (enables real sky130 Magic DRC + Netgen LVS).
 Install recipe in `README.md`. **Never install large packages into `$HOME` (full) — use `/proj`.**
-Platforms in this checkout: `nangate45` (default), `sky130hd`, `sky130hs`, `asap7`, `gf180`,
+Platforms in this checkout: `asap7` (default), `nangate45`, `sky130hd`, `sky130hs`, `gf180`,
 `ihp-sg13g2`. The nangate45 LVS rule is bundled (`tools/install_nangate45_lvs.sh`).
 
 ## Hard Rules (skill-level)

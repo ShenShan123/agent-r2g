@@ -84,7 +84,7 @@ _journal_action() {  # action_type payload_json [symptom_id] — generic best-ef
 [[ "${R2G_SOURCE_ONLY:-0}" == "1" ]] && return 0 2>/dev/null
 # --- end Tier-0 journal hooks ---
 
-PROJECT_DIR=""; PLATFORM="nangate45"; CHECK="both"; MAX_ITERS=8; BASE_ITERS=3; RESUME=0
+PROJECT_DIR=""; PLATFORM="asap7"; CHECK="both"; MAX_ITERS=8; BASE_ITERS=3; RESUME=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --check) CHECK="$2"; shift 2;;

@@ -715,7 +715,7 @@ def ingest(project: Path,
     cfg = _parse_config_mk(project / "constraints" / "config.mk")
     design_name = cfg.get("DESIGN_NAME", "unknown")
     design_family = _project_family(project, design_name, families)
-    platform = cfg.get("PLATFORM", "nangate45")
+    platform = cfg.get("PLATFORM", "asap7")
 
     ppa = _read_json(project / "reports" / "ppa.json") or {}
     summary = ppa.get("summary", {}) if isinstance(ppa, dict) else {}

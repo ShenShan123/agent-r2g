@@ -69,7 +69,7 @@ def test_backfill_resolves_platform_from_config_mk(tmp_path, tmp_knowledge_dir):
     plats = dict(conn.execute(
         "SELECT design_name, platform FROM fix_events").fetchall())
     assert plats["skywater_thing"] == "sky130hd"     # resolved from config.mk
-    assert plats["no_config_thing"] == "nangate45"   # skill-default fallback
+    assert plats["no_config_thing"] == "asap7"   # skill-default fallback
     assert None not in plats.values()                # never NULL
     conn.close()
 
@@ -109,7 +109,7 @@ def test_backfill_retry_pass_orfs(tmp_path, tmp_knowledge_dir):
     assert row[2] == "full"
     assert row[3] == "cleared"       # orfs == pass -> the run closed
     assert row[4].startswith("backfill:retry_pass")
-    assert row[5] == "nangate45"     # platform defaults to skill default when absent
+    assert row[5] == "asap7"     # platform defaults to skill default when absent
 
 
 def test_backfill_orfs_no_session_collision_on_shared_design(tmp_path, tmp_knowledge_dir):

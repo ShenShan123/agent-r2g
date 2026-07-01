@@ -119,7 +119,7 @@ def _to_float(v):
 def extract_presynth_features(project: Path) -> dict:
     project = Path(project)
     cfg = _parse_config_mk(project / "constraints" / "config.mk")
-    platform = cfg.get("PLATFORM", "nangate45")
+    platform = cfg.get("PLATFORM", "asap7")
     cells = _cell_count(project / "synth")
     io = _primary_io(project)
     layers = cfg.get("MAX_ROUTING_LAYER")

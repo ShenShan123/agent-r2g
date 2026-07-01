@@ -8,7 +8,7 @@ set -euo pipefail
 # Results are collected into <project-dir>/drc/
 
 PROJECT_DIR="${1:-}"
-PLATFORM="${2:-nangate45}"
+PLATFORM="${2:-asap7}"
 # Derive FLOW_VARIANT from project directory basename (matching run_orfs.sh logic)
 if [[ -n "${3:-}" ]]; then
   FLOW_VARIANT="$3"

@@ -85,7 +85,7 @@ def resolve_case_paths(script_file, default_output_name):
         # built from this so per-design macro libs don't reshuffle std-cell ids.
         "sc_lib_files": split_lib_files(_env("R2G_SC_LIB_FILES", _env("R2G_LIB_FILES"))),
         "tech_lef": _env("R2G_TECH_LEF"),
-        "platform": _env("R2G_PLATFORM", "nangate45"),
+        "platform": _env("R2G_PLATFORM", "asap7"),
         # Extra positional overrides (place_density, core_util, ...) start at argv[4];
         # metadata.py falls back to config.mk for each when they are not supplied.
         "extra_arg_start": 4,

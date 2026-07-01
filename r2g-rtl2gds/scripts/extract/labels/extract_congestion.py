@@ -209,7 +209,7 @@ def main():
     # non-critical here, but pass it to honor the single-source intent.
     layer_info = routing_layer_info(
         tech_lef,
-        fallback=get_profile(os.environ.get("R2G_PLATFORM", "nangate45")).fallback_routing_layers,
+        fallback=get_profile(os.environ.get("R2G_PLATFORM", "asap7")).fallback_routing_layers,
     )
     db_units, grid_step_x, grid_step_y, components, design_name = parse_def_header_and_components(def_file)
     if design_name_override:
