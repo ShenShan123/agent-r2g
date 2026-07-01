@@ -424,6 +424,43 @@ def _is_ppl0024(entry: dict) -> bool:
         return False
 
 
+def _is_pdn_strap_width(entry: dict) -> bool:
+    """True if the newest backend run aborted at floorplan with PDN-0185: the die is too
+    NARROW to lay sky130hd's met4/met5 PDN power straps (a strap set needs ~28.8um, but a
+    tiny CORE_UTILIZATION-auto-sized die is only ~27um wide), so pdngen aborts REGARDLESS of
+    utilization (tools/mk_sky130_project.py:199). RECOVERABLE by flooring the die to an
+    explicit PDN-feasible size -- DISTINCT from FLW-0024 (die too small for the CELLS) and
+    PPL-0024 (die perimeter too short for the PINS). Read from the run's flow.log. (2026-07-01
+    sky130 round: 3 tiny designs -- 8-bit control logic, apb_protocol -- were mislabeled
+    'unseen_crash' because the loop had no PDN-strap handler.)"""
+    proj = Path(entry["project_path"])
+    logs = sorted(proj.glob("backend/RUN_*/flow.log"))
+    if not logs:
+        return False
+    try:
+        return "PDN-0185" in logs[-1].read_text(errors="ignore")
+    except OSError:
+        return False
+
+
+def _pdn0185_insufficient_width(project_path: str) -> float | None:
+    """The die width (um) PDN-0185 reported as insufficient, parsed from the newest backend
+    run's '[ERROR PDN-0185] Insufficient width (W um) to add straps ...' message. Returns W,
+    or None when there is no PDN-0185 / it is unparseable. Lets the PDN recovery floor the die
+    ONLY when it is genuinely narrower than the strap-feasible minimum -- a wide die that
+    PDN-failed for another reason is left to escalate honestly, never SHRUNK into the floor."""
+    proj = Path(project_path)
+    logs = sorted(proj.glob("backend/RUN_*/flow.log"))
+    if not logs:
+        return None
+    try:
+        txt = logs[-1].read_text(errors="ignore")
+    except OSError:
+        return None
+    m = re.search(r"Insufficient width \(([\d.]+)\s*um\)", txt)
+    return float(m.group(1)) if m else None
+
+
 def _config_knob(line: str) -> str:
     """'export DIE_AREA  = 0 0 50 50' -> 'DIE_AREA' (no regex dependency)."""
     parts = line.split()
@@ -560,6 +597,65 @@ def _relieve_pin_overflow(entry: dict, *, perimeter_target: float | None = None)
     if _lower_core_util(entry):
         return True
     return _resize_to_core_util(entry, util=_PIN_RELIEF_UTIL)
+
+
+# ── PDN-0185 (floorplan strap-width) recovery ────────────────────────────────
+# sky130hd lays met4/met5 PDN straps that need a core wider than a strap set (~28.8um); a
+# tiny design auto-sizes (CORE_UTILIZATION) a die only ~27um wide, so pdngen aborts REGARDLESS
+# of utilization. Unlike FLW-0024, the fix is NOT converting to CORE_UTILIZATION (that IS the
+# cause) -- it is pinning an explicit PDN-feasible DIE floor, the loop-side twin of
+# tools/mk_sky130_project.py's PDN_DIE_FLOOR (new projects get the floor at setup; the corpus
+# re-point via setup_rtl_designs.py does NOT, so a re-pointed tiny design hits PDN-0185 --
+# 2026-07-01 sky130 round).
+_PDN_DIE_FLOOR_UM = 200   # cordic-validated sky130hd minimum for met4/met5 straps
+_PDN_CORE_INSET_UM = 10   # core-to-die margin (um) for the IO ring
+
+
+def _relieve_pdn_strap_width(entry: dict) -> bool:
+    """PDN-0185 recovery: FLOOR the die to an explicit PDN-feasible square (side
+    _PDN_DIE_FLOOR_UM) so the met4/met5 straps fit, DROPPING any CORE_UTILIZATION/DIE_AREA/
+    CORE_AREA. Never touches PLACE_DENSITY_LB_ADDON (the hard-rule floor). Returns True iff it
+    changed config.mk; a no-op (False) when there is no config.mk, or PDN-0185's reported
+    width is already >= the floor (a wide die that PDN-failed for another reason -> honest
+    residual, never shrunk into the floor)."""
+    cfg = Path(entry["project_path"]) / "constraints" / "config.mk"
+    if not cfg.is_file():
+        return False
+    width = _pdn0185_insufficient_width(entry["project_path"])
+    if width is not None and width >= _PDN_DIE_FLOOR_UM:
+        return False
+    inset, side = _PDN_CORE_INSET_UM, _PDN_DIE_FLOOR_UM
+    keep = [ln for ln in cfg.read_text().splitlines()
+            if _config_knob(ln) not in ("CORE_UTILIZATION", "DIE_AREA", "CORE_AREA")]
+    keep.append(f"export DIE_AREA = 0 0 {side} {side}")
+    keep.append(f"export CORE_AREA = {inset} {inset} {side - inset} {side - inset}")
+    cfg.write_text("\n".join(keep) + "\n")
+    return True
+
+
+def _record_pdn_fix(entry: dict, *, cleared: bool) -> None:
+    """Record the PDN-0185 die-floor (CORE_UTILIZATION -> explicit PDN-feasible DIE_AREA) as a
+    fix_log row so the NEXT _ingest projects it into fix_events -> fix_trajectories -> a Tier-3
+    recipe, making the recovery VISIBLE to learning (mirrors _record_resize_fix). Keyed
+    check='orfs_stage' / class='floorplan' (DISTINCT from _record_resize_fix's class='place',
+    so the PDN symptom stays separate from the FLW-0024 place-resize symptom). Honest outcome:
+    clean retry -> cleared (before=1, after=0); a retry that still aborts -> no_change
+    (before=after=1), preserving negative learning."""
+    proj = Path(entry["project_path"])
+    reports = proj / "reports"
+    reports.mkdir(parents=True, exist_ok=True)
+    runs = sorted(proj.glob("backend/RUN_*"))
+    run_tag = runs[-1].name if runs else "norun"
+    sid = "pdnfix_" + hashlib.sha1(f"{proj}:{run_tag}".encode("utf-8")).hexdigest()[:12]
+    row = {
+        "fix_session_id": sid, "iter": 1, "strategy": "pdn_die_floor",
+        "check": "orfs_stage", "violation_class": "floorplan", "from_stage": "floorplan",
+        "before": 1, "after": 0 if cleared else 1,
+        "before_status": "fail", "after_status": "clean" if cleared else "fail",
+        "verdict": "cleared" if cleared else "no_change", "ts": _now(),
+    }
+    with (reports / "fix_log.jsonl").open("a", encoding="utf-8") as f:
+        f.write(json.dumps(row, sort_keys=True) + "\n")
 
 
 def _record_resize_fix(entry: dict, *, cleared: bool) -> None:
@@ -868,6 +964,21 @@ def process_one(led: Ledger, entry: dict, conn, *,
             _record_synth_mem_fix(entry, cleared=synth_cleared)
             _ingest(entry)
             return result
+        # PDN-0185 (floorplan pdngen: die too NARROW for met4/met5 power straps): a tiny
+        # design auto-sizes (CORE_UTILIZATION) a die ~27um wide, but a sky130hd strap set
+        # needs ~28.8um, so pdngen aborts REGARDLESS of utilization (mk_sky130_project.py
+        # :199). RECOVERABLE by flooring the die to an explicit PDN-feasible size and
+        # re-flowing ONCE -- DISTINCT from FLW-0024 (die too small for CELLS) / PPL-0024
+        # (perimeter too short for PINS). Mislabeled 'unseen_crash' before this because the
+        # loop had no PDN handler (2026-07-01 sky130 round). Mirrors the FLW/PPL recoveries.
+        if (not _resized and entry.get("kind") != "ab_arm"
+                and _fail_stage(entry) == "floorplan" and _is_pdn_strap_width(entry)
+                and _relieve_pdn_strap_width(entry)):
+            led.set_state(design, "fixing")
+            result = process_one(led, entry, conn, _resized=True)
+            _record_pdn_fix(entry, cleared=(result == "clean"))
+            _ingest(entry)
+            return result
         reason, notes = "unseen_crash", f"run_orfs rc={rc}"
         if entry.get("kind") != "ab_arm" and _fail_stage(entry) == "route":
             led.set_state(design, "fixing")
@@ -932,6 +1043,15 @@ def process_one(led: Ledger, entry: dict, conn, *,
             reason = "synth_timeout"
             notes = (f"yosys synthesis timed out (rc={rc}); design too large to canonicalize "
                      f"in the stage budget (raise ORFS_TIMEOUT or reduce SYNTH_MEMORY_MAX_BITS)")
+        elif (entry.get("kind") != "ab_arm" and _fail_stage(entry) == "floorplan"
+              and _is_pdn_strap_width(entry)):
+            # PDN-0185 that survived the die-floor retry (the explicit PDN-feasible die still
+            # could not lay straps), or a die already >= the floor that PDN-failed for another
+            # reason: an honest residual, NOT an unseen crash, routed to the PDN-grid /
+            # strap-density runbook.
+            reason = "pdn_strap_residual"
+            notes = (f"PDN-0185 insufficient width for met4/met5 straps (rc={rc}); flooring "
+                     f"the die to {_PDN_DIE_FLOOR_UM}um did not clear")
         led.set_state(design, "escalated", reason=reason)
         if conn is not None:
             import escalations
@@ -988,6 +1108,26 @@ def _localize_arm_sdc(dst: Path) -> None:
     new, n = re.subn(r"(?m)^(\s*(?:export\s+)?SDC_FILE\s*=).*$", rf"\g<1> {sdc}", text)
     if n == 0:
         new = text.rstrip("\n") + f"\nexport SDC_FILE = {sdc}\n"
+    cfg.write_text(new, encoding="utf-8")
+
+
+def _localize_arm_platform(dst: Path, platform: str) -> None:
+    """Pin an A/B arm copy's config.mk PLATFORM to the TRIAL's platform (ab_key.platform).
+    PLATFORM is ORFS **ground truth** -- run_orfs.sh/run_drc.sh build the design and pick the
+    DRC deck from config.mk's PLATFORM, NOT the argument they are passed -- but `copytree`
+    inherits the SUBJECT's config.mk PLATFORM verbatim. When the subject (or a reused arm
+    dir) carries a PRIOR round's platform -- e.g. an asap7 arm-scratch dir reused as a
+    nangate45 candidate's subject -- the arm runs the WRONG deck (KLayout `asap7.lydrc` on a
+    nangate45 GDS) and HANGS at DRC (asap7 DRC is heavy), tail-blocking the whole wave
+    (2026-07-01 sky130 round: 4 msrv32 antenna arms hung 32min@0%CPU). Idempotent regex
+    repoint, mirroring _localize_arm_sdc; a no-op when there is no config.mk."""
+    cfg = dst / "constraints" / "config.mk"
+    if not cfg.is_file():
+        return
+    text = cfg.read_text(encoding="utf-8")
+    new, n = re.subn(r"(?m)^(\s*(?:export\s+)?PLATFORM\s*=).*$", rf"\g<1> {platform}", text)
+    if n == 0:
+        new = text.rstrip("\n") + f"\nexport PLATFORM = {platform}\n"
     cfg.write_text(new, encoding="utf-8")
 
 
@@ -1153,6 +1293,13 @@ def plan_arms_for_candidates(led: Ledger, conn, *, n_ab_designs: int = 2,
                         # period_relax's SDC edit) actually take effect, not the subject's
                         # failing-period SDC (2026-06-25 SDC-pinning fix).
                         _localize_arm_sdc(dst)
+                    # Pin the arm's config.mk PLATFORM to the TRIAL's platform on EVERY plan
+                    # (idempotent, guarded on dst.is_dir() so it also corrects an ALREADY-
+                    # materialized arm whose config.mk carries a stale prior-round PLATFORM).
+                    # Without this the arm runs the wrong DRC deck and HANGS (asap7.lydrc on a
+                    # nangate45 GDS), tail-blocking the wave (2026-07-01 sky130 round).
+                    if dst.is_dir():
+                        _localize_arm_platform(dst, key["platform"])
                     # Do NOT re-add an arm that already ran and is terminal+UNJUDGED: it is
                     # awaiting its pair's verdict, and led.add would reset it to 'pending'
                     # (dropping judged), knocking it back to un-run BEFORE judge_finished_trials

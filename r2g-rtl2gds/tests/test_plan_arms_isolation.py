@@ -47,3 +47,41 @@ def test_plan_arms_isolates_a_crashing_candidate(tmp_path, monkeypatch):
     assert appended >= 2
     # the bad candidate planned nothing (skipped, not crashed)
     assert not [e for e in led.entries() if e.get("strategy") == "strat_bad"]
+
+
+def test_plan_arms_sets_arm_platform_from_ab_key(tmp_path, monkeypatch):
+    """2026-07-01: an A/B arm's on-disk config.mk PLATFORM must match ab_key.platform, NOT
+    inherit the SUBJECT's stale platform. A nangate45 antenna candidate whose subject is a
+    reused asap7 arm-scratch dir would otherwise run asap7.lydrc DRC on a nangate45 GDS and
+    HANG, tail-blocking the wave. PLATFORM is ORFS ground truth (run_orfs builds against
+    config.mk, never the passed arg)."""
+    import re
+    from pathlib import Path
+    import ab_runner
+    import recipe_lifecycle
+
+    # subject with a STALE asap7 config.mk (e.g. reused arm-scratch from a prior round)
+    subj = tmp_path / "stale_asap7_subject"
+    (subj / "constraints").mkdir(parents=True)
+    (subj / "constraints" / "config.mk").write_text(
+        "export DESIGN_NAME = s\nexport PLATFORM = asap7\n")
+
+    cand = {"symptom_id": "sym", "design_class": "logic/small", "platform": "nangate45",
+            "strategy": "antenna_diode_repair"}
+    monkeypatch.setattr(recipe_lifecycle, "pending_candidates", lambda conn: [cand])
+    monkeypatch.setattr(el, "_ab_coverage_gap", lambda conn, key: False)
+    monkeypatch.setattr(el, "_symptom_check", lambda conn, sid, strat=None: "both")
+    monkeypatch.setattr(ab_runner, "plan_trial", lambda conn, **k: {
+        "designs": [{"design_name": "s", "project_path": str(subj), "cell_count": 1}],
+        "match_level": "exact"})
+
+    led = el.Ledger(tmp_path / "l.jsonl")
+    el.plan_arms_for_candidates(led, conn=None, repeats=1)
+
+    arms = [e for e in led.entries() if e.get("kind") == "ab_arm"]
+    assert arms, "no arms planned"
+    for a in arms:
+        cfg = (Path(a["project_path"]) / "constraints" / "config.mk").read_text()
+        m = re.search(r"(?m)^\s*(?:export\s+)?PLATFORM\s*=\s*(\S+)", cfg)
+        assert m and m.group(1) == "nangate45", \
+            f"arm {a['design']} inherited stale PLATFORM instead of ab_key: {cfg!r}"

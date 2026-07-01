@@ -481,6 +481,15 @@ Yosys crash, typically caused by very large designs or specific RTL constructs t
 - **Fix:** Floor the die to a PDN-feasible size. `tools/mk_sky130_project.py` computes `core_side = sqrt(cell_count * 8um² / util)` and, when that falls below ~160 um, emits an explicit `DIE_AREA = 0 0 200 200` / `CORE_AREA = 10 10 190 190` (cordic-validated 200 um core clears met4 straps). Designs naturally larger than the floor keep `CORE_UTILIZATION` (auto-sized).
 - **Validated:** `simple_i2c_slave` (65→436 cells) — was PDN-0185 at floorplan under CU=20; with the 200 um floor it ran clean through synth→floorplan→place→cts→route→finish, **timing clean, DRC 0, RCX complete** (~3.5 min).
 
+##### Loop-side self-heal (2026-07-01 sky130 round, `engineer_loop.py`)
+
+The setup-time floor above only protects projects materialized by `mk_sky130_project.py`. The **corpus re-point** used to start a fresh platform round (`tools/setup_rtl_designs.py --platform sky130hd --force`) re-points `config.mk` to `CORE_UTILIZATION` **without** applying the PDN floor, so a re-pointed *tiny* design (8-bit control logic, AMBA `apb_protocol`) auto-sizes a ~27 um die and hits `PDN-0185` at `2_4_floorplan_pdn`. `engineer_loop.process_one` used to file this as **`unseen_crash`** (it had detectors/recoveries for FLW-0024/PPL-0024/synth but none for PDN), blinding the learner — `ingest_run.py` still recorded the honest `orfs-fail-floorplan-PDN-0185` failure_event (so honesty stayed 5/5), but the escalation reason was a mystery instead of a classifiable, recipe-backed residual.
+
+- **Fix (loop-side twin of the setup floor):** `process_one` now detects `PDN-0185` at the `floorplan` stage (`_is_pdn_strap_width`), **floors the die to an explicit `DIE_AREA = 0 0 200 200` / `CORE_AREA = 10 10 190 190`** (`_relieve_pdn_strap_width` — *dropping* `CORE_UTILIZATION`, the cause, NOT reusing it as FLW-0024 does; parses the reported insufficient width via `_pdn0185_insufficient_width` so a die already ≥ the 200 um floor is never SHRUNK — it escalates instead), retries the flow **once**, records a learnable `pdn_die_floor` fix (`_record_pdn_fix`, `check=orfs_stage` / `class=floorplan` — a DISTINCT symptom from the FLW-0024 place-resize), and, if the floored die STILL cannot lay straps, escalates the honest **`pdn_strap_residual`** (registered in `escalations.REASONS`, else `open_escalation` raises `ValueError` and crashes the worker — the exact `synth_memory_residual` latent-crash class).
+- **Distinct lever per abort:** FLW-0024 = die too small for the CELLS (lower util → bigger die); PPL-0024 = perimeter too short for the PINS (target the demanded perimeter); PDN-0185 = die too NARROW for the power straps (floor the width — lowering util on a tiny design still can't guarantee ≥28.8 um).
+- **Tests:** `tests/test_pdn0185_recovery.py` (10 — detector, width parse, floor/no-op-when-wide, recover+retry+learnable-row, honest residual).
+- **Follow-up (open):** teach `setup_rtl_designs.py` to apply the same PDN floor at re-point time so the loop rarely has to self-heal it (the setup path and the loop path should size sky130 dies identically).
+
 #### Sub-variant: sky130 high-pin-count floorplan (PPL-0024 on the PDN floor die)
 
 - **Symptom (sky130hd/sky130hs):** `[ERROR PPL-0024] Number of IO pins (1521) exceeds maximum number of available positions (718). Increase the die perimeter from 800.00um to 2068.56um.` → `Stage 'place' failed (exit 2)`. No final GDS/ODB; the campaign driver records `residual_class=orfs_incomplete` (now `orfs_place` after the `extract_ppa.py` fail-stage fix).
@@ -2462,6 +2471,33 @@ to its honest `synth_memory_residual` reason once its log is fully written.)
 - **Skill-level alarm:** for a platform with `candidate>0` + arm runs ingested but `ab_trials=0` that
   PERSISTS across waves, check whether arm ledger entries cycle through `clean` back to `pending` — a
   re-plan is resetting them before the judge fires.
+
+### Sub-variant: A/B arm runs the WRONG platform's DRC deck (stale config.mk) → hangs the wave (2026-07-01)
+
+- **Symptom:** a wave stalls for hours with a few designs stuck in `fixing` at **~0 % CPU** (not the 99 %
+  legit-extraction case), the wave log frozen. `ps` shows the stuck job is an A/B arm
+  (`<subj>_abA_<strat>_<r>`) whose `fix_signoff.sh <arm> nangate45` was called, yet ORFS built into
+  `results/asap7/…` and KLayout is running `platforms/asap7/drc/asap7.lydrc` — the arm's
+  `constraints/config.mk` says `export PLATFORM = asap7` while its `ab_key.platform` is `nangate45`.
+- **Root cause:** `plan_arms_for_candidates` materializes an arm with `shutil.copytree(subject → arm)` and
+  repoints only `SDC_FILE` (`_localize_arm_sdc`) — it inherits the SUBJECT's `config.mk` **PLATFORM
+  verbatim**. **PLATFORM is ORFS ground truth** (`run_orfs.sh`/`run_drc.sh` build the design and pick the
+  DRC deck from `config.mk`, NOT the arg they are passed), so when the subject (or a reused arm-scratch
+  dir) carries a *prior round's* platform, the arm runs the wrong, heavy `asap7.lydrc` deck on a nangate45
+  GDS and **hangs**, tail-blocking all wave workers. Exposed in the 2026-07-01 sky130 round: the shared
+  knowledge store still held nangate45 `antenna_diode_repair` candidates whose msrv32 subjects were
+  asap7-config arm-scratch dirs left from the asap7 round (`setup_rtl_designs.py --force` only re-points
+  real `rtl_designs/`, not arm-scratch). 4 arms hung 32 min @ 0 % CPU.
+- **Fix (2026-07-01):** new `_localize_arm_platform(dst, ab_key.platform)` (regex repoint mirroring
+  `_localize_arm_sdc`), called in `plan_arms_for_candidates` on **every** plan and guarded on `dst.is_dir()`
+  so it corrects BOTH fresh arms and already-materialized stale ones (idempotent). Existing pending arm
+  dirs were reconciled in place with the same helper. Tests: `tests/test_loop_timing_place_ab.py`
+  (`_localize_arm_platform` unit) + `tests/test_plan_arms_isolation.py`
+  (`test_plan_arms_sets_arm_platform_from_ab_key` — plans from a stale-asap7 subject, asserts arm PLATFORM
+  == ab_key). Suite 885→888.
+- **Skill-level alarm:** a wave design stuck in `fixing` at ~0 % CPU for >10 min whose `ps` cmd names a
+  DRC deck (`*.lydrc`) from a DIFFERENT platform than the design's `ab_key`/ledger platform — kill it
+  (log it, no silent caps) and check the arm's `config.mk` PLATFORM vs its `ab_key.platform`.
 
 ### Detecting the gap directly: `tools/check_db_integrity.py` (both-DBs cross-check, 2026-06-30)
 

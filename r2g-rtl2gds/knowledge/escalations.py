@@ -46,7 +46,16 @@ REASONS = ("unknown_symptom", "catalog_exhausted", "unseen_crash",
            # registered here → open_escalation raised ValueError → the worker CRASHED and the
            # design was mislabeled `worker_exc:ValueError`, burying the honest reason (the EXACT
            # latent-crash class documented for place_density_residual above; fixed 2026-06-30).
-           "synth_memory_residual")
+           "synth_memory_residual",
+           # A floorplan PDN abort (PDN-0185: the die is too NARROW to lay sky130hd's
+           # met4/met5 power straps — a tiny CORE_UTILIZATION-auto-sized die is ~27um but a
+           # strap set needs ~28.8um, so pdngen aborts REGARDLESS of utilization). RECOVERABLE
+           # by flooring the die to an explicit PDN-feasible size (engineer_loop.py process_one,
+           # 2026-07-01 sky130 round); a residual survives only when that floor itself cannot
+           # lay straps. KNOWN, recipe-backed — NOT an unseen crash. MUST be registered here or
+           # open_escalation raises ValueError and crashes the worker (the exact latent-crash
+           # class the synth_memory_residual note above documents).
+           "pdn_strap_residual")
 
 
 def _now() -> str:

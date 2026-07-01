@@ -90,6 +90,36 @@ def test_localize_arm_sdc_adds_when_absent(tmp_path):
     assert f"SDC_FILE = {(arm / 'constraints' / 'constraint.sdc').resolve()}" in cfg
 
 
+def _arm_platform(cfg_text):
+    import re
+    m = re.search(r"(?m)^\s*(?:export\s+)?PLATFORM\s*=\s*(\S+)", cfg_text)
+    return m.group(1) if m else None
+
+
+def test_localize_arm_platform_repoints_to_ab_key(tmp_path):
+    """2026-07-01: an arm copy inherits the SUBJECT's config.mk PLATFORM. When the subject
+    carries a stale prior-round platform (asap7 arm-scratch reused for a nangate45 candidate),
+    the arm runs the WRONG DRC deck (asap7.lydrc) and HANGS. _localize_arm_platform pins
+    PLATFORM to the trial's platform (ORFS ground truth: run_orfs builds against config.mk)."""
+    arm = tmp_path / "d_abB_antenna_0"
+    (arm / "constraints").mkdir(parents=True)
+    (arm / "constraints" / "config.mk").write_text(
+        "export DESIGN_NAME = d\nexport PLATFORM    = asap7\n")
+    engineer_loop._localize_arm_platform(arm, "nangate45")
+    cfg = (arm / "constraints" / "config.mk").read_text()
+    assert _arm_platform(cfg) == "nangate45"
+    assert "asap7" not in cfg
+
+
+def test_localize_arm_platform_adds_when_absent(tmp_path):
+    """If config.mk has no PLATFORM line, _localize_arm_platform appends one."""
+    arm = tmp_path / "d_abA_antenna_0"
+    (arm / "constraints").mkdir(parents=True)
+    (arm / "constraints" / "config.mk").write_text("export DESIGN_NAME = d\n")
+    engineer_loop._localize_arm_platform(arm, "sky130hd")
+    assert _arm_platform((arm / "constraints" / "config.mk").read_text()) == "sky130hd"
+
+
 def test_apply_recipe_strategy_place_resizes(tmp_path):
     """arm B of a place trial converts the too-small fixed DIE_AREA -> CORE_UTILIZATION
     (the FLW-0024 recovery) so its place stage completes where arm A's aborts."""
