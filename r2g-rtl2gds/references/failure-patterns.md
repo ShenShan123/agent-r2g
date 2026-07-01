@@ -587,6 +587,67 @@ Yosys crash, typically caused by very large designs or specific RTL constructs t
   false `complete`); other read-only reporting tools (`tools/run_signoff.sh`,
   `aggregate_signoff_results.py`, the dashboard) share the unguarded-read class but are off the
   learning path.
+- **RECURRENCE 2026-06-30 (this alarm FIRED on A/B antenna arms — and the honesty gates did NOT catch it).**
+  A stop-and-report status check found **8 asap7 rows with `lvs_status='clean'`** (impossible on asap7 —
+  no LVS deck). All 8 were **A/B antenna arm dirs** (`..._abA_antenna__0` …), config.mk re-pointed to
+  asap7 but carrying a stale nangate45 `reports/lvs.json` (`raw_status:text_match_found`) written today
+  — i.e. the arm's signoff was read from stale prior-platform reports rather than freshly run/skipped for
+  asap7. The bug-#4 `_run_flow` stale-report deletion did **not** cover this arm path. **Critically,
+  `honesty.py` stayed 5/5 GREEN throughout** — its five gates check `fail`↔`failure_event` parity, NOT
+  "is a *clean* row genuine," so fabricated cleans are invisible to them (the same blind spot that made
+  bug #4 dangerous). Reconciled: deleted the 8 fabricated rows + their 16 stale report files; asap7 then
+  read honest `lvs_clean=0 / lvs_skipped=47 / drc_clean=0`. **RECOMMENDED FIX (open, high-value):** add a
+  sixth honesty gate — *a run on a platform with no LVS deck (asap7) MUST have `lvs_status ∈ {skipped,
+  NULL}`; `clean`/`fail` is a contamination ALARM.* That single gate would have auto-caught this the
+  moment it was ingested, converting a silent lie into a hard stop. Also harden the A/B arm
+  create/ingest path to clear `reports/` before signoff (mirror the `_run_flow` fix) so arms cannot
+  inherit a subject's cross-platform reports.
+- **RECURRENCE 2026-06-30 — the DRC LEG (extractor freshness guard missing on `extract_drc`, unlike
+  `extract_lvs`).** A stop-and-report check found **6 asap7 A/B antenna arm rows with
+  `drc=clean, drc_violations=0, lvs=clean` — `drc_mode:full`**. On disk each arm had genuinely re-run
+  `asap7.lydrc` (fresh `drc/drc_run.log`, 28s, real merged GDS) and its ORFS-side
+  `flow/reports/asap7/<design>/<variant>/6_drc_count.rpt` = **25** (the documented irreducible floor:
+  `LIG.LISD.S.7`, `LIG.SDT.S.8`, `V0.S.1`, `V1.S.4`, `M4.S.5`, `V2.M3.AUX.2`, `V4/V5.M*.AUX.2`) — yet
+  `reports/drc.json` read `clean/0`. **Reproduced read-only:** `extract_drc.py <arm>` → `clean/0`.
+  - **Root cause (the DRC twin of the LVS holes above):** these arm dirs were created in a
+    *pre-copytree-fix* wave, so their `not dst.exists()` copytree was skipped and a **June-19
+    `drc/6_drc_count.rpt=0` + empty `6_drc.lyrdb`** lingered locally. The Jun-30 re-run wrote the real
+    25 only to the ORFS-side `reports/` dir; `run_drc.sh`'s copy back into `drc/` (lines ~200-205) was
+    skipped (variant/interrupted), leaving the stale local `0`. Then BOTH readers trusted it:
+    `run_drc.sh`'s count logic (`cat $DRC_DIR/6_drc_count.rpt`) AND `extract_drc.py`
+    (`parse_drc_count`/`parse_lyrdb` off the local `drc/`) — **`extract_drc.py` had NO mtime freshness
+    guard**, even though `extract_lvs.py` got exactly one (commit `b710905`) for this same 2026-06-30
+    bug. The LVS leg recurred too: these arms had **no `lvs/lvs_result.json` skip marker** (their
+    `make lvs` died at the CDL step, `can't read "::env(CDL_FILE)"`), so `extract_lvs`'s skip/netgen
+    precedence never fired and it read the stale June-19 `6_lvs.lvsdb` (`text_match_found`) as `clean`
+    — its guards covered skip-vs-klayout and netgen-vs-klayout, but NOT *fresh `lvs_run.log` over stale
+    klayout artifacts*.
+  - **Fix (2026-06-30, branch r2g-debug/asap7-round):**
+    1. `extract_drc.py` — new `artifacts_stale()` mtime guard: if a fresh `drc_run.log` post-dates the
+       local `6_drc_count.rpt`/`6_drc.lyrdb`, refuse to certify clean → status `stale`
+       (`total_violations=None`). Mirrors the `extract_lvs` guard.
+    2. `run_drc.sh` — purge stale `drc/6_drc.{lyrdb,log}` + `6_drc_count.rpt` BEFORE `make drc`, so a
+       skipped fresh-copy falls through to the honest `no_count_report`→`stuck` path, never a stale-0
+       clean.
+    3. `extract_lvs.py` — symmetric freshness guard: a would-be `clean` derived from KLayout verdict
+       artifacts (`6_lvs.lvsdb`/`6_lvs.log`) OLDER than a fresh `lvs_run.log` becomes `stale` (only
+       downgrades clean — a crash/incomplete with no fresh lvsdb stays crash/incomplete).
+    - Both new statuses are fail-CLOSED everywhere: `fix_signoff` clean-gate and `ingest_run.is_clean`
+      whitelist `{clean,clean_beol,skipped}` only, so `stale` is an unresolved residual, never clean.
+    - Reconcile: the fixed extractors (edited mid-campaign, canonical path) drove the campaign's final
+      wave to re-emit these arms honestly — the 6 fabricated rows are gone, asap7 reads
+      `drc_clean=0 / drc_fail=38 / stuck=9`, and a genuine `traffic_controller drc=fail(25) lvs=skipped`
+      row now records the real floor. The arm-row deletion had run FK-off, orphaning **15
+      `config_lineage` rows** (`current/previous_run_id`→deleted runs; the FK is `ON DELETE CASCADE`,
+      so the intent is removal) — cleaned in one transaction → `foreign_key_check` 0, honesty 5/5.
+    - Tests: `test_extract_drc.py::test_stale_artifacts_after_rerun_not_reported_clean` (+ fresh-stays-
+      clean converse); `test_extract_lvs.py::test_stale_klayout_artifacts_after_rerun_not_reported_clean`
+      (+ converse). Suite 866→870.
+  - **Skill-level alarm (unchanged, now closed on the extractor side):** the LVS-`clean`-on-asap7 alarm
+    also fires for **DRC-`clean` on any asap7 design** (genuine asap7 clean count = 0; see "ASAP7
+    residual-DRC-by-design"). Both are now caught at the extractor boundary before ingest. The proposed
+    sixth honesty gate (no-LVS-deck platform ⇒ `lvs∈{skipped,NULL}`) remains the belt to the extractor's
+    suspenders and is still worth adding.
 
 ### Re-running signoff after ORFS scratch dirs were cleaned
 
@@ -2041,6 +2102,15 @@ attainable → arms can diverge), or run first-promotion on a platform with a ge
 asap7 `drc=clean` rows that existed were fabrications (arm copytree inherited the nangate45 subject's clean
 `drc/`+`reports/` before the 2026-06-30 copytree-exclude-stage-dirs fix) — reconciled out; genuine asap7
 `drc=clean` count = 0.
+
+**The authoritative resolution is Calibre, not a better KLayout deck** (2026-07-01). The community
+`asap7.lydrc` floor is a *deck* limitation; the official **encrypted ASAP7 Calibre deck** (from
+asap.asu.edu) is the only genuinely clean-able asap7 DRC/LVS. This machine has Calibre + a license but
+NOT the deck (only placeholder READMEs). A guarded scaffold is in place — `scripts/flow/run_calibre_drc.sh`
++ `scripts/extract/extract_calibre_drc.py` (skip cleanly until the deck is installed; emit `engine:calibre`
+verdicts in the `extract_drc` schema). When the deck lands and smoke-passes on this Calibre (2025.1 vs the
+deck's 2017.4 target — a real version risk), asap7 DRC-clean becomes achievable and this "no asap7
+promotion is honest" premise must be revisited. Full runbook + integration steps: `references/calibre-signoff.md`.
 
 ## Missing Hard-Memory Wrapper Stubs (BSG Macro Designs)
 
