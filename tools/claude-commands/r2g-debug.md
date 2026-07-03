@@ -1,5 +1,5 @@
 ---
-description: Drive an RTL→GDS sign-off campaign on an ORFS platform (sky130hd by default — full, genuinely clean-able DRC (Magic) + LVS (Netgen) + RCX signoff; nangate45/asap7/gf180/ihp also supported) in parallel waves, hunt r2g-rtl2gds skill bugs, and prove the engineer-learning-loop is closed (DRC clean where the deck allows — sky130hd cleans via Magic DRC + Netgen LVS; asap7 KLayout DRC is NOT clean-able and needs the un-installed Calibre deck — + best Fmax + promoted recipes).
+description: Drive an RTL→GDS sign-off campaign on an ORFS platform (sky130hd by default — full, genuinely clean-able DRC (KLayout gate + optional Magic advisory) + LVS (Netgen) + RCX signoff; nangate45/asap7/gf180/ihp also supported) in parallel waves, hunt r2g-rtl2gds skill bugs, and prove the engineer-learning-loop is closed (DRC clean where the deck allows — sky130hd cleans via KLayout DRC + Netgen LVS; asap7 KLayout DRC is NOT clean-able and needs the un-installed Calibre deck — + best Fmax + promoted recipes).
 argument-hint: "[overrides, e.g. PLATFORM=sky130hd WAVE_MAX=24 WORKERS=3 NUM_CORES=4]"
 ---
 
@@ -13,7 +13,7 @@ the closed learning loop works.
 **Platform is the central knob — pick it from `$ARGUMENTS`, default `sky130hd`.** The whole
 command is platform-parameterized; only the *signoff success contract* and a few bug-hunt
 leads change per platform (see "Per-platform signoff contract" below). sky130hd (SkyWater
-130nm, with real Magic DRC + Netgen LVS decks — so DRC/LVS are genuinely clean-able and a
+130nm, with a genuinely clean-able KLayout DRC gate (+ opt-in Magic advisory) and Netgen LVS — so a
 DRC/LVS-clean win can actually **promote** a recipe) is the primary target of this command;
 nangate45 (the completed historical round), asap7, gf180, and ihp-sg13g2 also work. **asap7 is
 deliberately NOT the default: its community KLayout DRC deck has an irreducible false-violation
@@ -26,7 +26,7 @@ clean-able — see the "asap7 arm specifics" note below.**
 2. **Batch the RTL designs into waves** and run them **in parallel to fully use the CPUs**
    (respecting the shared-host hard rule below — do not oversubscribe).
 3. For every design: drive sign-off to the platform's **honest terminal state** (see the
-   contract below — for the default **sky130hd** that is genuinely **DRC clean (Magic) + LVS
+   contract below — for the default **sky130hd** that is genuinely **DRC clean (KLayout) + LVS
    clean (Netgen) + RCX**; for the non-default asap7 arm under the KLayout deck it is instead
    **DRC run with its honest residual floor + RCX, LVS skipped**, because asap7 KLayout DRC is
    NOT clean-able), and **search for the best Fmax**.
@@ -70,9 +70,9 @@ skipped}`, so a *legitimately skipped* check IS clean.
 
 | Platform       | DRC            | LVS              | RCX | Honest terminal state means …                     |
 |----------------|----------------|------------------|-----|---------------------------------------------------|
-| **sky130hd** ★ | **Yes (Magic)**| **Yes (Netgen)** | Yes | **GDS + DRC clean + LVS clean + RCX** — the default; genuinely clean-able, so a clean win can promote |
+| **sky130hd** ★ | **Yes (KLayout²)**| **Yes (Netgen)** | Yes | **GDS + DRC clean + LVS clean + RCX** — the default; genuinely clean-able, so a clean win can promote |
 | nangate45      | Yes (KLayout)  | Yes (KLayout)    | Yes | GDS + DRC clean + LVS clean + RCX                 |
-| sky130hs       | Yes (Magic)    | Yes (Netgen)     | Yes | GDS + DRC clean + LVS clean + RCX                 |
+| sky130hs       | Yes (KLayout²) | Yes (Netgen)     | Yes | GDS + DRC clean + LVS clean + RCX                 |
 | gf180/ihp      | Yes (KLayout)  | Yes (KLayout)    | Yes | GDS + DRC clean + LVS clean + RCX                 |
 | asap7          | Yes¹ (KLayout) | **No (skipped)** | Yes | GDS + **DRC run w/ honest residual floor (NOT clean-able)** + RCX; **`lvs=skipped` is honest-clean** |
 
@@ -85,16 +85,27 @@ is HONEST platform truth, not a bug to chase.** Chasing asap7 to "DRC clean" is 
 spawned the 2026-06-30/07-01 fabricated-clean bug. See `references/failure-patterns.md`
 "ASAP7 residual-DRC-by-design".
 
+² **sky130 DRC gate = KLayout, NOT Magic (2026-07-02 finding, commits cd33f62+00351d8).** The loop
+signs sky130 DRC off with the KLayout `sky130hd.lydrc` deck. A naive full-chip Magic
+`gds read`+`drc catchup` reports thousands of `li.*`/`mcon.*` std-cell-internal/abutment artifacts
+(~4777 on a KLayout-clean design) and would false-fail the whole corpus — so Magic full-chip DRC
+must NEVER be the gate. It runs as an **advisory cross-check** when `R2G_MAGIC_ADVISORY=1`
+(non-fatal, `R2G_MAGIC_ADVISORY_TIMEOUT` default 300s): `extract_drc` attaches
+`magic_advisory{...authoritative:false}` and NEVER changes `status`. (Magic itself is still
+REQUIRED on sky130 — Netgen LVS uses Magic to extract SPICE from the GDS.)
+
 **sky130hd specifics (the default platform):**
-- sky130hd uses **Magic** for DRC (`run_drc.sh` routes to `run_magic_drc.sh`) and **Netgen** for
-  LVS (`run_netgen_lvs.sh`) — both have real, clean-able decks, so the honest terminal state is a
-  *genuine* DRC-clean + LVS-clean, not a residual floor. A recipe that clears a real DRC/LVS
-  violation can therefore actually **promote** — the whole reason sky130hd is the default.
-- Required tools for sky130hd: `yosys`/`openroad`/ORFS + **magic** (DRC) + **netgen-lvs** (LVS) +
+- sky130hd signs off DRC with **KLayout** (`sky130hd.lydrc`; Magic advisory optional — footnote ²)
+  and LVS with **Netgen** (`run_netgen_lvs.sh`, Magic-extract + netgen-compare) — both genuinely
+  clean-able, so the honest terminal state is a *genuine* DRC-clean + LVS-clean, not a residual
+  floor. A recipe that clears a real DRC/LVS violation can therefore actually **promote** — the
+  whole reason sky130hd is the default.
+- Required tools for sky130hd: `yosys`/`openroad`/ORFS + **KLayout** (DRC gate) + **magic** +
+  **netgen-lvs** (LVS: Magic extracts SPICE, Netgen compares) +
   the **sky130A PDK**. On this machine magic/netgen live in `~/miniconda3/envs/eda` and sky130A is
   staged at `/proj/workarea/user5/sky130_pdk/share/pdk/sky130A`, both pinned in
-  `references/env.local.sh` and green in `check_env.sh`. A red magic/netgen/PDK row **does** block
-  sky130 signoff — fix the env first, or DRC/LVS will falsely *skip* and teach the loop a lie.
+  `references/env.local.sh` and green in `check_env.sh`. A red klayout/magic/netgen/PDK row **does**
+  block sky130 signoff — fix the env first, or DRC/LVS will falsely *skip* and teach the loop a lie.
 - **Wrong-LVS-tool guard (historical sky130 bug, 2026-06-17):** on sky130 LVS is **Netgen, NOT
   KLayout**. The dominant early blocker was the loop running KLayout LVS on sky130 → 12/12
   false-`fail`. `fix_signoff.sh` is now platform-aware and `extract_lvs` is most-recent-tool-wins;
@@ -197,8 +208,9 @@ bash r2g-rtl2gds/scripts/flow/check_env.sh   # the tools $PLATFORM needs must be
 ```
 
 `check_env.sh` lists every ORFS platform it found and the tool paths. For the default **sky130hd**
-you need `yosys`/`openroad`/ORFS green **plus `magic` (DRC), `netgen-lvs` (LVS), and the sky130A
-PDK** green (`references/env.local.sh` pins all three on this machine). For nangate45 you need its
+you need `yosys`/`openroad`/ORFS green **plus KLayout (the DRC gate — footnote ²), `magic` +
+`netgen-lvs` (LVS: Magic extracts, Netgen compares), and the sky130A
+PDK** green (`references/env.local.sh` pins them on this machine). For nangate45 you need its
 KLayout LVS rule; for the non-default asap7 arm you instead need `KLAYOUT_CMD` green (KLayout drives
 asap7 DRC) and magic/netgen being absent is fine (sky130-only). A flow that aborts on a missing
 tool — **or silently *skips* DRC/LVS because its tool/PDK is unset** — teaches the loop a lie, so fix
@@ -252,12 +264,19 @@ honesty snapshot + integrity verdict per wave. **Launch it in the background and
 not block:
 
 ```bash
-# Optional: pre-seed the live pool (re-sourced each wave): 
-#   mkdir -p tools/_${PLATFORM}_resume_logs
-#   printf 'WORKERS=3\nNUM_CORES=4\nWAVE_MAX=24\n' > tools/_${PLATFORM}_resume_logs/pool.env
-PLATFORM="$PLATFORM" LEDGER="$LEDGER" WAVE_MAX=${WAVE_MAX:-24} WORKERS=${WORKERS:-3} NUM_CORES=${NUM_CORES:-4} \
-  setsid bash tools/campaign_resume_waves.sh >/dev/null 2>&1 &
-echo "driver pgid: $!"   # record the PGID — to stop a wave campaign you must kill the GROUP
+# SINGLE-INSTANCE GUARD (hard rule): NEVER launch a second driver — two drivers on one ledger
+# race set_state appends and can run the same design concurrently (FLOW_VARIANT collision).
+# The pgrep is END-ANCHORED on the script name (an un-anchored -f false-matches YOUR OWN shell,
+# whose cmdline contains the pattern). If a driver is alive: monitor it, retune via pool.env,
+# and skip the launch — under /loop this makes every later tick a pure supervisor check-in.
+pgrep -f 'campaign_resume_waves\.sh$' && echo "driver ALREADY RUNNING — do NOT relaunch" || {
+  # Optional: pre-seed the live pool (re-sourced each wave):
+  #   mkdir -p tools/_${PLATFORM}_resume_logs
+  #   printf 'WORKERS=3\nNUM_CORES=4\nWAVE_MAX=24\n' > tools/_${PLATFORM}_resume_logs/pool.env
+  PLATFORM="$PLATFORM" LEDGER="$LEDGER" WAVE_MAX=${WAVE_MAX:-24} WORKERS=${WORKERS:-3} NUM_CORES=${NUM_CORES:-4} \
+    setsid bash tools/campaign_resume_waves.sh >/dev/null 2>&1 &
+  echo "driver pgid: $!"   # record the PGID — to stop a wave campaign you must kill the GROUP
+}
 ```
 
 If you prefer to drive each wave by hand (or to debug a single wave), run the same interleaved
@@ -306,6 +325,10 @@ several map to documented patterns — chase them down rather than papering over
     is a lead to check the *tool* first (wrong-tool KLayout-on-sky130 = 100% false-fail, 2026-06-17) and
     the *match-then-writer-crash* class (LVS matched with 0 mismatches, then the net2id writer crashed →
     should be `crash`/retry, not `fail`). Only a real connectivity mismatch is a genuine sky130 LVS fail.
+    **Read the netgen report's FINAL verdict, not intermediate lines** (2026-07-03): a `.rpt` full of
+    subcircuit-level "Netlists match uniquely." lines can still end `Final result: Netlists do not
+    match.` — only the final-result line (what `extract_lvs` classifies, e.g. `netgen_topology`) is
+    the verdict; the early "match uniquely" lines are per-cell passes, not a false-fail signal.
   - **asap7-arm lead (non-default):** `lvs` filed as `fail` when asap7 has **no LVS deck** → it must be
     `skipped` (the honest-clean state), not `fail`. An asap7 design marked `incomplete`/`fail` *only*
     because LVS didn't "pass" is a misclassification bug — fix the gate, don't chase a non-existent LVS clean.
@@ -327,6 +350,36 @@ several map to documented patterns — chase them down rather than papering over
     "$KDB" "SELECT COUNT(*) FROM runs WHERE platform='asap7' AND (drc_status='clean' OR
     lvs_status='clean')"` MUST be 0. A non-zero count means a stale-read slipped a fabrication in.
   See `references/failure-patterns.md` "Stale prior-platform signoff report".
+- **Fabricated `clean` with NO reports at all — the LEDGER lies while both DBs stay green** (2026-07-02,
+  bug #7 of the sky130 round). A fix path whose success criterion is weaker than the platform's clean
+  contract (route_relief: "flow completes") marked designs ledger-`clean` with **no `drc.json`/`lvs.json`
+  on disk**; knowledge honestly recorded empty statuses, so `honesty.py` AND `check_db_integrity` stayed
+  green — no current gate cross-checks the LEDGER's clean against the signoff contract. **Run this
+  cross-check every tick** (must return 0): for each ledger-clean non-`ab_arm` design, its latest
+  knowledge row must have `drc_status`/`lvs_status ∈ {clean, clean_beol, skipped}`. Tell-tale in
+  `reports/fix_log.jsonl`: a vacuous `before=0 after=0 verdict=cleared` route entry as the only signoff
+  evidence. Fixed: a cleared route abort now falls THROUGH to real signoff — a route-fixed design's
+  fix_log must show the route session AND fresh DRC/LVS sessions after it. See failure-patterns.md
+  "Fabricated clean via cleared route abort".
+- **GHOST A/B arms — `*_arm_incomplete` escalations for arm dirs that don't exist** (2026-07-03, bug #8).
+  `plan_trial` Tier 1 (`run_violations` exhibitors) selected subjects whose project dirs a prior wipe
+  removed (immutable `runs` history is correct; picking non-existent dirs as PHYSICAL subjects is not) —
+  cheapest-first even ranked the tiny wiped clones FIRST, so ghost arms were ledger'd, flowed against
+  nothing, escalated every drain, and **starved the candidate** (`ab_trials` flat for its symptom while
+  arm escalations pile up). Check `ls design_cases/ | grep _ab` against the ledger's `ab_arm` entries.
+  Fixed: Tier-1 `isdir` filter + plan_arms skips subject-less arms (logged). A candidate whose exhibitors
+  are ALL gone now escalates `unvalidatable_insufficient_subjects` honestly. See failure-patterns.md
+  "Ghost A/B arms".
+- **`route_relief` cleared route but DRC comes back `stuck`** — the big-die scan pattern (2026-07-02,
+  2-of-2 on this round). The utilization floor (8) clears a route timeout by inflating the die; the DRC
+  deck then can't scan the huge, mostly-empty die inside its 7200s stage bound (`klayout_polygon_op_
+  no_progress`, exit 124) → honest `stuck` residual, NOT a fabrication and NOT a hang to kill. Small
+  designs relieved modestly DRC fine — it is die-size-dependent. Candidate future lever: intermediate
+  utilization steps (12–20) before the floor so route clears AND the deck can scan.
+- **Global `fail` count drifts DOWN while `fe` parity holds** — benign, do not chase (2026-07-03). A fix
+  session that re-flows and re-ingests without a regenerated `ppa.json` REPLACEs the same `run_id`
+  (documented ingest keying), flipping its own fail row to pass; the trajectory survives in
+  `fix_events`/`fix_trajectories`. The ALARM is only a parity BREAK (`fail != fe`), never the drift.
 - **`ab_trials` grows but `promoted` is flat for `$PLATFORM`** → the 2026-06-24 "arms are identical"
   alarm (subtler than empty `ab_trials`). Verify a trial's `metrics_json` shows the two arms genuinely
   diverging (different `is_success`/`outcome_score`/`fix_iters`), not wall-clock noise.
@@ -356,8 +409,35 @@ The loop is "closed" only when ALL of these hold — show the SQL/output for eac
   exits 0 — knowledge honesty 5/5 *and* the journal kept step (every A/B launch / promote / escalate
   move recorded in both books, `run_id` back-fill intact, no dangling cross-DB references). Explain any
   residual `WARN` — acceptable only once you've named why it is not a live writer bug.
+- **Every ledger-clean is signoff-backed (the bug-#7 gate the DBs can't see):** this cross-check
+  must report 0 — it catches a `clean` the LEDGER claims that knowledge can't back, which
+  `honesty.py`/`check_db_integrity` structurally miss (they audit the two DBs, not the ledger):
+
+  ```bash
+  python3 - <<'EOF'
+  import json, sqlite3
+  last = {}
+  for line in open('design_cases/_batch/sky130hd_campaign.jsonl'):   # $LEDGER
+      d = json.loads(line)
+      if d.get('design'): last.setdefault(d['design'], {}).update(d)
+  con = sqlite3.connect('r2g-rtl2gds/knowledge/knowledge.sqlite')
+  ok = lambda s: (s or '') in ('clean', 'clean_beol', 'skipped')
+  bad = 0
+  for name, row in last.items():
+      if row.get('state') != 'clean' or row.get('kind') == 'ab_arm': continue
+      pp = row.get('project_path') or f"design_cases/{name}"
+      r = con.execute("SELECT drc_status, lvs_status FROM runs WHERE project_path LIKE ? "
+                      "ORDER BY ingested_at DESC LIMIT 1", (f"%{pp.split('/')[-1]}",)).fetchone()
+      if r and not (ok(r[0]) and ok(r[1])): bad += 1; print("FABRICATED-CLEAN:", name, r)
+  print("not-signoff-backed cleans:", bad)   # MUST be 0
+  EOF
+  ```
 - **Failure learning:** `fix_events`/`fix_trajectories` captured fix attempts — including
   `abandoned`/`failed` ones (negative learning), not just successes.
+  A **loss** verdict is closure evidence too: a recipe arm doing WORSE than control (e.g.
+  core_util_relief 2026-07-03, losses across 4 class keys) proves the judge gets real signal and
+  correctly withholds promotion — "promoted stays flat" is only an alarm when trials are NOISE, not
+  when they are honest losses.
 - **Success learning + promotion:** at least one recipe transitioned `candidate → promoted`
   **on `$PLATFORM` (per-platform `promo` for `$PLATFORM` grew)**, backed by an `ab_trials` row whose
   arms genuinely diverged (arm A control loses / arm B forced-recipe wins).
