@@ -217,9 +217,15 @@ for _attempt in $(seq 1 "$LVS_CRASH_RETRIES"); do
   # Reap orphaned klayout from THIS run on ANY nonzero exit. A SIGSEGV gives make
   # "Error 11" (exit 2) — the old 124/137-only cleanup left a multi-GB klayout child
   # still spinning (a real leak observed 2026-06-03). Always reap on failure.
+  # 2026-07-04 audit H2: the old patterns assumed cmdline token ORDER
+  # ("variant.*lvs" — but ORFS passes the rule deck BEFORE the GDS, so they never
+  # matched) and one was DESIGN_NAME-scoped (ICCAD designs all share
+  # DESIGN_NAME=top -> could SIGKILL a CONCURRENT worker's LVS). Match variant+lvs
+  # in EITHER order and never scope by DESIGN_NAME; FLOW_VARIANT is unique per
+  # project (hard rule), so this only ever reaps our own run.
   if [[ $LVS_STATUS -ne 0 ]]; then
     pkill -9 -f "klayout.*${FLOW_VARIANT}.*lvs" 2>/dev/null || true
-    pkill -9 -f "klayout.*${DESIGN_NAME}.*FreePDK45" 2>/dev/null || true
+    pkill -9 -f "klayout.*lvs.*${FLOW_VARIANT}" 2>/dev/null || true
     sleep 2
   fi
 

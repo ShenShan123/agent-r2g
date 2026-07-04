@@ -434,6 +434,16 @@ for f in $ODB_FILES; do
   cp "$f" "$BACKEND_DIR/final/" 2>/dev/null || true
 done
 
+# HONESTY GUARD (2026-07-04 audit M7): the copies above swallow failures
+# (`|| true` keeps a partial resume usable), but a SUCCESSFUL flow whose GDS
+# never reached backend/final/ (disk full, permissions) must not report
+# success — signoff would later find no GDS and misdiagnose the design.
+# Downgrade to failure with an explicit reason; run-meta records the new status.
+if [[ $MAKE_STATUS -eq 0 && -n "$GDS_FILES" ]] && ! ls "$BACKEND_DIR"/final/*.gds >/dev/null 2>&1; then
+  echo "ERROR: flow succeeded but no GDS reached $BACKEND_DIR/final (result copy failed — disk full?)" | tee -a "$BACKEND_DIR/flow.log"
+  MAKE_STATUS=1
+fi
+
 # Write run metadata
 cat > "$BACKEND_DIR/run-meta.json" <<METAEOF
 {

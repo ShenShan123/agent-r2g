@@ -8,6 +8,10 @@ import json
 import re
 import sys
 
+# Atomic report writes: a kill -9/OOM mid-write must never leave a torn
+# reports/*.json for ingest to misread (2026-07-04 robustness audit M1).
+import report_io
+
 
 def parse_spef(spef_path: Path) -> dict:
     """Parse SPEF file for summary statistics."""
@@ -153,7 +157,7 @@ def main():
             skip_data = json.loads(skip_file.read_text(encoding='utf-8'))
             if skip_data.get('status') == 'skipped':
                 out_path.parent.mkdir(parents=True, exist_ok=True)
-                out_path.write_text(json.dumps(skip_data, indent=2), encoding='utf-8')
+                report_io.write_json_atomic(out_path, skip_data)
                 print(out_path)
                 return
         except Exception:
@@ -176,7 +180,7 @@ def main():
     if not spef_path.exists():
         result = {'status': 'no_spef', 'reason': 'No SPEF file found. Run RCX extraction first.'}
         out_path.parent.mkdir(parents=True, exist_ok=True)
-        out_path.write_text(json.dumps(result, indent=2), encoding='utf-8')
+        report_io.write_json_atomic(out_path, result)
         print(out_path)
         return
 
@@ -198,7 +202,7 @@ def main():
     }
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text(json.dumps(result, indent=2, ensure_ascii=False), encoding='utf-8')
+    report_io.write_json_atomic(out_path, result)
     print(out_path)
 
 

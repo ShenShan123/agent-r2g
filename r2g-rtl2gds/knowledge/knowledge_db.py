@@ -29,6 +29,18 @@ def connect(db_path: Path | str = DEFAULT_DB_PATH) -> sqlite3.Connection:
     conn = sqlite3.connect(str(db_path), timeout=30.0)
     conn.execute("PRAGMA busy_timeout = 30000")
     conn.execute("PRAGMA foreign_keys = ON")
+    # WAL (parity with journal_db): under R2G_AB_WORKERS=8 a burst of concurrent
+    # ingests could exceed the 30s busy_timeout in rollback-journal mode (readers
+    # block writers), and a locked-out ingest is SWALLOWED by the driver — a run
+    # silently missing from the store (2026-07-04 audit M5). WAL lets readers and
+    # the writer proceed concurrently. Best-effort: flipping the mode needs a
+    # moment with no competing lock, so retry on the next connect if it fails.
+    # The -wal/-shm sidecars are gitignored; SQLite auto-checkpoints on the last
+    # clean close, so the TRACKED knowledge.sqlite binary stays commit-complete.
+    try:
+        conn.execute("PRAGMA journal_mode = WAL")
+    except sqlite3.OperationalError:
+        pass
     return conn
 
 

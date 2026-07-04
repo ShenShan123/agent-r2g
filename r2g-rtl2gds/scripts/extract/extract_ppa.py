@@ -8,6 +8,10 @@ import json
 import re
 import sys
 
+# Atomic report writes: a kill -9/OOM mid-write must never leave a torn
+# reports/*.json for ingest to misread (2026-07-04 robustness audit M1).
+import report_io
+
 
 def parse_area_report(text: str) -> dict:
     """Parse OpenROAD area report."""
@@ -451,7 +455,7 @@ def main():
                 ppa['summary']['timing'] = sm
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text(json.dumps(ppa, indent=2, ensure_ascii=False), encoding='utf-8')
+    report_io.write_json_atomic(out_path, ppa)
     print(out_path)
 
 

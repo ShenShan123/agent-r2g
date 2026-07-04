@@ -9,6 +9,10 @@ import re
 import sys
 import xml.etree.ElementTree as ET
 
+# Atomic report writes: a kill -9/OOM mid-write must never leave a torn
+# reports/*.json for ingest to misread (2026-07-04 robustness audit M1).
+import report_io
+
 
 def parse_lvsdb(lvs_dir: Path) -> dict:
     """Parse KLayout lvsdb (XML) for LVS comparison results."""
@@ -284,7 +288,7 @@ def main():
             skip_data = json.loads(skip_file.read_text(encoding='utf-8'))
             if skip_data.get('status') == 'skipped':
                 out_path.parent.mkdir(parents=True, exist_ok=True)
-                out_path.write_text(json.dumps(skip_data, indent=2), encoding='utf-8')
+                report_io.write_json_atomic(out_path, skip_data)
                 print(out_path)
                 return
         except Exception:
@@ -336,8 +340,7 @@ def main():
             if ng_class:
                 out['mismatch_class'] = ng_class
             out_path.parent.mkdir(parents=True, exist_ok=True)
-            out_path.write_text(json.dumps(out, indent=2, ensure_ascii=False),
-                                encoding='utf-8')
+            report_io.write_json_atomic(out_path, out)
             print(out_path)
             return
         except Exception:
@@ -439,7 +442,7 @@ def main():
             result.update(cls)
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text(json.dumps(result, indent=2, ensure_ascii=False), encoding='utf-8')
+    report_io.write_json_atomic(out_path, result)
     print(out_path)
 
 

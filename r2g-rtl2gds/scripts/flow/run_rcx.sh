@@ -121,7 +121,9 @@ echo "Timeout: ${RCX_TIMEOUT}s"
 # Capture exit code correctly: disable set -e and pipefail around PIPESTATUS capture
 RCX_STATUS=0
 set +e +o pipefail
-timeout --signal=TERM --kill-after=60 "$RCX_TIMEOUT" \
+# setsid so timeout can kill the whole process group (parity with run_orfs/
+# run_drc/run_lvs) — a bare timeout orphans openroad children on kill (2026-07-04 M4).
+setsid timeout --signal=TERM --kill-after=60 "$RCX_TIMEOUT" \
   openroad -no_splash -exit "$RCX_DIR/run_rcx.tcl" 2>&1 | tee "$RCX_DIR/rcx.log"
 RCX_STATUS=${PIPESTATUS[0]}
 set -e -o pipefail

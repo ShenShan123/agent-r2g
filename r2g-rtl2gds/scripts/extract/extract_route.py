@@ -32,6 +32,10 @@ import re
 import sys
 from pathlib import Path
 
+# Atomic report writes: a kill -9/OOM mid-write must never leave a torn
+# reports/*.json for ingest to misread (2026-07-04 robustness audit M1).
+import report_io
+
 # A route-stage exit code that means "killed", not "found N violations": GNU
 # timeout uses 124 (TERM) / 137 (128+SIGKILL after --kill-after) — see
 # run_orfs.sh setsid timeout. These are NOT a clean/quantified failure.
@@ -136,7 +140,7 @@ def main() -> int:
     out_path = Path(sys.argv[2])
     result = extract(project_root)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text(json.dumps(result, indent=2, ensure_ascii=False), encoding="utf-8")
+    report_io.write_json_atomic(out_path, result)
     print(out_path)
     return 0
 

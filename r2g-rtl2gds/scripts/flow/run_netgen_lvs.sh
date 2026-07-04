@@ -142,7 +142,10 @@ read_db "$ODB_FILE"
 write_verilog -include_pwr_gnd "$POWERED_NETLIST"
 exit
 ORTCL
-  if "$OPENROAD_EXE" -no_init -exit "$LVS_DIR/write_powered_verilog.tcl" > "$LVS_DIR/write_powered_verilog.log" 2>&1 \
+  # timeout: the only tool call in this file that had none — a large ODB hangs
+  # write_verilog indefinitely, and inside an `if` set -e never fires (2026-07-04 M3).
+  if timeout --signal=TERM --kill-after=30 900 \
+       "$OPENROAD_EXE" -no_init -exit "$LVS_DIR/write_powered_verilog.tcl" > "$LVS_DIR/write_powered_verilog.log" 2>&1 \
      && [[ -s "$POWERED_NETLIST" ]] && grep -q 'VPWR' "$POWERED_NETLIST"; then
     echo "Using power-aware netlist from ODB: $POWERED_NETLIST"
     VERILOG_NETLIST="$POWERED_NETLIST"
@@ -216,8 +219,22 @@ MAGIC_EOF
 NETGEN_TIMEOUT="${NETGEN_TIMEOUT:-3600}"
 echo "Timeout: ${NETGEN_TIMEOUT}s per step"
 echo "Step 1: Extracting SPICE netlist from GDS with Magic..."
-( cd "$EXT_SCRATCH" && timeout --signal=TERM --kill-after=30 "$NETGEN_TIMEOUT" \
+# set +e +o pipefail around the tee pipeline (the PIPESTATUS idiom the Netgen step
+# below already uses): under `set -euo pipefail` a Magic TIMEOUT (exit 124 — the
+# exact hang this timeout exists for) aborted the script AT THIS LINE, skipping
+# the intended status:error JSON below, so the timeout reason was lost
+# (2026-07-04 audit M2; fail-closed either way, but undiagnosable).
+MAGIC_STATUS=0
+set +e +o pipefail
+( cd "$EXT_SCRATCH" && setsid timeout --signal=TERM --kill-after=30 "$NETGEN_TIMEOUT" \
     "$MAGIC_EXE" -dnull -noconsole -T "$MAGIC_TECH" "$EXTRACT_TCL" ) 2>&1 | tee "$EXTRACT_LOG"
+MAGIC_STATUS=${PIPESTATUS[0]}
+set -e -o pipefail
+if [[ $MAGIC_STATUS -eq 124 || $MAGIC_STATUS -eq 137 ]]; then
+  echo "ERROR: Magic SPICE extraction timed out after ${NETGEN_TIMEOUT}s (exit $MAGIC_STATUS)" >&2
+  echo '{"tool": "netgen", "status": "error", "reason": "Magic SPICE extraction timeout"}' > "$LVS_DIR/netgen_lvs_result.json"
+  exit 1
+fi
 
 if [[ ! -f "$EXTRACTED_SPICE" ]]; then
   echo "ERROR: Magic SPICE extraction failed — $EXTRACTED_SPICE not created" >&2

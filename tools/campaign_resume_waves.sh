@@ -36,6 +36,24 @@ PLATFORM=${PLATFORM:-sky130hd}
 # nangate45 round historically lives in campaign.jsonl — override LEDGER=... to
 # resume it (asap7 in asap7_campaign.jsonl); new rounds use <platform>_campaign.jsonl.
 LEDGER=${LEDGER:-design_cases/_batch/${PLATFORM}_campaign.jsonl}
+
+# Single-instance guard (2026-07-04 audit H1): two drivers on one ledger race
+# set_state and flow the same designs into the same FLOW_VARIANT paths (violates
+# the "never two same DESIGN_NAME+FLOW_VARIANT" hard rule). flock is per-ledger,
+# matching batch_run.sh/batch_flow.sh; the pgrep net also catches a pre-lock
+# legacy driver that holds no flock. SKIP_INSTANCE_GUARD=1 overrides (debug only).
+if [[ "${SKIP_INSTANCE_GUARD:-0}" != "1" ]]; then
+  if pgrep -f "campaign_resume_waves\.sh" | grep -qvw "$$"; then
+    echo "ERROR: another campaign_resume_waves.sh is already running (pgrep) — refusing to double-launch." >&2
+    exit 1
+  fi
+  mkdir -p "$(dirname "$LEDGER")"
+  exec 200>"${LEDGER}.driverlock"
+  if ! flock -n 200; then
+    echo "ERROR: another driver holds ${LEDGER}.driverlock — refusing to double-launch." >&2
+    exit 1
+  fi
+fi
 EL=r2g-rtl2gds/scripts/loop/engineer_loop.py
 KDB=r2g-rtl2gds/knowledge/knowledge.sqlite
 INTEG=tools/check_db_integrity.py
