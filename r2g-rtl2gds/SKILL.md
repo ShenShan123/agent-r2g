@@ -442,6 +442,7 @@ design_cases/<design-name>/
 │   └── run_rcx.tcl            # Generated Tcl extraction script
 ├── labels/                    # Dataset labels (Y): congestion/wirelength/timing/irdrop CSVs (run_labels.sh)
 ├── features/                  # Dataset features (X): nodes/edges/metadata CSVs (run_features.sh)
+├── dataset/                   # PyG graphs: {b..f}_graph.pt, netlist_graph.pt, graph_manifest.json (run_graphs.sh)
 ├── reports/
 │   ├── ppa.json               # PPA metrics + geometry
 │   ├── progress.json          # ORFS stage completion
@@ -544,6 +545,17 @@ design_cases/<design-name>/
       cell-type/routing-layer vocabularies adapt per platform. See
       `references/feature-extraction.md`.
     - Batch backfill across completed designs: `tools/run_features_batch.sh`.
+13d. Build PyG graph datasets (optional — training-ready `.pt` graphs joining 13b+13c):
+    - `scripts/flow/run_graphs.sh <project-dir> [platform]`
+    - Runs 13b/13c automatically when their CSVs are missing or older than the DEF,
+      then assembles five graph topologies (`b`..`f`: pin-level heterograph down to
+      gate-clique) into `<project-dir>/dataset/{b..f}_graph.pt`, plus the
+      synthesis-netlist bipartite graph (`netlist_graph.pt`) and a stats manifest
+      (`dataset/graph_manifest.json`, mirrored to `reports/graph_dataset.json`).
+    - Needs torch + torch_geometric + pandas (heavier than the base toolchain):
+      point `R2G_GRAPH_PYTHON` at a venv that has them (install on /proj, NOT $HOME);
+      machines without one SKIP cleanly with a HINT. `R2G_GRAPH_VARIANTS` selects
+      variants (default `bcdef`). See `references/graph-dataset.md`.
 14. Diagnose issues: `scripts/reports/build_diagnosis.py <project-root> reports/diagnosis.json`
 15. Get config suggestions: `knowledge/suggest_config.py <project-dir>` (optional, useful for tuning)
 16. Generate the dashboard with `scripts/dashboard/generate_multi_project_dashboard.py`.

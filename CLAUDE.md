@@ -221,6 +221,7 @@ inert for nangate45). The dashboard's **Knowledge Store Health** panel renders r
 | Historical debug narratives + corpus results                        | `r2g-rtl2gds/references/lessons-learned.md`       |
 | How to read PPA / signoff JSON                                      | `r2g-rtl2gds/references/ppa-report-guide.md`      |
 | Dataset label/feature extraction (Y/X)                              | `references/{label,feature}-extraction.md`        |
+| PyG graph datasets (b–f variants, netlist graph, torch venv)        | `r2g-rtl2gds/references/graph-dataset.md`         |
 | Per-platform tech handling (voltage, tap cells, layers, liberty)    | `r2g-rtl2gds/scripts/extract/techlib/`            |
 | Spec / config / SDC templates                                       | `references/spec-template.md`, `assets/`          |
 | DRC/LVS/route fixing (antenna diode, density/route relief, LVS)     | `r2g-rtl2gds/references/signoff-fixing.md`        |

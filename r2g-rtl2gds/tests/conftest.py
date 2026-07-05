@@ -30,6 +30,11 @@ EXTRACT_DIR = SKILL_ROOT / "scripts" / "extract"
 if str(EXTRACT_DIR) not in sys.path:
     sys.path.insert(0, str(EXTRACT_DIR))
 
+# Make scripts/extract/graph/ importable for graph-dataset stage tests.
+GRAPH_DIR = SKILL_ROOT / "scripts" / "extract" / "graph"
+if str(GRAPH_DIR) not in sys.path:
+    sys.path.insert(0, str(GRAPH_DIR))
+
 # Make scripts/reports/ importable for signoff-fixer tests.
 REPORTS_DIR = SKILL_ROOT / "scripts" / "reports"
 if str(REPORTS_DIR) not in sys.path:

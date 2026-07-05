@@ -82,3 +82,20 @@ roll-up land under `design_cases/_batch/logs_labels_<tag>/`.
   SDC `clk_port_name` doesn't match an actual port) get all-`not_in_path` timing
   rows (`label=0`) — honestly recorded, not an error. Purely combinational designs
   also correctly produce zero in-path rows.
+
+## 2026-07-05 corrections (RTL2Graph integration audit)
+
+Two label defects were fixed on this date; CSVs generated before it are wrong in
+these spots (regenerate before training on them):
+
+- `timing_features.csv`: EVERY register (bus-named cell) had `slack=INF,
+  in_sta_path=false` — the STA-pin-name -> odb-component join missed on DEF
+  name escaping. After the fix registers carry real slack (aes_core sky130hd:
+  5/2476 -> 2476/2476 labeled).
+- `wirelength.csv` + `cell_congestion.csv` on sky130*: DEF `RECT` patch groups
+  were misread as route points, inflating RECT-bearing nets ~100-400x (1283/30k
+  nets on aes_core) and congestion utilization past 11x. Fixed lengths are
+  centerline (patch metal excluded), so RECT nets read ~0.2 um below OpenROAD's
+  `report_wire_length`, which includes patches.
+
+Full defect table: failure-patterns.md "Dataset-Extraction Silent-Value Defects".

@@ -129,3 +129,20 @@ memory-light). With no design args it auto-discovers designs that have a collect
 - Hand-rolled regex parsers tuned to ORFS `write_def`/`write_spef` output. The stats JSON
   carries row counts; a quick sanity check is `nodes_gate` rows ≈ DEF `COMPONENTS`.
 - Designs that never reached `6_final` are skipped (status recorded), not errored.
+
+## 2026-07-05 semantics corrections (RTL2Graph integration audit)
+
+Three feature values changed meaning on this date (commit `fix(skill): feature
+extractors — PIN-direction inversion, macro flag, load-only pin caps`); CSVs
+generated before it carry the OLD, wrong semantics:
+
+- `num_drivers`/`num_sinks`: DEF PIN direction is now interpreted from the
+  chip's perspective (an INPUT port drives its net; an OUTPUT port sinks it).
+  Previously every output-port net counted 2 drivers / 0 sinks.
+- `connects_macro_flag`: now real (1 when the net touches a master that only
+  exists in the per-design macro libs, e.g. fakeram45_*). Previously always 0.
+- `sum_pin_cap_fF`: now the sum of INPUT-pin load caps only. Previously the
+  driver's liberty `max_capacitance` (a drive limit ~20x the loads) was added
+  in, dominating the value.
+
+Full defect table: failure-patterns.md "Dataset-Extraction Silent-Value Defects".
