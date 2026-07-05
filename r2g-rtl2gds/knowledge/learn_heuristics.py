@@ -385,7 +385,7 @@ def _design_class_by_project(conn) -> dict[str, str]:
     fallback: dict[str, str] = {}
     for pp, dc in conn.execute(
             "SELECT project_path, design_class FROM runs WHERE project_path IS NOT NULL "
-            "ORDER BY ingested_at DESC, run_id DESC"):
+            "ORDER BY julianday(ingested_at) DESC, run_id DESC"):
         if not pp or pp in out:
             continue
         dc = dc or "unknown/unknown"
@@ -529,7 +529,7 @@ def learn(db_path: Path | str,
         entry["fix_recipes"] = recipes
 
     data = {
-        "generated_at": _dt.datetime.utcnow().isoformat(timespec="seconds") + "Z",
+        "generated_at": _dt.datetime.now().astimezone().isoformat(timespec="seconds"),
         "source_run_count": len(rows),
         "min_successful_runs_required": MIN_SUCCESSFUL,
         "schema_version": 3,                       # decision-8 recipes projection

@@ -33,7 +33,10 @@ NONDIVERGENT_STRATEGIES = frozenset({"lvs_resolve_unknown"})
 
 
 def _now() -> str:
-    return _dt.datetime.utcnow().isoformat(timespec="seconds") + "Z"
+        # SYSTEM-LOCAL time with numeric offset (2026-07-04, operator request) —
+    # replaces utcnow()+"Z". Readers must compare timestamps via julianday()
+    # (parses both regimes), never lexicographically.
+    return _dt.datetime.now().astimezone().isoformat(timespec="seconds")
 
 
 def _iter_keys(heur: dict):
@@ -173,6 +176,6 @@ def pending_candidates(conn) -> list[dict]:
     """All candidate rows awaiting an A/B trial (ab_runner's work queue)."""
     cur = conn.execute(
         "SELECT symptom_id, design_class, platform, strategy FROM recipe_status"
-        " WHERE status='candidate' ORDER BY updated_at")
+        " WHERE status='candidate' ORDER BY julianday(updated_at)")
     return [dict(zip(("symptom_id", "design_class", "platform", "strategy"), r))
             for r in cur.fetchall()]

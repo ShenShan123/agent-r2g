@@ -94,7 +94,7 @@ def bug_solutions(*, symptom_id: str, knowledge_db_path=DEFAULT_KDB) -> list[dic
         for s in sols:
             row = kc.execute(
                 "SELECT status FROM recipe_status WHERE symptom_id=? AND"
-                " strategy=? ORDER BY updated_at DESC LIMIT 1",
+                " strategy=? ORDER BY julianday(updated_at) DESC LIMIT 1",
                 (symptom_id, s["strategy"])).fetchone()
             s["status"] = row[0] if row else "promoted"
             s["proven_on"] = (s["proven_on"] or "").split(",")

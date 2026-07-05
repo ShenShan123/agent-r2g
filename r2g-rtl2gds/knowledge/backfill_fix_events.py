@@ -64,7 +64,10 @@ _DEFAULT_PLATFORM = "asap7"
 
 
 def _now() -> str:
-    return _dt.datetime.utcnow().isoformat(timespec="seconds") + "Z"
+        # SYSTEM-LOCAL time with numeric offset (2026-07-04, operator request) —
+    # replaces utcnow()+"Z". Readers must compare timestamps via julianday()
+    # (parses both regimes), never lexicographically.
+    return _dt.datetime.now().astimezone().isoformat(timespec="seconds")
 
 
 def _resolve_platform(cases_root: Path, dir_basename: str,

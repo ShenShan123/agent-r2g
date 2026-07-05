@@ -282,7 +282,7 @@ o=dict(check=check,iter=int(it),strategy=strategy,
        predicates=preds, ts=ts)
 open(logp,"a").write(json.dumps(o)+"\n")' \
     "$1" "$2" "$3" "$4" "$5" "$6" "${7:-}" "$PROJECT_DIR" "$FIX_SESSION_ID" "$LOG" \
-    "${8:-}" "${9:-}" "$(date -u +%FT%TZ)" "${10:-}"
+    "${8:-}" "${9:-}" "$(date +%FT%T%:z)" "${10:-}"
 }
 
 _ensure_baseline() {  # $1 = drc|lvs : RUN the signoff tool once if there is no real

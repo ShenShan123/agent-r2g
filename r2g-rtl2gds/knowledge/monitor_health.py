@@ -27,7 +27,7 @@ def _fetch_all(conn) -> list[dict]:
     cur = conn.execute(
         "SELECT design_family, platform, orfs_status, drc_status, "
         "lvs_status, lvs_mismatch_class, rcx_status, ingested_at "
-        "FROM runs ORDER BY ingested_at ASC"
+        "FROM runs ORDER BY julianday(ingested_at) ASC"
     )
     cols = [c[0] for c in cur.description]
     return [dict(zip(cols, r)) for r in cur.fetchall()]

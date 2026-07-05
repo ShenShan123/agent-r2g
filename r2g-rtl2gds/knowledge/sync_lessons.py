@@ -8,6 +8,7 @@ run_violations.symptom_id / signature_json. Prose is never modified. Idempotent.
 """
 from __future__ import annotations
 
+import datetime as _dt
 import hashlib
 import fnmatch
 import json
@@ -121,16 +122,17 @@ def sync(conn, patterns_path: Path | None = None) -> int:
                 "INSERT INTO lessons (lesson_id, source_doc, section_title, status, "
                 " symptom_trigger_json, strategy_ids_json, prose_excerpt, "
                 " evidence_runs_json, content_hash, synced_at) "
-                "VALUES (?,?,?,?,?,?,?,?,?,datetime('now')) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?) "
                 "ON CONFLICT(lesson_id) DO UPDATE SET "
                 "  status=excluded.status, symptom_trigger_json=excluded.symptom_trigger_json, "
                 "  strategy_ids_json=excluded.strategy_ids_json, prose_excerpt=excluded.prose_excerpt, "
                 "  evidence_runs_json=excluded.evidence_runs_json, "
-                "  content_hash=excluded.content_hash, synced_at=datetime('now')",
+                "  content_hash=excluded.content_hash, synced_at=excluded.synced_at",
                 (lid, str(doc), title, meta.get("status", "active"),
                  json.dumps(trigger, sort_keys=True),
                  json.dumps(meta.get("strategy_ids") or []), prose,
-                 json.dumps(evidence), content_hash))
+                 json.dumps(evidence), content_hash,
+                 _dt.datetime.now().astimezone().isoformat(timespec="seconds")))
             n += 1
     conn.commit()
     return n

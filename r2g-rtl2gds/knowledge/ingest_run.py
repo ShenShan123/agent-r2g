@@ -325,7 +325,7 @@ def _upsert_symptom(conn: sqlite3.Connection, sig: dict, sid: str) -> None:
         (sid, sig.get("check"), sig.get("class"),
          json.dumps(sig.get("predicates") or {}, sort_keys=True),
          symptom.SYMPTOM_SCHEMA_VERSION,
-         _dt.datetime.utcnow().isoformat(timespec="seconds") + "Z"))
+         _dt.datetime.now().astimezone().isoformat(timespec="seconds")))
 
 
 def _ingest_fix_events(conn: sqlite3.Connection, project: Path,
@@ -408,7 +408,7 @@ def _write_run_violations(conn: sqlite3.Connection, run_id: str,
          json.dumps(drc.get("categories") or {}, sort_keys=True),
          lvs.get("status"), lvs.get("mismatch_class"), tcheck.get("tier"), wns,
          sid, json.dumps(sig, sort_keys=True),
-         _dt.datetime.utcnow().isoformat(timespec="seconds") + "Z"))
+         _dt.datetime.now().astimezone().isoformat(timespec="seconds")))
 
 
 # orfs_status is intentionally a FAITHFUL record of backend/stage_log.jsonl:
@@ -620,7 +620,7 @@ def _record_lineage(conn: sqlite3.Connection, run_id: str,
         "clock_period_ns "
         "FROM runs "
         "WHERE design_name = ? AND platform = ? AND run_id != ? "
-        "ORDER BY ingested_at DESC LIMIT 1",
+        "ORDER BY julianday(ingested_at) DESC LIMIT 1",
         (design_name, platform, run_id),
     ).fetchone()
     if prev is None:
@@ -698,7 +698,7 @@ def _record_lineage(conn: sqlite3.Connection, run_id: str,
         "VALUES (?, ?, ?, ?, ?, ?, ?)",
         (design_name, platform, run_id, prev_run_id,
          json.dumps(diff, sort_keys=True), current_outcome,
-         _dt.datetime.utcnow().isoformat(timespec="seconds") + "Z"),
+         _dt.datetime.now().astimezone().isoformat(timespec="seconds")),
     )
 
 
@@ -780,7 +780,7 @@ def ingest(project: Path,
     if class_cell_count is None:
         prior = conn.execute(
             "SELECT cell_count FROM runs WHERE project_path=? AND cell_count IS NOT NULL "
-            "ORDER BY ingested_at DESC, run_id DESC LIMIT 1",
+            "ORDER BY julianday(ingested_at) DESC, run_id DESC LIMIT 1",
             (str(project.resolve()),)).fetchone()
         if prior and prior[0]:
             class_cell_count = prior[0]
@@ -817,7 +817,7 @@ def ingest(project: Path,
         "design_name":       design_name,
         "design_family":     design_family,
         "platform":          platform,
-        "ingested_at":       _dt.datetime.utcnow().isoformat(timespec="seconds") + "Z",
+        "ingested_at":       _dt.datetime.now().astimezone().isoformat(timespec="seconds"),
 
         "core_utilization":       _to_float(cfg.get("CORE_UTILIZATION")),
         "place_density_lb_addon": _to_float(cfg.get("PLACE_DENSITY_LB_ADDON")),

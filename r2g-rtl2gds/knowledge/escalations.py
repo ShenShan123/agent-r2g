@@ -74,7 +74,10 @@ REASONS = ("unknown_symptom", "catalog_exhausted", "unseen_crash",
 
 
 def _now() -> str:
-    return _dt.datetime.utcnow().isoformat(timespec="seconds") + "Z"
+        # SYSTEM-LOCAL time with numeric offset (2026-07-04, operator request) —
+    # replaces utcnow()+"Z". Readers must compare timestamps via julianday()
+    # (parses both regimes), never lexicographically.
+    return _dt.datetime.now().astimezone().isoformat(timespec="seconds")
 
 
 def _journal_escalate(*, design: str, project_path: str, reason: str,

@@ -146,7 +146,10 @@ def judge_repeated_ex(arm_a_samples: list[dict | None],
 
 
 def _now() -> str:
-    return _dt.datetime.utcnow().isoformat(timespec="seconds") + "Z"
+        # SYSTEM-LOCAL time with numeric offset (2026-07-04, operator request) —
+    # replaces utcnow()+"Z". Readers must compare timestamps via julianday()
+    # (parses both regimes), never lexicographically.
+    return _dt.datetime.now().astimezone().isoformat(timespec="seconds")
 
 
 def _evidence_designs(symptom_id: str) -> list[str]:
@@ -173,7 +176,7 @@ def _resolve_evidence(conn, ev_names: list[str], want_platform: str | None) -> l
     names = set(ev_names)
     rows = conn.execute(
         "SELECT design_name, project_path, cell_count, platform, "
-        "ROW_NUMBER() OVER (PARTITION BY project_path ORDER BY ingested_at DESC, run_id DESC) rn "
+        "ROW_NUMBER() OVER (PARTITION BY project_path ORDER BY julianday(ingested_at) DESC, run_id DESC) rn "
         "FROM runs").fetchall()
     out, seen = [], set()
     for design_name, project_path, cell_count, plat, rn in rows:
@@ -230,7 +233,7 @@ def _symptom_designs(conn, symptom_id: str, want_platform: str | None) -> list[d
     # _resolve_evidence (cheapest-first, real dirs only, never an A/B arm copy).
     rows = conn.execute(
         "SELECT design_name, project_path, cell_count, platform, "
-        "ROW_NUMBER() OVER (PARTITION BY project_path ORDER BY ingested_at DESC, run_id DESC) rn "
+        "ROW_NUMBER() OVER (PARTITION BY project_path ORDER BY julianday(ingested_at) DESC, run_id DESC) rn "
         "FROM runs").fetchall()
     out, seen = [], set()
     for design_name, project_path, cell_count, plat, rn in rows:

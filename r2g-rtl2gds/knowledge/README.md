@@ -394,6 +394,18 @@ The knowledge store also feeds the loose-first **Fmax search** (`scripts/reports
     unreadable recipe lifecycle fails CLOSED (cold-start) instead of granting unvalidated recipes
     promoted-equivalent trust.
 
+32. **Timestamps are SYSTEM-LOCAL with a numeric offset; compare them with `julianday()`, never
+    lexicographically (2026-07-04, operator request).** All writers (`_now()` helpers, ingest's
+    `ingested_at`/`snapshot_ts`/`first_seen`, journal actions, ab_trials `ts`, lesson `synced_at`,
+    the fix-log `ts` from `fix_signoff.sh`, heuristics `generated_at`) stamp
+    `YYYY-MM-DDTHH:MM:SS±HH:MM` — matching the flow artifacts (`RUN_*` dirs were already local).
+    Rows written before the switch carry UTC `…Z` stamps, which sort AHEAD of newer local stamps
+    lexicographically by the UTC offset — so every load-bearing latest-row ordering
+    (`_arm_metric`, ab_runner's subject ROW_NUMBERs, ingest's prior-row lookups,
+    `_design_class_by_project`, `pending_candidates`) orders by `julianday(col)`, which parses
+    both regimes and orders by REAL time. New readers must do the same. Tests:
+    `tests/test_local_timestamps.py`.
+
 ## Sharing the store across users
 
 `knowledge.sqlite` (git-tracked) ships the skill pre-trained, but a binary blob does not

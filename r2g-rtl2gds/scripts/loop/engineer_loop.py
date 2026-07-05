@@ -46,7 +46,10 @@ STATES = ("pending", "flow", "signoff", "fixing", "clean", "escalated",
 
 
 def _now() -> str:
-    return _dt.datetime.utcnow().isoformat(timespec="seconds") + "Z"
+        # SYSTEM-LOCAL time with numeric offset (2026-07-04, operator request) —
+    # replaces utcnow()+"Z". Readers must compare timestamps via julianday()
+    # (parses both regimes), never lexicographically.
+    return _dt.datetime.now().astimezone().isoformat(timespec="seconds")
 
 
 class Ledger:
@@ -1564,7 +1567,7 @@ def _arm_metric(conn, project_path: str, *, timing: bool = False,
         "SELECT run_id, total_elapsed_s, fix_iters_to_clean, drc_status, "
         "lvs_status, rcx_status, lvs_mismatch_class, orfs_status, outcome_score, "
         "wns_ns, timing_tier "
-        "FROM runs WHERE project_path=? ORDER BY ingested_at DESC LIMIT 1",
+        "FROM runs WHERE project_path=? ORDER BY julianday(ingested_at) DESC LIMIT 1",
         (project_path,)).fetchone()
     if row is None:
         return None

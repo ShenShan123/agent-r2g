@@ -54,7 +54,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
+STAMP="$(date +%Y%m%dT%H%M%S%z)"
 OUT_DIR="$DC/_batch"
 mkdir -p "$OUT_DIR"
 JSONL="$OUT_DIR/beol_drc_${STAMP}.jsonl"

@@ -383,7 +383,7 @@ def main() -> int:
     view = build_view(args.db, args.heuristics)
     # The file gets a generated_at for provenance; build_view itself stays pure.
     out_obj = dict(view)
-    out_obj["generated_at"] = _dt.datetime.utcnow().isoformat(timespec="seconds") + "Z"
+    out_obj["generated_at"] = _dt.datetime.now().astimezone().isoformat(timespec="seconds")
     text = json.dumps(out_obj, indent=2, sort_keys=True)
     if args.out:
         Path(args.out).write_text(text + "\n", encoding="utf-8")

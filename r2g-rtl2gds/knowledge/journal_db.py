@@ -22,7 +22,10 @@ ACTION_TYPES = ("config_knob_delta", "sdc_edit", "stage_rerun", "tool_invoke",
 
 
 def _now() -> str:
-    return _dt.datetime.utcnow().isoformat(timespec="seconds") + "Z"
+        # SYSTEM-LOCAL time with numeric offset (2026-07-04, operator request) —
+    # replaces utcnow()+"Z". Readers must compare timestamps via julianday()
+    # (parses both regimes), never lexicographically.
+    return _dt.datetime.now().astimezone().isoformat(timespec="seconds")
 
 
 def connect(db_path: Path | str = DEFAULT_JOURNAL_PATH) -> sqlite3.Connection:

@@ -28,7 +28,7 @@ if [[ -z "${ORFS_ROOT:-}" || -z "${FLOW_HOME:-}" ]]; then
   fi
 fi
 
-now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
+now() { date +%Y-%m-%dT%H:%M:%S%:z; }
 
 START="$(date +%s)"
 RDRC=skip

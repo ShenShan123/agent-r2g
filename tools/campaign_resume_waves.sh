@@ -107,9 +107,9 @@ while true; do
   # shellcheck disable=SC1090
   [ -f "$POOL_ENV" ] && { source "$POOL_ENV"; export NUM_CORES; }
   p=$(pending_count)
-  if [ "$p" -le 0 ]; then echo "ALL_DONE platform=$PLATFORM pending=0"; echo "$(date -u +%FT%TZ) ALL_DONE platform=$PLATFORM" >>"$PROG"; break; fi
+  if [ "$p" -le 0 ]; then echo "ALL_DONE platform=$PLATFORM pending=0"; echo "$(date +%FT%T%:z) ALL_DONE platform=$PLATFORM" >>"$PROG"; break; fi
   wave=$((wave+1))
-  echo "$(date -u +%FT%TZ) WAVE_START platform=$PLATFORM wave=$wave pending=$p max=$WAVE_MAX workers=$WORKERS num_cores=$NUM_CORES" >>"$PROG"
+  echo "$(date +%FT%T%:z) WAVE_START platform=$PLATFORM wave=$wave pending=$p max=$WAVE_MAX workers=$WORKERS num_cores=$NUM_CORES" >>"$PROG"
   ts=$(date +%Y%m%d_%H%M%S)
   wlog="$LOGDIR/wave_${wave}_${ts}.log"
   {
@@ -128,9 +128,9 @@ while true; do
   integ=PASS
   python3 "$INTEG" --platform "$PLATFORM" >>"$wlog" 2>&1 || integ=ALARM
   h=$(honesty)
-  echo "$(date -u +%FT%TZ) HONESTY $h" >>"$wlog"
+  echo "$(date +%FT%T%:z) HONESTY $h" >>"$wlog"
   before=$p; after=$(pending_count); did=$((before-after))
   line="WAVE_DONE platform=$PLATFORM wave=$wave rc=$rc integrity=$integ processed~=$did pending_now=$after | $h"
   echo "$line"
-  echo "$(date -u +%FT%TZ) $line" >>"$PROG"
+  echo "$(date +%FT%T%:z) $line" >>"$PROG"
 done

@@ -176,7 +176,7 @@ def mine(db_path: Path | str,
         })
 
     data = {
-        "generated_at": _dt.datetime.utcnow().isoformat(timespec="seconds") + "Z",
+        "generated_at": _dt.datetime.now().astimezone().isoformat(timespec="seconds"),
         "min_occurrences": min_occurrences,
         "min_distinct_designs": min_distinct_designs,
         "candidates": candidates,

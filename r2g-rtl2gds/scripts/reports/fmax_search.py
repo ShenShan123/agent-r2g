@@ -297,14 +297,14 @@ def record_verify_triple(conn, *, design_name, design_family, platform, period,
     The N>=8 min-sample gate in fmax_model.select_model means one triple cannot
     move the active estimator."""
     import datetime as _dt
-    rid = "fmaxverify_" + _dt.datetime.utcnow().strftime("%Y%m%d%H%M%S%f")
+    rid = "fmaxverify_" + _dt.datetime.now().astimezone().strftime("%Y%m%d%H%M%S%f")
     conn.execute(
         "INSERT OR REPLACE INTO runs (run_id, project_path, design_name, "
         "design_family, platform, ingested_at, clock_period_ns, floorplan_setup_ws, "
         "place_setup_ws, finish_setup_ws, wns_ns, drc_status, lvs_status, eval_arm) "
         "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (rid, f"verify:{design_name}", design_name, design_family, platform,
-         _dt.datetime.utcnow().isoformat(timespec="seconds") + "Z",
+         _dt.datetime.now().astimezone().isoformat(timespec="seconds"),
          period, floorplan_ws, place_ws, finish_ws, finish_ws,
          "clean" if finish_ws is not None and finish_ws >= 0 else "fail",
          "clean", "fmax_verify"))
