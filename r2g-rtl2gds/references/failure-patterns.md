@@ -3049,3 +3049,76 @@ physical-only fill/tap/decap cells are absent from the timing liberty → `cell_
 the graph stage filters them — nangate45's curated map differs, a platform asymmetry).
 Power/ground iopin→net edge rows reference nets absent from nodes_net.csv (power nets
 live in SPECIALNETS) — the graph stage's net_type filter + inner joins drop them.
+
+### 10. `connects_macro_flag` ≡ 0 on every macro design — SC-lib list already contained the macro libs (2026-07-06 nangate45 round)
+
+- **Symptom:** on a fakeram45 design (mem_soc, 2 SRAM macros, ~230 macro-connected
+  nets) `nodes_net.csv` had `connects_macro_flag=0` for ALL 1,248 nets. No error
+  anywhere — pure std-cell designs legitimately have all-0, so the column looked alive.
+- **Root cause:** ORFS's resolved `LIB_FILES` **already folds `ADDITIONAL_LIBS` in**,
+  so `run_features.sh`'s `R2G_SC_LIB_FILES="$LIB_FILES"` (the "std-cell subset")
+  contained the macro libs too. `macro_cell_keys()` = lib_files − sc_lib_files = ∅ →
+  the flag can never fire, on ANY platform. Same wiring also fed macro cells into the
+  runtime cell-type map's "std-cell-only" id space — a LATENT cross-design id reshuffle
+  (nangate45 escaped only because uppercase std names sort before `fakeram45_*`).
+- **Fix:** `run_features.sh` now subtracts `ADDITIONAL_LIBS` from `LIB_FILES` when
+  exporting `R2G_SC_LIB_FILES`. Verified live: mem_soc regenerated with 237 flag=1
+  nets matching the DEF∩LEF-BLOCK truth (verifier check
+  `ext.net connects_macro_flag == DEF∩LEF-BLOCK truth`).
+
+### 11. Liberty `bus()`/`bundle()` groups unparsed — every macro bus pin unclassified with cap 0 (all platforms)
+
+- **Symptom:** fakeram45 bus pins (`addr_in[3]`, `wd_in[5]`, `rd_out[0]`, …) got
+  `pin_type_id=14` (the untyped fallback) and contributed 0 to `sum_pin_cap_fF`,
+  while the SAME macro's scalar pins (clk/we_in/ce_in) were typed with real caps —
+  the mixed result made the CSV look plausible.
+- **Root cause:** macro liberty declares direction/capacitance ONCE at the `bus()`
+  group level with NO per-bit `pin()` members; `techlib/liberty.py` only matched
+  `pin (...) {`. The DEF connects per-bit, so every lookup missed. Std-cell-only
+  platforms never exposed this (no bus groups in std liberty).
+- **Fix:** the pin-group regex now also enters `bus()`/`bundle()` groups, and
+  `get_pin_info` falls back from `name[idx]` to the bus base entry. Regression:
+  `test_bus_group_members_resolve` + verifier check
+  `ext.macro pins classified (no type-14 bus fallout)`.
+
+### 12. nangate45 curated cell-type map drifted 22 masters behind the deployed liberty (RETIRED → runtime map)
+
+- **Symptom:** every instance of AOI211_X1/AOI222_X1/OAI211_X1/OAI222_X1/OAI222_X4,
+  ALL scan FFs (SDFF*/SDFFR*/SDFFS*/SDFFRS*), ALL clock gates (CLKGATE*/CLKGATETST*),
+  and TLAT_X1 took `cell_type_id=95` — the literal UNKNOWN sentinel — silently aliased
+  onto genuinely-unknown masters. Reverse diff proved version drift: the map still
+  carried DFFSR/DLHR/DLHS/TINV_X2 keys the current liberty no longer ships. Dormant on
+  the default corpus (no DFT/clock-gating ⇒ 0.001% of 46.7M instances), a cliff the
+  moment SYNTH clock gating, scan, or latch inference is enabled.
+- **Root cause:** nangate45 was the ONLY platform hardwired to a frozen curated map
+  (`resolve_cell_type_map` special case); every other platform builds the map from the
+  resolved liberty at runtime and cannot miss a cell.
+- **Fix:** curated special-case retired — nangate45 uses the runtime liberty-derived
+  map like everyone else (self-heals future liberty drift, covers all 23 fakeram
+  sizes). Macro-lib cells now take a dedicated shared `MACRO` id (= UNKNOWN+1) instead
+  of collapsing into UNKNOWN. **Any nangate45 dataset built against the curated ids
+  must be regenerated** (they were already invalidated by #7). Regression:
+  `test_nangate45_runtime_map_heals_drifted_masters` + verifier checks
+  `ext.macro masters share one dedicated id` / `ext.distinct std masters get distinct ids`.
+
+### 13. `metadata.csv` tracks_per_layer was a pipe-joined STRING — `global_feat[12]` = 0.0 on every platform
+
+- **Symptom:** `global_feat[12]` was 0.0 in every graph of every platform; the CSV
+  column held `metal1:228|metal10:12|…`, which `load_global_feat`'s `pd.to_numeric`
+  coerced to NaN → 0.0. Same mechanism zeroes PLACE_DENSITY/CORE_UTILIZATION when they
+  hold non-numeric strings like "Default" (those are accepted as honest absences).
+- **Fix:** `metadata.py` emits the numeric MEAN per-layer track count in
+  `tracks_per_layer` and moved the per-layer detail to a new trailing
+  `tracks_detail` column (loaders read by column name — inert). Regression: verifier
+  checks `ext.metadata tracks_per_layer numeric mean` + `ext.global_feat[12] tracks nonzero`.
+
+### 14. `classify_pin_type` name-heuristic ordering — FA/HA sum output `S` labeled "select"; ICGs not sequential
+
+- **Symptom:** nangate45 FA_X1/HA_X1 declare the SUM output as `pin (S) { direction :
+  output }`; `_looks_like_select` ran before the OUTPUT branch, so adder sum pins got
+  pin_type_id 10 (select input) instead of 4 (output) — platform-agnostic, hits
+  arithmetic-heavy designs. Related: CLKGATE*/CLKGATETST* hold state via `statetable()`
+  (not ff/latch), so `is_sequential` mis-flagged ICGs combinational.
+- **Fix:** select classification now requires `direction != OUTPUT` (MUX2_X1's S input
+  still classifies 10); `statetable(` marks sequential. Regression:
+  `test_select_name_on_output_pin_is_output`, `test_statetable_marks_sequential`.

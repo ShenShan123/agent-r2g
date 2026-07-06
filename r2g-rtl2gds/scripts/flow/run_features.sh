@@ -117,7 +117,20 @@ export R2G_CONFIG="$([[ -f "$CONFIG_MK" ]] && echo "$CONFIG_MK" || echo "")"
 export R2G_LIB_FILES="$LIB_FILES $ADDITIONAL_LIBS"
 # Std-cell liberty only — the cell-type-id map is built from this so per-design macro
 # libs (ADDITIONAL_LIBS) don't reshuffle std-cell ids across a platform dataset.
-export R2G_SC_LIB_FILES="$LIB_FILES"
+# ORFS's resolved LIB_FILES ALREADY folds ADDITIONAL_LIBS in, so subtract them —
+# otherwise the std-cell "subset" contains the macro libs, macro_cell_keys() sees an
+# empty difference, and connects_macro_flag is 0 on every macro design (2026-07-06
+# nangate45 fakeram audit; failure-patterns.md "Dataset-Extraction Silent-Value
+# Defects" #10).
+SC_LIB_FILES=""
+for _lf in $LIB_FILES; do
+  _is_macro_lib=0
+  for _al in $ADDITIONAL_LIBS; do
+    [[ "$_lf" == "$_al" ]] && _is_macro_lib=1 && break
+  done
+  [[ "$_is_macro_lib" == 0 ]] && SC_LIB_FILES="${SC_LIB_FILES:+$SC_LIB_FILES }$_lf"
+done
+export R2G_SC_LIB_FILES="$SC_LIB_FILES"
 export R2G_TECH_LEF="$TECH_LEF"
 export R2G_PLATFORM="$PLATFORM"
 

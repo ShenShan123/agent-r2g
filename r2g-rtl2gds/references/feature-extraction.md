@@ -14,7 +14,7 @@ Written to `design_cases/<design>/features/` and `design_cases/<design>/reports/
 
 | File | Rows | Columns |
 |------|------|---------|
-| `features/metadata.csv` | per design (1 row) | `graph_id,num_cells,num_nets,num_ios,avg_fanout,die_width,die_height,core_area,dbu_unit,PLACE_DENSITY,CORE_UTILIZATION,ABC_AREA,C_total,tracks_per_layer,V_nom,freq_Hz` |
+| `features/metadata.csv` | per design (1 row) | `graph_id,num_cells,num_nets,num_ios,avg_fanout,die_width,die_height,core_area,dbu_unit,PLACE_DENSITY,CORE_UTILIZATION,ABC_AREA,C_total,tracks_per_layer,V_nom,freq_Hz,tracks_detail` — `tracks_per_layer` is the numeric MEAN per-layer track count (2026-07-06 fix: the old pipe-joined string coerced `global_feat[12]` to 0 on every platform); the per-layer detail string moved to `tracks_detail` |
 | `features/nodes_gate.csv` | per placed instance | `graph_id,inst_name,master,cell_type_id,cell_area,cell_power,x_um,y_um,orientation,orientation_id,placement_status,placement_status_id` |
 | `features/nodes_net.csv` | per net | `graph_id,net_name,net_type_id,fanout,pin_count,num_drivers,num_sinks,connects_macro_flag,num_layer,hpwl_um` |
 | `features/nodes_iopin.csv` | per top-level I/O pin | `graph_id,iopin_name,net_name,pin_x_um,pin_y_um,pin_owner_master,pin_name,pin_layer_hint,nearest_tap_distance_um,pin_direction,pin_direction_id,net_use,net_type_id` |
@@ -71,15 +71,17 @@ layers) are stored in `scripts/extract/techlib/profile.py` as a `TechProfile` pe
 platform, retrieved via `techlib.profile.get_profile(name)`. The workers import the
 consolidated `techlib.*` modules instead of maintaining per-extractor copies.
 
-- **cell_type_id** — provided by `techlib.cell_types`. `nangate45` uses a curated
-  function-family + drive-strength map (`techlib.cell_types.NANGATE45_CELL_TYPE_MAPPING`,
-  IDs 0–128, `UNKNOWN`=95, incl. the known `fakeram45_*` macros). Any other platform gets
-  a deterministic map built from the platform's **standard-cell** liberty only
-  (`R2G_SC_LIB_FILES` = `LIB_FILES`, sorted → 0..N-1) so the ids are stable across every
-  design of that platform; per-design macro cells (`ADDITIONAL_LIBS`) resolve to `UNKNOWN`
-  rather than reshuffling the std-cell ids. Which strategy applies is recorded in the
-  `TechProfile.cell_type_strategy` field (`"curated"` for nangate45, `"runtime"` for all
-  others).
+- **cell_type_id** — provided by `techlib.cell_types`. EVERY platform (nangate45
+  included since 2026-07-06) gets a deterministic map built from the platform's
+  **standard-cell** liberty only (`R2G_SC_LIB_FILES` = `LIB_FILES` minus
+  `ADDITIONAL_LIBS`, sorted → 0..N-1, `UNKNOWN` = N) so the ids are stable across every
+  design of that platform; per-design macro cells (`ADDITIONAL_LIBS`) share the
+  dedicated `MACRO` id (= N+1) rather than reshuffling the std-cell ids or aliasing
+  onto `UNKNOWN`. nangate45's former curated map
+  (`techlib.cell_types.NANGATE45_CELL_TYPE_MAPPING`) was retired 2026-07-06 after it
+  drifted 22 masters behind the deployed liberty (every SDFF*/CLKGATE*/TLAT →
+  UNKNOWN=95; failure-patterns.md #12) — the dict remains only as an import shim, and
+  nangate45 datasets built against it must be regenerated.
 - **num_layer** — distinct routing layers a net traverses, derived from the tech LEF's
   `TYPE ROUTING` layer names via `techlib.lef.routing_layers` / `routing_layer_regex`
   (nangate `metal1..10`, sky130 `li1`/`met1..5`, asap7 `M1..9`); falls back to `metal\d+`

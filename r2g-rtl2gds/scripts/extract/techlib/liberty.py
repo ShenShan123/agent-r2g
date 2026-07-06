@@ -188,7 +188,9 @@ def _merge_liberty_file(lib_path, db):
             current_pin_depth = -1
 
         if current_cell is not None:
-            if re.match(r"(ff|latch)\s*\(", line):
+            # statetable(): clock-gate cells (nangate45 CLKGATE*/CLKGATETST*) hold
+            # state via a statetable group, not ff()/latch() (2026-07-06 audit F4).
+            if re.match(r"(ff|latch|statetable)\s*\(", line):
                 current_cell["is_sequential"] = True
 
             if current_pin is None:
@@ -225,7 +227,14 @@ def _merge_liberty_file(lib_path, db):
                         except Exception:
                             pass
 
-            m_pin = re.match(r"pin\s*\(\s*([^)]+?)\s*\)\s*\{", line)
+            # bus()/bundle() groups are parsed exactly like pin() groups: macro
+            # liberty (fakeram45_*) declares direction/capacitance at the BUS
+            # level with NO per-bit pin() members, while the DEF connects per-bit
+            # (addr_in[3]). Storing the bus base name + the [idx]-fallback in
+            # get_pin_info make those lookups resolve; without this every macro
+            # bus pin classified 14/cap 0 (2026-07-06 nangate45 fakeram audit;
+            # failure-patterns.md "Dataset-Extraction Silent-Value Defects" #11).
+            m_pin = re.match(r"(?:pin|bus|bundle)\s*\(\s*([^)]+?)\s*\)\s*\{", line)
             if m_pin:
                 pin_name = _strip_name_token(m_pin.group(1))
                 current_pin = current_cell["pins"].setdefault(
@@ -304,7 +313,19 @@ def get_cell_power(master_name, lib_db):
 def get_pin_info(master_name, pin_name, lib_db):
     pkey = _strip_name_token(pin_name)
     cell = lib_db.get("cells", {}).get(_norm_key(master_name), {})
-    return cell.get("pins", {}).get(pkey, {})
+    pins = cell.get("pins", {})
+    info = pins.get(pkey)
+    if info is not None:
+        return info
+    # Bus-member fallback: DEF/netlist pins are per-bit (`addr_in[3]`) while
+    # macro liberty declares attributes once at the bus() level (`bus(addr_in)`)
+    # — resolve the member to its bus base entry.
+    m_bus = re.match(r"^(.*)\[\d+\]$", pkey)
+    if m_bus:
+        info = pins.get(m_bus.group(1))
+        if info is not None:
+            return info
+    return {}
 
 
 def get_pin_direction(master_name, pin_name, lib_db):
@@ -426,7 +447,10 @@ def classify_pin_type(master_name, pin_name, lib_db, is_io=False):
         return 8
     if _looks_like_scan(n):
         return 9
-    if _looks_like_select(n):
+    # Select is an INPUT concept: nangate45 FA_X1/HA_X1 declare the SUM output as
+    # `pin (S) { direction : output }` — without the direction guard it lands on
+    # id 10 instead of 4 (2026-07-06 audit F3). MUX2_X1's S (input) still gets 10.
+    if _looks_like_select(n) and direction != "OUTPUT":
         return 10
     if direction == "INPUT":
         if n.startswith("A"):

@@ -329,3 +329,113 @@ def test_real_sky130hd_pins_have_directions():
     assert total > 1000
     assert empty == 0, f"{empty}/{total} pins lost direction"
     assert clocks > 0, "no clock pins flagged (quoted `clock : \"true\";` missed)"
+
+
+# --------------------------------------------------------------------------- #
+# bus()/bundle() groups + bus-member lookup (2026-07-06 nangate45 fakeram audit)
+# --------------------------------------------------------------------------- #
+_BUS_LIB = """
+library (buslib) {
+  capacitive_load_unit (1,ff);
+  cell (fakeram45_256x32) {
+    area : 5065.704;
+    pin(clk)   {
+      direction : input;
+      clock : true;
+      capacitance : 25.000;
+    }
+    pin(we_in) {
+      direction : input;
+      capacitance : 10.000;
+    }
+    bus(addr_in) {
+      bus_type : fakeram45_256x32_ADDRESS;
+      direction : input;
+      capacitance : 5.000;
+      timing() {
+        related_pin : clk;
+      }
+    }
+    bus(rd_out) {
+      bus_type : fakeram45_256x32_DATA;
+      direction : output;
+      max_capacitance : 500.000;
+    }
+  }
+}
+"""
+
+
+def test_bus_group_members_resolve(tmp_path):
+    """DEF-style per-bit pins (addr_in[3]) resolve via the bus() base entry.
+
+    Macro liberty declares direction/capacitance ONCE at the bus() level with no
+    per-bit pin() members; without the bus parse + [idx] fallback every macro bus
+    pin classified 14 with cap 0 (nangate45 fakeram audit 2026-07-06).
+    """
+    p = tmp_path / "bus.lib"
+    p.write_text(_BUS_LIB)
+    db = liberty.load_liberty_db([str(p)])
+    # scalar pins unaffected
+    assert liberty.get_pin_direction("fakeram45_256x32", "clk", db) == "INPUT"
+    # bus base parsed
+    assert liberty.get_pin_direction("fakeram45_256x32", "addr_in", db) == "INPUT"
+    # per-bit members fall back to the bus entry: direction, cap, classification
+    assert liberty.get_pin_direction("fakeram45_256x32", "addr_in[3]", db) == "INPUT"
+    assert liberty.get_pin_load_cap_fF("fakeram45_256x32", "addr_in[7]", db) == 5.0
+    assert liberty.get_pin_direction("fakeram45_256x32", "rd_out[31]", db) == "OUTPUT"
+    # output bus member: max_capacitance is a drive limit, NOT a load
+    assert liberty.get_pin_load_cap_fF("fakeram45_256x32", "rd_out[0]", db) == 0.0
+    # classification: input bus member no longer the unclassified 14 bucket
+    # (addr_in -> the A-prefix input group 0; rd_out -> output 4)
+    assert liberty.classify_pin_type("fakeram45_256x32", "addr_in[3]", db) == 0
+    assert liberty.classify_pin_type("fakeram45_256x32", "rd_out[0]", db) == 4
+
+
+def test_select_name_on_output_pin_is_output(tmp_path):
+    """FA/HA sum output `S` must classify OUTPUT (4), not select (10) — audit F3."""
+    lib = """
+library (fal) {
+  cell (FA_X1) {
+    pin(S)  {
+      direction : output;
+      max_capacitance : 60.0;
+    }
+    pin(CI) {
+      direction : input;
+      capacitance : 1.6;
+    }
+  }
+  cell (MUX2_X1) {
+    pin(S) {
+      direction : input;
+      capacitance : 1.7;
+    }
+  }
+}
+"""
+    p = tmp_path / "fa.lib"
+    p.write_text(lib)
+    db = liberty.load_liberty_db([str(p)])
+    assert liberty.classify_pin_type("FA_X1", "S", db) == 4       # sum output
+    assert liberty.classify_pin_type("MUX2_X1", "S", db) == 10    # true select
+
+
+def test_statetable_marks_sequential(tmp_path):
+    """CLKGATE*-style cells hold state via statetable() — audit F4."""
+    lib = """
+library (icg) {
+  cell (CLKGATE_X1) {
+    statetable ("CK E", "IQ") { table : "L L : - : L, L H : - : H "; }
+    pin(GCK) { direction : output; }
+  }
+  cell (AND2_X1) {
+    pin(ZN) { direction : output; }
+  }
+}
+"""
+    p = tmp_path / "icg.lib"
+    p.write_text(lib)
+    db = liberty.load_liberty_db([str(p)])
+    assert db["cells"]["CLKGATE_X1"]["is_sequential"] is True
+    assert db["cells"]["AND2_X1"]["is_sequential"] is False

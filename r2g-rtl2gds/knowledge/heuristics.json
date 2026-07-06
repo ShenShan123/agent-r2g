@@ -1,9 +1,9 @@
 {
-  "generated_at": "2026-07-01T14:29:04Z",
-  "source_run_count": 2355,
+  "generated_at": "2026-07-06T07:32:04-07:00",
+  "source_run_count": 2364,
   "min_successful_runs_required": 3,
   "schema_version": 3,
-  "generation": 3093,
+  "generation": 3106,
   "families": {
     "rv32i": {
       "platforms": {
@@ -70,7 +70,7 @@
           "p90_elapsed_s": 782.0,
           "fix_recipes": {
             "drc": {
-              "'m3.2'": {
+              "m3.2": {
                 "strategies": {
                   "density_relief": {
                     "attempts": 2,
@@ -412,7 +412,7 @@
           "p90_elapsed_s": 1150.0,
           "fix_recipes": {
             "drc": {
-              "'m3.2'": {
+              "m3.2": {
                 "strategies": {
                   "density_relief": {
                     "attempts": 1,
@@ -437,7 +437,7 @@
           "success_rate": 0.0,
           "fix_recipes": {
             "drc": {
-              "'M1.S.6'": {
+              "M1.S.6": {
                 "strategies": {
                   "density_relief": {
                     "attempts": 1,
@@ -535,7 +535,7 @@
           "p90_elapsed_s": 863.0,
           "fix_recipes": {
             "drc": {
-              "'m3.2'": {
+              "m3.2": {
                 "strategies": {
                   "density_relief": {
                     "attempts": 2,
@@ -669,7 +669,7 @@
           "success_rate": 0.0,
           "fix_recipes": {
             "drc": {
-              "'M4.S.5'": {
+              "M4.S.5": {
                 "strategies": {
                   "density_relief": {
                     "attempts": 2,
@@ -681,7 +681,7 @@
                 },
                 "n_sessions": 2
               },
-              "'  '": {
+              "null": {
                 "strategies": {
                   "density_relief": {
                     "attempts": 2,
@@ -691,11 +691,7 @@
                     "median_reduction_pct": 0.10870858113848768
                   }
                 },
-                "n_sessions": 6
-              },
-              "null": {
-                "strategies": {},
-                "n_sessions": 1
+                "n_sessions": 7
               }
             },
             "lvs": {
@@ -802,16 +798,16 @@
     "axi": {
       "platforms": {
         "nangate45": {
-          "sample_size": 55,
-          "success_count": 33,
-          "success_rate": 0.6,
+          "sample_size": 56,
+          "success_count": 34,
+          "success_rate": 0.6071428571428571,
           "core_utilization": {
             "min_safe": 10.0,
-            "max_safe": 25.0,
+            "max_safe": 35.0,
             "median": 25.0
           },
           "place_density_lb_addon": {
-            "min_safe": 0.2,
+            "min_safe": 0.15,
             "max_safe": 0.2,
             "median": 0.2
           },
@@ -1017,7 +1013,7 @@
           "success_rate": 0.0,
           "fix_recipes": {
             "drc": {
-              "'M1.S.6'": {
+              "M1.S.6": {
                 "strategies": {
                   "density_relief": {
                     "attempts": 1,
@@ -1029,7 +1025,7 @@
                 },
                 "n_sessions": 1
               },
-              "'LIG.LISD.S.7LIG.LISD.S.7 : Min. corner-to-corner spacing between LISD and LIG not on the same net : 15nm'": {
+              "LIG.LISD.S.7LIG.LISD.S.7": {
                 "strategies": {
                   "density_relief": {
                     "attempts": 1,
@@ -1041,7 +1037,7 @@
                 },
                 "n_sessions": 1
               },
-              "'M4.S.5'": {
+              "M4.S.5": {
                 "strategies": {
                   "density_relief": {
                     "attempts": 3,
@@ -1067,8 +1063,8 @@
     "dma": {
       "platforms": {
         "nangate45": {
-          "sample_size": 4,
-          "success_count": 4,
+          "sample_size": 5,
+          "success_count": 5,
           "success_rate": 1.0,
           "core_utilization": {
             "min_safe": 20.0,
@@ -1076,7 +1072,7 @@
             "median": 20.0
           },
           "place_density_lb_addon": {
-            "min_safe": 0.2,
+            "min_safe": 0.15,
             "max_safe": 0.2,
             "median": 0.2
           },
@@ -1122,7 +1118,7 @@
           "success_rate": 0.0,
           "fix_recipes": {
             "drc": {
-              "'LIG.LISD.S.7LIG.LISD.S.7 : Min. corner-to-corner spacing between LISD and LIG not on the same net : 15nm'": {
+              "LIG.LISD.S.7LIG.LISD.S.7": {
                 "strategies": {
                   "density_relief": {
                     "attempts": 1,
@@ -1134,7 +1130,7 @@
                 },
                 "n_sessions": 1
               },
-              "'M1.S.6'": {
+              "M1.S.6": {
                 "strategies": {
                   "density_relief": {
                     "attempts": 2,
@@ -1146,7 +1142,7 @@
                 },
                 "n_sessions": 2
               },
-              "'V1.S.4'": {
+              "V1.S.4": {
                 "strategies": {
                   "density_relief": {
                     "attempts": 1,
@@ -1158,7 +1154,7 @@
                 },
                 "n_sessions": 1
               },
-              "'GATE.S.1'": {
+              "GATE.S.1": {
                 "strategies": {
                   "density_relief": {
                     "attempts": 2,
@@ -1170,7 +1166,7 @@
                 },
                 "n_sessions": 4
               },
-              "'M4.S.5'": {
+              "M4.S.5": {
                 "strategies": {},
                 "n_sessions": 2
               }
@@ -1289,7 +1285,7 @@
           "success_rate": 0.0,
           "fix_recipes": {
             "drc": {
-              "'LIG.LISD.S.7LIG.LISD.S.7 : Min. corner-to-corner spacing between LISD and LIG not on the same net : 15nm'": {
+              "LIG.LISD.S.7LIG.LISD.S.7": {
                 "strategies": {
                   "density_relief": {
                     "attempts": 1,
@@ -1432,7 +1428,7 @@
           "success_rate": 0.0,
           "fix_recipes": {
             "drc": {
-              "'LIG.LISD.S.7LIG.LISD.S.7 : Min. corner-to-corner spacing between LISD and LIG not on the same net : 15nm'": {
+              "LIG.LISD.S.7LIG.LISD.S.7": {
                 "strategies": {
                   "density_relief": {
                     "attempts": 1,
@@ -1444,7 +1440,7 @@
                 },
                 "n_sessions": 1
               },
-              "'M1.S.6'": {
+              "M1.S.6": {
                 "strategies": {
                   "density_relief": {
                     "attempts": 1,
@@ -1470,8 +1466,8 @@
     "uart": {
       "platforms": {
         "nangate45": {
-          "sample_size": 24,
-          "success_count": 24,
+          "sample_size": 25,
+          "success_count": 25,
           "success_rate": 1.0,
           "core_utilization": {
             "min_safe": 25.0,
@@ -1479,7 +1475,7 @@
             "median": 25.0
           },
           "place_density_lb_addon": {
-            "min_safe": 0.2,
+            "min_safe": 0.15,
             "max_safe": 0.2,
             "median": 0.2
           },
@@ -1525,7 +1521,7 @@
           "success_rate": 0.0,
           "fix_recipes": {
             "drc": {
-              "'V1.S.4'": {
+              "V1.S.4": {
                 "strategies": {
                   "density_relief": {
                     "attempts": 2,
@@ -1537,7 +1533,7 @@
                 },
                 "n_sessions": 2
               },
-              "'M1.S.6'": {
+              "M1.S.6": {
                 "strategies": {
                   "density_relief": {
                     "attempts": 1,
@@ -1806,16 +1802,16 @@
     "riscymcu": {
       "platforms": {
         "nangate45": {
-          "sample_size": 4,
-          "success_count": 3,
-          "success_rate": 0.75,
+          "sample_size": 5,
+          "success_count": 4,
+          "success_rate": 0.8,
           "core_utilization": {
             "min_safe": 25.0,
-            "max_safe": 25.0,
+            "max_safe": 35.0,
             "median": 25.0
           },
           "place_density_lb_addon": {
-            "min_safe": 0.2,
+            "min_safe": 0.15,
             "max_safe": 0.2,
             "median": 0.2
           },
@@ -2076,7 +2072,7 @@
           "p90_elapsed_s": 3576.0,
           "fix_recipes": {
             "drc": {
-              "'m3.2'": {
+              "m3.2": {
                 "strategies": {
                   "density_relief": {
                     "attempts": 1,
@@ -2134,16 +2130,16 @@
     "aes_xcrypt": {
       "platforms": {
         "nangate45": {
-          "sample_size": 13,
-          "success_count": 10,
-          "success_rate": 0.7692307692307693,
+          "sample_size": 15,
+          "success_count": 12,
+          "success_rate": 0.8,
           "core_utilization": {
             "min_safe": 15.0,
-            "max_safe": 25.0,
-            "median": 15.0
+            "max_safe": 35.0,
+            "median": 17.5
           },
           "place_density_lb_addon": {
-            "min_safe": 0.2,
+            "min_safe": 0.15,
             "max_safe": 0.2,
             "median": 0.2
           },
@@ -2742,7 +2738,7 @@
           "p90_elapsed_s": 1204.0,
           "fix_recipes": {
             "drc": {
-              "'m3.2'": {
+              "m3.2": {
                 "strategies": {
                   "density_relief": {
                     "attempts": 1,
@@ -3783,7 +3779,7 @@
           "p90_elapsed_s": 966.0,
           "fix_recipes": {
             "drc": {
-              "'m3.2'": {
+              "m3.2": {
                 "strategies": {
                   "density_relief": {
                     "attempts": 1,
@@ -4298,16 +4294,16 @@
     "usb": {
       "platforms": {
         "nangate45": {
-          "sample_size": 4,
-          "success_count": 4,
+          "sample_size": 5,
+          "success_count": 5,
           "success_rate": 1.0,
           "core_utilization": {
             "min_safe": 20.0,
-            "max_safe": 25.0,
+            "max_safe": 35.0,
             "median": 25.0
           },
           "place_density_lb_addon": {
-            "min_safe": 0.2,
+            "min_safe": 0.15,
             "max_safe": 0.2,
             "median": 0.2
           },
@@ -4379,16 +4375,16 @@
     "axil": {
       "platforms": {
         "nangate45": {
-          "sample_size": 36,
-          "success_count": 26,
-          "success_rate": 0.7222222222222222,
+          "sample_size": 37,
+          "success_count": 27,
+          "success_rate": 0.7297297297297297,
           "core_utilization": {
             "min_safe": 25.0,
-            "max_safe": 25.0,
+            "max_safe": 35.0,
             "median": 25.0
           },
           "place_density_lb_addon": {
-            "min_safe": 0.2,
+            "min_safe": 0.15,
             "max_safe": 0.2,
             "median": 0.2
           },
@@ -4467,7 +4463,7 @@
           "p90_elapsed_s": 2675.0,
           "fix_recipes": {
             "drc": {
-              "'m3.2'": {
+              "m3.2": {
                 "strategies": {
                   "density_relief": {
                     "attempts": 1,
@@ -4817,7 +4813,7 @@
           "p90_elapsed_s": 1840.0,
           "fix_recipes": {
             "drc": {
-              "'m3.2'": {
+              "m3.2": {
                 "strategies": {
                   "density_relief": {
                     "attempts": 2,
@@ -4988,7 +4984,7 @@
           "p90_elapsed_s": 2530.0,
           "fix_recipes": {
             "drc": {
-              "'m3.2'": {
+              "m3.2": {
                 "strategies": {
                   "density_relief": {
                     "attempts": 1,
@@ -5162,7 +5158,7 @@
           "success_rate": 0.0,
           "fix_recipes": {
             "drc": {
-              "'  '": {
+              "null": {
                 "strategies": {
                   "density_relief": {
                     "attempts": 2,
@@ -5174,7 +5170,7 @@
                 },
                 "n_sessions": 2
               },
-              "'M4.S.5'": {
+              "M4.S.5": {
                 "strategies": {
                   "density_relief": {
                     "attempts": 4,
@@ -5243,7 +5239,7 @@
           "success_rate": 0.0,
           "fix_recipes": {
             "drc": {
-              "'M1.S.6'": {
+              "M1.S.6": {
                 "strategies": {
                   "density_relief": {
                     "attempts": 1,
@@ -5255,7 +5251,7 @@
                 },
                 "n_sessions": 1
               },
-              "'GATE.S.1'": {
+              "GATE.S.1": {
                 "strategies": {},
                 "n_sessions": 2
               }
@@ -6757,7 +6753,7 @@
           "success_rate": 0.0,
           "fix_recipes": {
             "drc": {
-              "'GATE.S.1'": {
+              "GATE.S.1": {
                 "strategies": {
                   "density_relief": {
                     "attempts": 1,
@@ -6828,7 +6824,7 @@
           "success_rate": 0.0,
           "fix_recipes": {
             "drc": {
-              "'LIG.LISD.S.7LIG.LISD.S.7 : Min. corner-to-corner spacing between LISD and LIG not on the same net : 15nm'": {
+              "LIG.LISD.S.7LIG.LISD.S.7": {
                 "strategies": {
                   "density_relief": {
                     "attempts": 1,
@@ -6915,7 +6911,7 @@
           "success_rate": 0.0,
           "fix_recipes": {
             "drc": {
-              "'M4.S.5'": {
+              "M4.S.5": {
                 "strategies": {
                   "density_relief": {
                     "attempts": 1,
@@ -8295,9 +8291,9 @@
         }
       }
     },
-    "f670d8e567be3158": {
+    "04d38c5a585fd332": {
       "check": "drc",
-      "class": "'m3.2'",
+      "class": "m3.2",
       "predicates": {},
       "platforms_seen": [
         "sky130hd"
@@ -8419,6 +8415,9 @@
         "sky130hd"
       ],
       "evidence_designs": [
+        "ControlUnit",
+        "Control_logic",
+        "GPIO_top",
         "SPI_Master_With_Single_CS",
         "aes_key_mem",
         "axi_dma",
@@ -8428,19 +8427,19 @@
         "traffic_control",
         "wbsafety"
       ],
-      "n_sessions": 12,
+      "n_sessions": 16,
       "strategies": {
         "density_relief": {
-          "attempts": 4,
+          "attempts": 8,
           "successes": 0,
-          "failures": 0,
-          "wins": 0,
+          "failures": 1,
+          "wins": 3,
           "by_platform": {
             "asap7": {
-              "attempts": 4,
+              "attempts": 8,
               "successes": 0,
-              "failures": 0,
-              "wins": 0
+              "failures": 1,
+              "wins": 3
             }
           }
         }
@@ -8985,9 +8984,9 @@
         }
       }
     },
-    "a230c5b85c3c542c": {
+    "908725302ebe8ec1": {
       "check": "drc",
-      "class": "'GATE.S.1'",
+      "class": "GATE.S.1",
       "predicates": {},
       "platforms_seen": [
         "asap7"
@@ -9014,39 +9013,9 @@
         }
       }
     },
-    "2bd28973528e0cf4": {
+    "87818ea67713d804": {
       "check": "drc",
-      "class": "'  '",
-      "predicates": {},
-      "platforms_seen": [
-        "asap7"
-      ],
-      "evidence_designs": [
-        "ControlUnit",
-        "Control_logic",
-        "GPIO_top"
-      ],
-      "n_sessions": 4,
-      "strategies": {
-        "density_relief": {
-          "attempts": 4,
-          "successes": 0,
-          "failures": 1,
-          "wins": 3,
-          "by_platform": {
-            "asap7": {
-              "attempts": 4,
-              "successes": 0,
-              "failures": 1,
-              "wins": 3
-            }
-          }
-        }
-      }
-    },
-    "632c2700923e556e": {
-      "check": "drc",
-      "class": "'M4.S.5'",
+      "class": "M4.S.5",
       "predicates": {},
       "platforms_seen": [
         "asap7"
@@ -9079,9 +9048,9 @@
         }
       }
     },
-    "c52bc0e4241a1ef6": {
+    "4c14f972781c2aa9": {
       "check": "drc",
-      "class": "'LIG.LISD.S.7LIG.LISD.S.7 : Min. corner-to-corner spacing between LISD and LIG not on the same net : 15nm'",
+      "class": "LIG.LISD.S.7LIG.LISD.S.7",
       "predicates": {},
       "platforms_seen": [
         "asap7"
@@ -9111,9 +9080,9 @@
         }
       }
     },
-    "449c0e719c6ff3a9": {
+    "235cf628ab71e499": {
       "check": "drc",
-      "class": "'M1.S.6'",
+      "class": "M1.S.6",
       "predicates": {},
       "platforms_seen": [
         "asap7"
@@ -9145,9 +9114,9 @@
         }
       }
     },
-    "3d1e0efec2b806c0": {
+    "13bb9bf9ccf14273": {
       "check": "drc",
-      "class": "'V1.S.4'",
+      "class": "V1.S.4",
       "predicates": {},
       "platforms_seen": [
         "asap7"
@@ -9880,7 +9849,7 @@
         }
       }
     },
-    "f670d8e567be3158": {
+    "04d38c5a585fd332": {
       "logic/medium": {
         "sky130hd": {
           "strategies": {
@@ -10201,14 +10170,14 @@
         "*": {
           "strategies": {
             "density_relief": {
-              "attempts": 4,
+              "attempts": 8,
               "successes": 0,
-              "failures": 0,
-              "wins": 0,
-              "mean_outcome_score": 0.8333333333333334
+              "failures": 1,
+              "wins": 3,
+              "mean_outcome_score": 0.7342045454545455
             }
           },
-          "n_sessions": 4
+          "n_sessions": 8
         },
         "nangate45": {
           "strategies": {},
@@ -10217,14 +10186,14 @@
         "asap7": {
           "strategies": {
             "density_relief": {
-              "attempts": 4,
+              "attempts": 8,
               "successes": 0,
-              "failures": 0,
-              "wins": 0,
-              "mean_outcome_score": 0.8333333333333334
+              "failures": 1,
+              "wins": 3,
+              "mean_outcome_score": 0.7342045454545455
             }
           },
-          "n_sessions": 4
+          "n_sessions": 8
         }
       },
       "logic/small": {
@@ -10233,38 +10202,58 @@
           "n_sessions": 0
         },
         "*": {
-          "strategies": {},
-          "n_sessions": 0
+          "strategies": {
+            "density_relief": {
+              "attempts": 3,
+              "successes": 0,
+              "failures": 1,
+              "wins": 2,
+              "mean_outcome_score": 0.6666666666666666
+            }
+          },
+          "n_sessions": 3
         },
         "nangate45": {
           "strategies": {},
           "n_sessions": 0
+        },
+        "asap7": {
+          "strategies": {
+            "density_relief": {
+              "attempts": 3,
+              "successes": 0,
+              "failures": 1,
+              "wins": 2,
+              "mean_outcome_score": 0.6666666666666666
+            }
+          },
+          "n_sessions": 3
         }
       },
       "logic/unknown": {
         "asap7": {
           "strategies": {
             "density_relief": {
-              "attempts": 4,
+              "attempts": 5,
               "successes": 0,
               "failures": 0,
-              "wins": 0,
-              "mean_outcome_score": 0.8333333333333334
+              "wins": 1,
+              "mean_outcome_score": 0.7747272727272727
             }
           },
-          "n_sessions": 4
+          "n_sessions": 5
         },
         "*": {
           "strategies": {
             "density_relief": {
-              "attempts": 4,
+              "attempts": 5,
               "successes": 0,
               "failures": 0,
-              "wins": 0,
-              "mean_outcome_score": 0.8333333333333334
+              "wins": 1,
+              "mean_outcome_score": 0.7747272727272727
             }
           },
-          "n_sessions": 4
+          "n_sessions": 5
         }
       }
     },
@@ -11754,7 +11743,7 @@
         }
       }
     },
-    "a230c5b85c3c542c": {
+    "908725302ebe8ec1": {
       "logic/small": {
         "asap7": {
           "strategies": {
@@ -11834,87 +11823,7 @@
         }
       }
     },
-    "2bd28973528e0cf4": {
-      "logic/small": {
-        "asap7": {
-          "strategies": {
-            "density_relief": {
-              "attempts": 3,
-              "successes": 0,
-              "failures": 1,
-              "wins": 2,
-              "mean_outcome_score": 0.6666666666666666
-            }
-          },
-          "n_sessions": 3
-        },
-        "*": {
-          "strategies": {
-            "density_relief": {
-              "attempts": 3,
-              "successes": 0,
-              "failures": 1,
-              "wins": 2,
-              "mean_outcome_score": 0.6666666666666666
-            }
-          },
-          "n_sessions": 3
-        }
-      },
-      "*": {
-        "asap7": {
-          "strategies": {
-            "density_relief": {
-              "attempts": 4,
-              "successes": 0,
-              "failures": 1,
-              "wins": 3,
-              "mean_outcome_score": 0.6350757575757575
-            }
-          },
-          "n_sessions": 4
-        },
-        "*": {
-          "strategies": {
-            "density_relief": {
-              "attempts": 4,
-              "successes": 0,
-              "failures": 1,
-              "wins": 3,
-              "mean_outcome_score": 0.6350757575757575
-            }
-          },
-          "n_sessions": 4
-        }
-      },
-      "logic/unknown": {
-        "asap7": {
-          "strategies": {
-            "density_relief": {
-              "attempts": 1,
-              "successes": 0,
-              "failures": 0,
-              "wins": 1,
-              "mean_outcome_score": 0.5403030303030303
-            }
-          },
-          "n_sessions": 1
-        },
-        "*": {
-          "strategies": {
-            "density_relief": {
-              "attempts": 1,
-              "successes": 0,
-              "failures": 0,
-              "wins": 1,
-              "mean_outcome_score": 0.5403030303030303
-            }
-          },
-          "n_sessions": 1
-        }
-      }
-    },
-    "632c2700923e556e": {
+    "87818ea67713d804": {
       "logic/small": {
         "asap7": {
           "strategies": {
@@ -11994,7 +11903,7 @@
         }
       }
     },
-    "c52bc0e4241a1ef6": {
+    "4c14f972781c2aa9": {
       "logic/small": {
         "asap7": {
           "strategies": {
@@ -12074,7 +11983,7 @@
         }
       }
     },
-    "449c0e719c6ff3a9": {
+    "235cf628ab71e499": {
       "crypto/small": {
         "asap7": {
           "strategies": {
@@ -12154,7 +12063,7 @@
         }
       }
     },
-    "3d1e0efec2b806c0": {
+    "13bb9bf9ccf14273": {
       "logic/small": {
         "asap7": {
           "strategies": {
