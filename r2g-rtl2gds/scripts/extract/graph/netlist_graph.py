@@ -44,6 +44,10 @@ from techlib.liberty import load_liberty_db  # noqa: E402
 
 ESCAPED_OR_PLAIN_ID_RE = re.compile(r"\\\S+|[A-Za-z_$][A-Za-z0-9_$.\[\]]*")
 CONST_RE = re.compile(r"\d+'[bhdBHD][0-9a-fA-FxXzZ]+|[01]")
+# Sized Verilog constant literal (`1'b0`, `8'hFF`, `4'd3`, `2'o1`), tolerant of
+# spaces/underscores. Stripped from a concatenation before tokenizing so a
+# tie-off constant cannot leak its base fragment (`b0`) as a phantom net.
+SIZED_CONST_RE = re.compile(r"\d+\s*'\s*[bBoOdDhH][0-9a-fA-FxXzZ_]+")
 INSTANCE_HEADER_RE = re.compile(r"^\s*(\\\S+|[^\s(]+)\s+(\\\S+|[^\s(]+)\s*\((.*)\)\s*$", re.DOTALL)
 
 SKIP_STATEMENT_PREFIXES = {
@@ -68,8 +72,15 @@ def extract_signal_names(expr):
         return []
     if CONST_RE.fullmatch(expr):
         return [normalize_constant(expr)]
+    # A concatenation may mix tie-off constants with real signals
+    # (`{1'b0, sig}`) — drop the constants so their base fragment (`b0`) is not
+    # tokenized as a phantom net. ORFS mapped netlists tie constants through
+    # LOGIC0/LOGIC1 cells so this path is defensive (verified: zero literal
+    # constants across the sampled corpus netlists), but a hand-written or
+    # non-ORFS netlist could otherwise inject fake nets (2026-07-06 audit).
+    scan = SIZED_CONST_RE.sub(" ", expr)
     names, seen = [], set()
-    for match in ESCAPED_OR_PLAIN_ID_RE.finditer(expr):
+    for match in ESCAPED_OR_PLAIN_ID_RE.finditer(scan):
         token = match.group(0).strip()
         if token and token not in seen:
             seen.add(token)

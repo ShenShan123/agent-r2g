@@ -54,7 +54,10 @@ def parse_pins(def_path):
             if "+ DIRECTION " in line:
                 m = re.search(r"\+ DIRECTION\s+(\S+)", line)
                 if m and cur is not None:
-                    cur["dir"] = m.group(1).upper()
+                    # rstrip(';') for parity with the dash-line branch above: a
+                    # continuation `+ DIRECTION OUTPUT;` (no space before ';')
+                    # would otherwise store 'OUTPUT;' and mis-map pin_direction_id.
+                    cur["dir"] = m.group(1).upper().rstrip(";")
                 continue
             if "+ USE " in line:
                 m = re.search(r"\+ USE\s+(\S+)", line)

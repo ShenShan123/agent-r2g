@@ -190,7 +190,12 @@ def _merge_liberty_file(lib_path, db):
         if current_cell is not None:
             # statetable(): clock-gate cells (nangate45 CLKGATE*/CLKGATETST*) hold
             # state via a statetable group, not ff()/latch() (2026-07-06 audit F4).
-            if re.match(r"(ff|latch|statetable)\s*\(", line):
+            # ff_bank()/latch_bank(): MULTIBIT sequential cells (asap7 ships 27 such
+            # libs, e.g. DFFHQNx*_ASAP7 -> ``ff_bank(...)``) — the plain ``ff|latch``
+            # regex missed them because ``ff`` is not followed by ``(`` in ``ff_bank(``.
+            # Longer alternatives listed first so the match is unambiguous
+            # (2026-07-06 nangate45 verification round, failure-patterns.md #15).
+            if re.match(r"(ff_bank|ff|latch_bank|latch|statetable)\s*\(", line):
                 current_cell["is_sequential"] = True
 
             if current_pin is None:

@@ -3122,3 +3122,82 @@ live in SPECIALNETS) — the graph stage's net_type filter + inner joins drop th
 - **Fix:** select classification now requires `direction != OUTPUT` (MUX2_X1's S input
   still classifies 10); `statetable(` marks sequential. Regression:
   `test_select_name_on_output_pin_is_output`, `test_statetable_marks_sequential`.
+
+### 15. Liberty `ff_bank`/`latch_bank` (multibit sequential) not detected — `is_sequential` false on every asap7 multibit flop (2026-07-06 nangate45 verification round)
+
+- **Symptom:** `load_liberty_db` marks a cell sequential when its body opens an
+  `ff(`/`latch(`/`statetable(` group, but MULTIBIT flops/latches declare state via
+  `ff_bank(...)`/`latch_bank(...)`. The old regex `(ff|latch|statetable)\s*\(` fails to
+  match `ff_bank(` (after `ff` comes `_`, not `\s*\(`), so `is_sequential` stayed False.
+  asap7 ships 27 liberty files using `ff_bank`; nangate45/sky130/gf180/ihp have none.
+- **Impact:** currently **inert** — `is_sequential` is written but consumed by no
+  feature/label (dead field). Fixed defensively so a future consumer (or an asap7 graph
+  build) is correct, and because it is a genuine shared-parser defect surfaced by the
+  synthetic corner-case suite (real nangate45 files never exercise `ff_bank`).
+- **Fix:** regex widened to `(ff_bank|ff|latch_bank|latch|statetable)\s*\(` (longer
+  alternatives first so the match is unambiguous). Regression:
+  `test_ff_and_latch_bank_are_sequential`, `test_ff_latch_statetable_still_sequential_combinational_not`.
+
+### 16. `compute_feature_stats` had no honesty gate — a raw/truncated feature CSV summarized as "ok" (X-side mirror of #6)
+
+- **Symptom:** `compute_label_stats.py` flags a label CSV `invalid` when it has rows but
+  no numeric label column (the #6 irdrop raw-dump lesson). `compute_feature_stats.py` had
+  **no** equivalent: it returned `status:"ok"` for ANY non-empty CSV. A worker killed
+  mid-write (truncated rows) or a stale/raw CSV left at the canonical path was reported
+  fresh and healthy — the exact honesty failure the label side already guards. Asymmetric
+  and silent; not triggered on a clean nangate45 run (all workers succeed).
+- **Fix:** `compute_feature_stats.summarize` now checks each CSV's identity columns
+  against a `REQUIRED_COLS` schema — a missing column ⇒ `invalid` (raw/wrong-schema
+  dump), a required column left unset on any row ⇒ `invalid` (truncated write) — and
+  `main()` warns to stderr, mirroring the label gate. Behavior-neutral on well-formed
+  nangate45 CSVs (all 8 feature sets stay `ok`). Regression:
+  `test_feature_stats_flags_missing_columns_invalid`,
+  `test_feature_stats_flags_truncated_rows_invalid`, `test_feature_stats_ok_on_complete_csv`.
+
+### 17. `netlist_graph` tie-off constants in a concatenation leaked a phantom net (`{1'b0, sig}` → net `b0`)
+
+- **Symptom:** `extract_signal_names` tokenizes a concatenation with the plain-id regex;
+  a Verilog sized constant `1'b0` inside `{...}` is split by the `'` and its fragment
+  `b0` was emitted as a (fake) net node/edge. ORFS mapped netlists tie constants through
+  `LOGIC0_X1`/`LOGIC1_X1` cells (verified: zero literal constants across the sampled
+  corpus), so this never fired in production — a latent defect a hand-written or
+  non-ORFS netlist would trip.
+- **Fix:** sized constant literals (`\d+'[bodh]…`) are stripped from a concatenation
+  before tokenizing (standalone-constant normalization to CONST0/CONST1 unchanged).
+  Regression: `test_netlist_constants_in_concat_are_dropped`.
+
+### 18. Minor latent parity fixes (2026-07-06 audit) — no nangate45 impact
+
+- `run_labels.sh` did not export `R2G_PLATFORM` to `extract_congestion.py`, which fell
+  back to asap7's routing-layer profile — harmless today (all platforms share one
+  fallback table AND it only fires when the tech LEF yields no routing layers) but a
+  cross-platform hazard once the fallback becomes platform-specific. Now passed through.
+- `edges_iopin_net.py` did not `rstrip(';')` a DIRECTION captured on a *continuation*
+  line (the dash-line branch already did), so `+ DIRECTION OUTPUT;` with no space would
+  store `OUTPUT;`. DEF normally spaces the `;`; fixed for parity.
+
+### Corner-case verification infrastructure (2026-07-06)
+
+The bugs above (and the 2026-07-05 batch) live in code paths the REAL nangate45 designs
+never exercise, so `tools/verify_graph_dataset.py` (which cross-checks a built dataset
+against the raw liberty/LEF/DEF) stays green while they hide. Two new suites close that
+gap by exercising corner cases on inputs the extractors control:
+
+- `tests/fixtures/corner_synth.py` + `tests/test_corner_case_pipeline.py` — a
+  hand-computable synthetic nangate45-style design (std cells + a bus-pin macro, a
+  clock/reset/multi-layer/RECT-patch/2-driver net mix) driven through the REAL feature
+  workers → label extractors → PyG builder, asserting every output against
+  independently hand-derived ground truth, across **all five graph views b–f** (node/edge
+  counts, folded-entity `edge_attr` features + `edge_y` labels, clock-tree/FILL/TAP
+  exclusion, undirected symmetry).
+- `tests/test_corner_case_units.py` — focused unit corners: ff_bank/latch_bank/statetable
+  sequential detection, INOUT/FEEDTHRU + power/ground + multi-digit bus-index pin
+  classification, pf→fF cap scaling, CUT-vs-ROUTING LEF layers + VIA re-declaration, the
+  congestion demand-key (x_gcell, y_gcell) convention under an ASYMMETRIC grid (catches
+  the #7 transpose), netlist constant handling, and the #16 feature-stats honesty gate.
+
+**Lesson:** a raw-file cross-check and a corner-case fixture suite are complementary — the
+first proves the extractors match the tools on the inputs you HAVE, the second proves they
+handle the inputs you might GET. A liberty fixture MUST be one-attribute-per-line (the
+parser uses anchored `re.match`); a crammed pin silently drops direction/clock/cap and
+tests nothing.
