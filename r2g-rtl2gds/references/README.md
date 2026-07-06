@@ -33,6 +33,9 @@ start here when you don't know which doc to open.
   tables.
 - [`label-extraction.md`](label-extraction.md) — the Y side: per-cell / per-net regression-target
   tables. Both read the same `6_final.def` so rows join.
+- [`graph-dataset.md`](graph-dataset.md) — training-ready PyG graphs (`run_graphs.sh`): the five
+  b–f topologies + the synthesis-netlist graph, tensor schemas, torch-venv setup, and the
+  2026-07-05 RTL2Graph audit record.
 
 **Historical debug narratives & corpus results**
 - [`lessons-learned.md`](lessons-learned.md) — dated debug narratives and campaign results.
@@ -44,6 +47,7 @@ start here when you don't know which doc to open.
 | [`engineer-loop.md`](engineer-loop.md) | Runbook for the deterministic, resumable campaign orchestrator that drives the full PD flow unattended across a queue of designs. |
 | [`failure-patterns.md`](failure-patterns.md) | Catalog of failure modes (spec gaps, placement/route congestion, DRC/LVS, etc.) with symptoms and actions. |
 | [`feature-extraction.md`](feature-extraction.md) | The dataset **X** side: `run_features.sh` emits per-node/per-edge/graph feature tables plus per-design stats. |
+| [`graph-dataset.md`](graph-dataset.md) | Training-ready PyG graphs: `run_graphs.sh` joins X+Y into the five b–f graph topologies + the synthesis-netlist graph (torch venv, fail-soft). |
 | [`label-extraction.md`](label-extraction.md) | The dataset **Y** side: `run_labels.sh` emits per-cell/per-net regression-target tables plus per-design stats. |
 | [`lessons-learned.md`](lessons-learned.md) | Dated lessons from physical-design debugging and batch/campaign runs. |
 | [`orfs-playbook.md`](orfs-playbook.md) | ORFS usage playbook: environment autodetection, root layout, env knobs, macro designs, and Fmax search. |

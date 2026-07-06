@@ -386,3 +386,45 @@ For these, treat a `predicted`/`proxy-only` label as a loose upper bound and pre
 nangate45 corpus, which has the most signed-off runs); **other platforms are forward-learned** — the
 per-family offset accumulates only as verified runs land for those platforms, so early non-nangate
 predictions lean on conservative defaults until the model fills in.
+
+## RTL2Graph Integration Audit — "Green Pipeline" ≠ "Correct Data" (2026-07-05)
+
+Integrating the external RTL2Graph pipeline (Verilog→PyG netlist graphs + five
+feature/label graph-dataset topologies) began with a ground-truth audit — and the audit
+found more wrong in OUR extractors than in the code being integrated. Five defects, four
+of them live in the skill's own feature/label stages for months, every one producing
+plausible-looking CSVs that only an independent oracle exposed:
+
+- **Timing labels missing on every register** (STA-unescaped vs odb-escaped name join):
+  the cells `report_checks` names as the worst endpoints all carried `slack=INF`.
+- **sky130 RECT patch groups read as route points**: wirelength ~350× inflated on
+  RECT-bearing nets, congestion "utilization" 11× — invisible on nangate45 (no RECT in
+  NETS), which is exactly why the techlib byte-correspondence tests stayed green: they
+  proved old≡new, not old≡true.
+- **DEF PIN direction used from the wrong perspective** (output-port nets counted
+  2-driver/0-sink), **driver max_capacitance summed as net load** (dominating the
+  feature 20×), and **edge-attribute misalignment** in RTL2Graph's c–f variants
+  ([fwd|rev] edge concat vs pairwise attr repeat).
+
+Durable lessons:
+
+1. **Byte-for-byte regression gates freeze bugs in.** The techlib refactor's
+   correspondence tests (old vs new implementation on real DEFs) were the right tool for
+   a behavior-neutral refactor and exactly the wrong tool for correctness — both sides
+   shared the ancestor's bugs. Dataset stages need ORACLE checks: OpenDB counts/ITerm
+   directions, `report_wire_length -detailed_route` per net, `report_checks` per
+   endpoint. That recipe is now recorded in failure-patterns.md ("Dataset-Extraction
+   Silent-Value Defects") and took ~1 h to run for two platforms.
+2. **A "verified" external pipeline can be a stale fork of your own code.** RTL2Graph's
+   feature/label packages were pre-techlib ancestors (quote-bug and all); the genuinely
+   new pieces (graph assembly, netlist graph) were ported onto the skill's extractors
+   instead. Check lineage before porting.
+3. **Silent-wrong-value defects deserve their own failure class.** Nothing crashed;
+   `labels_stats.json` looked healthy; datasets trained on those CSVs would have learned
+   noise for register timing and sky130 wirelength/congestion. The dashboards can't see
+   this — only oracle audits can.
+
+Fixes + tests: commits `4d8e032` / `6b09000` / `69c10e2` (branch
+`feat/rtl2graph-integration`); stage docs in `graph-dataset.md`; audit narrative in
+`docs/superpowers/plans/rtl2graph-integration-audit-2026-07-05.md`. CSVs generated
+before 2026-07-05 must be regenerated before training.

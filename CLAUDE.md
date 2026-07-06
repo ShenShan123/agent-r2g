@@ -21,7 +21,7 @@ r2g-rtl2gds/                  # The skill (everything to run a flow lives here)
   SKILL.md                      # Workflow, hard rules, env knobs (PLACE_FAST, ROUTE_FAST, …)
   scripts/flow/                 # Stage runners: run_orfs.sh, run_drc/lvs/rcx.sh, fix_signoff.sh
     orfs_hooks/                   # ORFS stage-hook Tcl (POST_GLOBAL_PLACE_TCL, …)
-  scripts/extract/              # Tool output → JSON: extract_ppa/drc/lvs/rcx/route; techlib/, labels/, features/
+  scripts/extract/              # Tool output → JSON: extract_ppa/drc/lvs/rcx/route; techlib/, labels/, features/, graph/
   scripts/project/              # init_project, normalize_spec, validate_config
   scripts/reports/              # check_timing, diagnose_signoff_fix, suggest_config, build_*
   scripts/loop/                 # engineer_loop.py — the autonomous campaign driver
@@ -46,12 +46,15 @@ re-run with `--link --force`. (Root cause of the 2026-06-08 stale-skill defect.)
 `scripts/flow/_env.sh` autodetects ORFS + tool paths — nothing to source manually. Override via
 `$R2G_ENV_FILE`, `references/env.local.sh`, or by exporting `ORFS_ROOT`/`OPENROAD_EXE`/`YOSYS_EXE`/
 `KLAYOUT_CMD`/… **Required:** python3 (3.10+), yosys, openroad, ORFS checkout. **Optional:**
-iverilog/vvp, verilator, klayout, magic, netgen-lvs, opensta, sky130A PDK. Verify with
-`scripts/flow/check_env.sh`.
+iverilog/vvp, verilator, klayout, magic, netgen-lvs, opensta, sky130A PDK; a
+torch+torch_geometric+pandas venv for the PyG graph-dataset stage only (`R2G_GRAPH_PYTHON`;
+`run_graphs.sh` skips cleanly without it). Verify with `scripts/flow/check_env.sh`.
 
 **This machine:** signoff tools (iverilog/vvp, magic, netgen) live in `~/miniconda3/envs/eda`; the
 sky130A PDK is staged at `/proj/workarea/user5/sky130_pdk/share/pdk/sky130A`; all pinned in
 `references/env.local.sh` and green in `check_env.sh` (enables real sky130 Magic DRC + Netgen LVS).
+The graph-stage torch venv is at `/proj/workarea/user5/pyenvs/rtl2graph` (torch 2.12.1+cpu,
+PyG 2.8.0, pandas, pytest) — point `R2G_GRAPH_PYTHON` at its `bin/python`.
 Install recipe in `README.md`. **Never install large packages into `$HOME` (full) — use `/proj`.**
 Platforms in this checkout: `asap7` (default), `nangate45`, `sky130hd`, `sky130hs`, `gf180`,
 `ihp-sg13g2`. The nangate45 LVS rule is bundled (`tools/install_nangate45_lvs.sh`).

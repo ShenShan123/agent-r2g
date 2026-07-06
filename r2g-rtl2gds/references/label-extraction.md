@@ -11,10 +11,10 @@ Written to `design_cases/<design>/labels/` and `design_cases/<design>/reports/`:
 
 | File | Rows | Columns | Label transform |
 |------|------|---------|-----------------|
-| `labels/congestion.csv` | per placed instance | `Design,Cell,cell_type,cell_congestion,label` | `label = sqrt(cell_congestion)` |
+| `labels/cell_congestion.csv` | per placed instance | `Design,Cell,cell_type,cell_congestion,label` | `label = sqrt(cell_congestion)` |
 | `labels/wirelength.csv` | per net | `Design,Net,NetType,WireLength_um,label,mask_wl` | `label = log1p(WireLength_um)`; `mask_wl = NetType==SIGNAL` |
-| `labels/timing.csv` | per placed instance | `Design,Cell,Cell_Slack_ns,Path_Delay_ns,label,in_sta_path` | `label = log(1+Path_Delay_ns)`; `Path_Delay_ns = clk_period - worst_slack` (floored at 0) |
-| `labels/irdrop.csv` | per instance (fillers/tap/endcap filtered) | `Design,Cell,X,Y,Voltage_V,IR_Drop_mV,P95_mV,label,has_irdrop` | `label = log(1 + IR_Drop_mV/P95_mV)` |
+| `labels/timing_features.csv` | per placed instance | `Design,Cell,Cell_Slack_ns,Path_Delay_ns,label,in_sta_path` | `label = log(1+Path_Delay_ns)`; `Path_Delay_ns = clk_period - worst_slack` (floored at 0) |
+| `labels/ir_drop.csv` | per instance (fillers/tap/endcap filtered) | `Design,Cell,X,Y,Voltage_V,IR_Drop_mV,P95_mV,label,has_irdrop` | `label = log(1 + IR_Drop_mV/P95_mV)` |
 | `reports/labels_stats.json` | — | per-label count + min/mean/p50/p90/p95/p99/max for `label` and the raw metric, plus mask/in_path/has_irdrop tallies | — |
 
 `Design` + `Cell`/`Net` are the join keys across the four tables. Note that `timing`
@@ -82,6 +82,11 @@ roll-up land under `design_cases/_batch/logs_labels_<tag>/`.
   SDC `clk_port_name` doesn't match an actual port) get all-`not_in_path` timing
   rows (`label=0`) — honestly recorded, not an error. Purely combinational designs
   also correctly produce zero in-path rows.
+
+## Downstream consumer
+
+`scripts/flow/run_graphs.sh` (SKILL.md step 13d) joins these label CSVs with the
+feature CSVs into training-ready PyG graphs — see `graph-dataset.md`.
 
 ## 2026-07-05 corrections (RTL2Graph integration audit)
 

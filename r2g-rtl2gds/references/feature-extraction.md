@@ -130,6 +130,11 @@ memory-light). With no design args it auto-discovers designs that have a collect
   carries row counts; a quick sanity check is `nodes_gate` rows ≈ DEF `COMPONENTS`.
 - Designs that never reached `6_final` are skipped (status recorded), not errored.
 
+## Downstream consumer
+
+`scripts/flow/run_graphs.sh` (SKILL.md step 13d) joins these feature CSVs with the
+label CSVs into training-ready PyG graphs — see `graph-dataset.md`.
+
 ## 2026-07-05 semantics corrections (RTL2Graph integration audit)
 
 Three feature values changed meaning on this date (commit `fix(skill): feature

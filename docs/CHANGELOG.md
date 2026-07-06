@@ -19,6 +19,35 @@ skipped as library-pre-verified).
 
 ---
 
+## 2026-07-05 — RTL2Graph integrated as the PyG graph-dataset stage; 5 extraction defects found + fixed
+
+Audited the operator-provided `RTL2Graph/` pipeline against OpenDB/OpenROAD ground truth
+(cordic nangate45 + aes_core sky130hd) before integrating it, then shipped it as skill
+stage 13d (`scripts/flow/run_graphs.sh` → `<project>/dataset/{b..f}_graph.pt` +
+`netlist_graph.pt` + `graph_manifest.json`). Branch `feat/rtl2graph-integration`,
+commits `4d8e032`/`6b09000`/`69c10e2`; full record:
+`docs/superpowers/plans/rtl2graph-integration-audit-2026-07-05.md`.
+
+- **RTL2Graph's `feature_test_v3`/`label_test` = stale ancestors** of the skill's extract
+  stages (still carried the sky130 quote-bug, nangate-only `num_layer`, dead fakeram
+  keys) — not ported; the skill's stages are the substrate.
+- **Five silent-wrong-value defects found; four lived in the skill's own extractors**
+  (fixed + regression-tested; detail in failure-patterns.md "Dataset-Extraction
+  Silent-Value Defects"): (1) timing labels lost on EVERY register (escaped-vs-unescaped
+  name join; aes_core sky130hd 5/2476 → 2476/2476 labeled); (2) sky130 DEF `RECT` patch
+  groups parsed as route points (wirelength ~350× inflated on 1283/30k nets, congestion
+  "utilization" 11×); (3) DEF PIN direction inverted in `num_drivers`/`num_sinks` (+
+  `connects_macro_flag` implemented, was hardwired 0); (4) driver `max_capacitance`
+  summed into `sum_pin_cap_fF` (62.5 fF vs true 3.19 fF); (5) RTL2Graph c–f variants
+  misaligned `edge_attr`/`edge_type`/`edge_y` with `edge_index` (171/3001 sampled
+  pin-edges aligned; the consolidated port scores 3001/3001).
+- Port equivalence-proven vs the originals (node tensors + edge sets exact, all five
+  variants, identical inputs); five ~700-line near-duplicate scripts consolidated into
+  `scripts/extract/graph/`. torch/PyG/pandas are graph-stage-only deps — `run_graphs.sh`
+  probes `R2G_GRAPH_PYTHON` and SKIPs cleanly without them.
+- **Operator action:** label/feature CSVs generated before 2026-07-05 carry the old,
+  wrong values — regenerate before training. Suite: 964 passed / 16 skipped.
+
 ## 2026-06-16 — Gate B FIRED on the live store: A/B loop's first end-to-end verdict + density_relief
 
 Ran the deferred compute-bound **Tier −1 Gate B** for real on the live `knowledge.sqlite`
