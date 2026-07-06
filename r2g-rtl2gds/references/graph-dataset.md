@@ -101,11 +101,25 @@ counts, b/c edge counts by row accounting, **d/e/f edge counts by the clique
 formula** Σ C(k,2), c/f edge_attr == the folded entity's features, EXACT
 expected-NaN counts + sampled values for every y slot, node_name order,
 global_feat, netlist-graph counts vs an independent regex, manifest
-consistency, and physical-range sanity. Exit 0 = clean; run it after
-regenerating any corpus. Baseline: 54/54 on 9 sky130hd designs, 159..190K
-cells (2026-07-06). It verifies CSV→tensor fidelity — pair with sampled
-`report_wire_length -net ... -detailed_route` diffs (recipe in the tool
-header) when extractor-level truth is also in question.
+consistency, and physical-range sanity.
+
+The 2026-07-06 wide-coverage extension additionally re-parses the RAW
+liberty/LEF/DEF with its own independent parsers (never `techlib`) and
+verifies CSV↔tool truth end-to-end: gate area/leakage/x/y/orientation,
+cell_type_id injectivity + the shared MACRO id, macro bus-pin classification,
+`sum_pin_cap_fF` vs Σ liberty load caps, net
+pin_count/drivers/sinks/hpwl/`connects_macro_flag` vs DEF+liberty+LEF-BLOCK
+truth, iopin x/y/direction, metadata section counts/dbu/die/tracks/V_nom, a
+FULL independent congestion demand/capacity/gaussian recompute, wirelength vs
+an independent DEF route walk (+ `label == log1p(um)`), timing coverage of
+every sequential instance, irdrop header/range/`label == log1p(IR/P95)`,
+edge symmetry/self-loop/name-uniqueness gates, and
+sampled netlist-graph port connectivity. `--batch <root>` sweeps every project
+under a corpus root (exit non-zero on any failure) — run it after ANY corpus
+regeneration. Baselines: 54/54 × 9 sky130hd designs (pre-extension,
+2026-07-06); ALL-PASS (84–87 checks, design-dependent) × 10 nangate45 designs
+incl. a fakeram45 macro design (post-extension, same day). Helper parsers are pytest-pinned in
+`tests/test_verify_graph_dataset_helpers.py`.
 
 ## Provenance + audit (2026-07-05)
 
