@@ -150,4 +150,18 @@ generated before it carry the OLD, wrong semantics:
   driver's liberty `max_capacitance` (a drive limit ~20x the loads) was added
   in, dominating the value.
 
+A second 2026-07-05 wave (sky130 verification round) fixed three more — sky130
+CSVs from between the two waves are STILL wrong on these (failure-patterns.md
+#5/#8/#9):
+
+- `pin_type_id` + liberty-side `num_drivers`/`num_sinks` (sky130 only): quoted
+  `direction : "input";` / `clock : "true";` never parsed — 95% of pins
+  collapsed to the catch-all id 14 and every net took the assume-1-driver
+  fallback. Now quote-tolerant.
+- `sum_pin_cap_fF` (sky130 only): quoted `capacitive_load_unit(1.0, "pf")`
+  left the pf→fF scale at 1.0 — every sky130 pin cap was 1000× too small.
+- net `use` (all platforms): `+ USE` on the net's dash line was dropped, so
+  `use` was populated only for line-wrapped nets (1,666/30,345 on aes_core;
+  now 30,345/30,345). `net_type_id` was mostly saved by name-token fallback.
+
 Full defect table: failure-patterns.md "Dataset-Extraction Silent-Value Defects".

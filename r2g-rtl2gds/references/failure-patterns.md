@@ -2984,3 +2984,68 @@ intentionally diverge from the pre-2026-07-05 baseline.
 **Tests (5+6):** `tests/test_techlib_liberty.py` (quoted attributes, real-lib direction
 coverage), `tests/test_compute_label_stats.py` (raw/non-numeric → invalid),
 `tests/test_graph_stage.py` (label_health, manifest gap flag, duplicate-key guards).
+
+### 7. Congestion vertical demand keyed TRANSPOSED — ~80% of congestion labels wrong
+
+- **Symptom (aes_core sky130hd):** fixing the key changes `cell_congestion` for
+  151,335/189,774 cells (79.7%); mean |Δ| 0.052, max 0.323 on a 0–0.44 scale (e.g.
+  ANTENNA_30 read 0.009 where the true value is 0.096 — 10×). A cell physically ON a
+  vertical wire could read 0.0 while its diagonal-mirror cell read the phantom demand.
+- **Root cause:** `extract_congestion.add_split_segment` keys demand `(main_grid,
+  fixed_grid)`. For horizontal wires main=x → `(x, y)` ✓; for vertical wires main=y →
+  `(y, x)` ✗ — transposed vs. the `(x_gcell, y_gcell)` convention that
+  `build_grid_utilization` (which `max()`es h/v at the SAME key) and the cell mapper
+  use. Every cell's v_util came from its diagonal-mirror gcell; on non-square grids
+  transposed keys also fall off-grid (demand silently orphaned). Latent since the
+  original RTL2Graph ancestor; ORTHOGONAL to the #2 RECT fix (that validated point
+  extraction, which is upstream and was correct). The demand grid had zero test
+  coverage — `test_extract_congestion.py` only exercised LEF layer parsing.
+- **Fix (2026-07-05):** `add_split_segment(..., vertical=True)` emits `(fixed, main)`
+  = `(x, y)` for vertical wires; directional demand-grid tests added (a vertical wire
+  must fill a COLUMN; on-wire cell sees congestion, mirror cell sees none).
+
+### 8. capacitive_load_unit quoted unit — every sky130 pin cap 1000× too small
+
+- **Symptom:** sky130 `sum_pin_cap_fF` ≈ 0.002 fF per pin (impossible); nangate45 fine.
+- **Root cause:** the #5 quote sweep missed its sibling: sky130 writes
+  `capacitive_load_unit(1.0000000000, "pf");` and the bare-`[A-Za-z]+` unit regex
+  rejected `"pf"`, so `cap_scale_ff` stayed 1.0 and pf→fF scaling never happened
+  (nangate45's bare `(1,ff)` correctly needs no scaling — which is why only sky130
+  broke). The #5 direction fix *widened* the damage: output pins became correctly
+  OUTPUT, so the `max_capacitance` fallback (also unscaled) started firing too.
+- **Fix (2026-07-05):** optional quotes on the unit token. Real-lib check:
+  `cap_scale_ff` 1.0 → 1000.0; nand2_1/A = 2.315 fF (physically sane).
+- **Lesson (upgrade of #5's):** when a quoting bug is found, sweep the WHOLE file for
+  every value-capturing regex — including complex attributes — in ONE pass; fixing
+  only the reported sites left this one live through two audit waves.
+
+### 9. `parse_nets` drops `+ USE` on the net's dash line — `use` an artifact of line-wrapping
+
+- **Symptom (aes_core sky130hd):** `use` populated for only 1,666/30,345 nets — exactly
+  the ones whose connection list happened to wrap to a continuation line. ORFS emits
+  `+ USE` ON the `-` declaration line for single-line nets (28,679 of them here).
+- **Root cause:** the `-` branch in `techlib/def_parse.parse_nets` extracted conns and
+  `continue`d without scanning USE; the USE regex ran only on continuation lines.
+  Masked because `infer_net_type_id` falls back to name tokens (all 329 USE=CLOCK nets
+  are named `*clk*`) — a USE=CLOCK net with a non-clocky name would misclassify as
+  signal. `nodes_net.parse_pin_dirs` already scanned its dash line (the #3 fix) —
+  `parse_nets` simply never mirrored it.
+- **Fix (2026-07-05):** the same `m_use` search inside the `-` branch before `continue`.
+  Real-DEF check: USE coverage 1,666 → 30,345/30,345 (30,016 SIGNAL + 329 CLOCK).
+
+**Tests (7-9):** `tests/test_extract_congestion.py` (directional demand grid),
+`tests/test_techlib_liberty.py` (quoted cap unit), `tests/test_techlib_def_parse.py`
+(USE on dash line). **Regeneration note:** waves 1 AND 2 of the 2026-07-05 fixes both
+change sky130 outputs — congestion labels (#7), `sum_pin_cap_fF` (#8), `pin_type_id` /
+`num_drivers` / `num_sinks` (#5), irdrop labels (#6). ALL sky130 feature/label CSVs and
+graph datasets predating BOTH waves are wrong; regenerate before training.
+
+**Known modeling choices (documented, not bugs):** `extract_timing.tcl` constrains only
+the clock — no `set_input_delay`/`set_output_delay` — so pure I/O paths are
+unconstrained (input→reg slacks optimistic; cells feeding only output ports get
+`in_sta_path=false`, 4% of aes_core logic cells; reg↔reg labels unaffected). sky130
+physical-only fill/tap/decap cells are absent from the timing liberty → `cell_area`/
+`cell_power` 0 + `cell_type_id` UNKNOWN in nodes_gate.csv (84% of rows are such cells;
+the graph stage filters them — nangate45's curated map differs, a platform asymmetry).
+Power/ground iopin→net edge rows reference nets absent from nodes_net.csv (power nets
+live in SPECIALNETS) — the graph stage's net_type filter + inner joins drop them.

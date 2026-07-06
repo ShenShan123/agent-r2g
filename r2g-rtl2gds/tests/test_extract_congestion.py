@@ -104,3 +104,35 @@ def test_no_routing_layers_falls_back_to_default(tmp_path):
     """)
     info = parse_tech_lef(lef_path)
     assert info == DEFAULT_LAYER_INFO
+
+
+# --------------------------------------------------------------------------- #
+# Demand-grid keying (2026-07-05 vertical-transposition regression, #7).       #
+# --------------------------------------------------------------------------- #
+
+import extract_congestion as ec
+
+
+def test_demand_keys_are_x_y_for_both_directions():
+    """All demand keys must be (x_gcell, y_gcell). A vertical wire at one x
+    spanning several y gcells fills a COLUMN; keying it (y, x) — the 2026-07-05
+    transposition — turned it into a row read by every diagonal-mirror cell."""
+    demand_h, demand_v = {}, {}
+    # vertical wire at x=100 (gcell 0), y 0..4000; grid 1000x1000 DBU, dbu=1000
+    ec.add_route_segment(demand_h, demand_v, 100, 0, 100, 4000, 1000, 1000, 1000.0)
+    assert demand_h == {}
+    assert set(demand_v) == {(0, 0), (0, 1), (0, 2), (0, 3)}
+    assert all(abs(v - 1.0) < 1e-9 for v in demand_v.values())
+    # horizontal wire at y=2500 (gcell 2), x 0..3000 -> a row at y_gcell 2
+    ec.add_route_segment(demand_h, demand_v, 0, 2500, 3000, 2500, 1000, 1000, 1000.0)
+    assert set(demand_h) == {(0, 2), (1, 2), (2, 2)}
+
+
+def test_cell_on_vertical_wire_sees_congestion_not_its_mirror():
+    demand_h, demand_v = {}, {}
+    ec.add_route_segment(demand_h, demand_v, 100, 0, 100, 4000, 1000, 1000, 1000.0)
+    grid_util = ec.build_grid_utilization(demand_h, demand_v, cap_h=10.0, cap_v=10.0)
+    on_wire = ec.gaussian_cell_congestion(grid_util, 0, 2, radius=0)
+    mirror = ec.gaussian_cell_congestion(grid_util, 2, 0, radius=0)
+    assert on_wire > 0.0, "cell physically on the wire must see its congestion"
+    assert mirror == 0.0, "diagonal-mirror cell must NOT see phantom congestion"

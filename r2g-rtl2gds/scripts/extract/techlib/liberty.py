@@ -141,7 +141,12 @@ def _merge_liberty_file(lib_path, db):
         if not line:
             continue
 
-        m_cap_unit = re.search(r"capacitive_load_unit\s*\(\s*([0-9eE+.\-]+)\s*,\s*([A-Za-z]+)\s*\)", line)
+        # The unit token may be QUOTED — sky130 writes
+        # `capacitive_load_unit(1.0000000000, "pf");`, nangate45 bare `(1,ff)`.
+        # Missing the quoted form left cap_scale_ff at 1.0 (no pf->ff scaling):
+        # every sky130 pin capacitance landed 1000x too small — the sibling of
+        # the direction/clock quoted-value bug (failure-patterns.md #5).
+        m_cap_unit = re.search(r"capacitive_load_unit\s*\(\s*([0-9eE+.\-]+)\s*,\s*\"?([A-Za-z]+)\"?\s*\)", line)
         if m_cap_unit:
             try:
                 mag = float(m_cap_unit.group(1))

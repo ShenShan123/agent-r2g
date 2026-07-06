@@ -318,3 +318,22 @@ def test_route_segments_matches_congestion_segment_sequence(def_path):
 
     assert lines_seen > 0, "no NETS route lines scanned (DEF gate / path wrong?)"
     assert seg_lines > 0, "no route line produced any segment (vacuous pass?)"
+
+
+def test_parse_nets_use_on_dash_line(tmp_path):
+    """ORFS emits `+ USE` ON the `-` net line for single-line nets (28,679/
+    30,345 on aes_core sky130hd); scanning only continuation lines made `use`
+    an artifact of line-wrapping (2026-07-05 fix, failure-patterns #9)."""
+    d = tmp_path / "t.def"
+    d.write_text(
+        "DESIGN t ;\nUNITS DISTANCE MICRONS 1000 ;\n"
+        "NETS 3 ;\n"
+        "- clk ( u1 CK ) ( u2 CK ) + USE CLOCK ;\n"
+        "- n1 ( u1 A )\n  ( u2 X ) + USE SIGNAL ;\n"
+        "- n2 ( u1 B ) ;\n"
+        "END NETS\n")
+    nets = def_parse.parse_nets(str(d))
+    assert nets["clk"]["use"] == "CLOCK"          # dash-line USE (was '')
+    assert nets["n1"]["use"] == "SIGNAL"          # continuation-line USE still works
+    assert nets["n2"]["use"] == ""
+    assert nets["clk"]["conns"] == [("u1", "CK"), ("u2", "CK")]

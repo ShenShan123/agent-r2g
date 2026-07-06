@@ -92,7 +92,17 @@ def parse_def_header_and_components(def_file):
     return db_units, grid_step_x, grid_step_y, components, design_name
 
 
-def add_split_segment(demand, fixed_coord, start, end, grid_step_main, grid_step_fixed, db_units):
+def add_split_segment(demand, fixed_coord, start, end, grid_step_main, grid_step_fixed, db_units,
+                      vertical=False):
+    """Accumulate one axis-parallel wire into the per-gcell demand grid.
+
+    Every demand key MUST be (x_gcell, y_gcell) — the same convention
+    build_grid_utilization and the cell mapper use. For a vertical wire the
+    MAIN (walked) axis is y and the FIXED axis is x, so the key order flips
+    (``vertical=True``). Keying vertical demand (main, fixed) = (y, x) was the
+    2026-07-05 transposition bug: every cell's v_util was read from its
+    diagonal-mirror gcell (~80% of aes_core congestion labels wrong; see
+    failure-patterns.md "Dataset-Extraction Silent-Value Defects" #7)."""
     if start == end:
         return
 
@@ -107,7 +117,8 @@ def add_split_segment(demand, fixed_coord, start, end, grid_step_main, grid_step
         nxt = min(hi, next_boundary)
         length_um = (nxt - cur) / db_units
         if length_um > 0:
-            demand[(main_grid, fixed_grid)] = demand.get((main_grid, fixed_grid), 0.0) + length_um
+            key = (fixed_grid, main_grid) if vertical else (main_grid, fixed_grid)
+            demand[key] = demand.get(key, 0.0) + length_um
         cur = nxt
 
 
@@ -115,7 +126,8 @@ def add_route_segment(demand_h, demand_v, x1, y1, x2, y2, grid_step_x, grid_step
     if x1 != x2:
         add_split_segment(demand_h, y1, x1, x2, grid_step_x, grid_step_y, db_units)
     if y1 != y2:
-        add_split_segment(demand_v, x2, y1, y2, grid_step_y, grid_step_x, db_units)
+        add_split_segment(demand_v, x2, y1, y2, grid_step_y, grid_step_x, db_units,
+                          vertical=True)
 
 
 def extract_grid_demand(def_file, db_units, grid_step_x, grid_step_y):

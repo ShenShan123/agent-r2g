@@ -280,6 +280,7 @@ def test_quoted_attribute_values_parse(tmp_path):
     lib = tmp_path / "quoted.lib"
     lib.write_text(
         'library (quoted) {\n'
+        '  capacitive_load_unit(1.0000000000, "pf");\n'
         '  cell ("dff_q") {\n'
         '    area : 5.0;\n'
         '    ff ("IQ","IQ_N") { clocked_on : "CLK"; }\n'
@@ -300,6 +301,9 @@ def test_quoted_attribute_values_parse(tmp_path):
         '}\n'
     )
     db = liberty.load_liberty_db(str(lib))
+    # sky130 quotes the cap unit too: `capacitive_load_unit(1.0, "pf");` —
+    # missing it left cap_scale_ff at 1.0 (pin caps 1000x too small).
+    assert db["cap_scale_ff"] == pytest.approx(1000.0)
     pins = db["cells"]["DFF_Q"]["pins"]  # cell keys are _norm_key-uppercased
     assert pins["D"]["direction"] == "INPUT"
     assert pins["D"]["capacitance"] == pytest.approx(0.0021 * db["cap_scale_ff"])

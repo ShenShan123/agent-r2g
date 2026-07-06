@@ -157,6 +157,14 @@ def parse_nets(def_path):
                     if _INT_RE.match(a) and _INT_RE.match(b):
                         continue
                     cur["conns"].append((a, b))
+                # ORFS emits `+ USE` ON the dash line for single-line nets
+                # (28,679/30,345 on aes_core sky130hd) — scanning only
+                # continuation lines made `use` an artifact of line-wrapping
+                # (populated for 1,666 nets). Mirror nodes_net.parse_pin_dirs,
+                # which already scans its dash line before continuing.
+                m_use = re.search(r"\+\s*USE\s+(\S+)", s)
+                if m_use:
+                    cur["use"] = m_use.group(1).upper().rstrip(";")
                 continue
             if cur is None:
                 continue

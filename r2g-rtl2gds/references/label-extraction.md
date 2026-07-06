@@ -82,6 +82,13 @@ roll-up land under `design_cases/_batch/logs_labels_<tag>/`.
   SDC `clk_port_name` doesn't match an actual port) get all-`not_in_path` timing
   rows (`label=0`) — honestly recorded, not an error. Purely combinational designs
   also correctly produce zero in-path rows.
+- **Only the clock is constrained** — `extract_timing.tcl` applies no
+  `set_input_delay`/`set_output_delay` (the design SDC uses 20% of period for
+  both). Pure I/O paths are therefore unconstrained: input→reg slacks are
+  optimistic, and cells feeding only output ports get `in_sta_path=false`
+  (`label=0`). Bounded on aes_core sky130hd: 4% of real logic cells;
+  reg↔reg labels are unaffected. Larger for I/O-bound or combinational
+  designs — a documented modeling choice (2026-07-05 audit), not a join bug.
 
 ## Downstream consumer
 
@@ -102,5 +109,18 @@ these spots (regenerate before training on them):
   nets on aes_core) and congestion utilization past 11x. Fixed lengths are
   centerline (patch metal excluded), so RECT nets read ~0.2 um below OpenROAD's
   `report_wire_length`, which includes patches.
+
+A second 2026-07-05 wave (sky130 verification round) fixed two more, ALL
+platforms' pre-fix congestion CSVs affected (see failure-patterns.md
+"Dataset-Extraction Silent-Value Defects" #6/#7):
+
+- `cell_congestion.csv` (all platforms): VERTICAL routing demand was keyed
+  transposed `(y_gcell, x_gcell)`, so every cell's vertical utilization was
+  read from its diagonal-mirror gcell — 79.7% of aes_core congestion labels
+  change (mean |Δ| 0.052, max 0.323 on a 0–0.44 scale).
+- `ir_drop.csv`: an interrupted irdrop stage could leave PDNSim's RAW dump at
+  the canonical path (silently unusable labels). Now published atomically;
+  `labels_stats.json` reports `invalid` for unusable label CSVs; the graph
+  stage records per-file `label_health` in its manifest.
 
 Full defect table: failure-patterns.md "Dataset-Extraction Silent-Value Defects".
