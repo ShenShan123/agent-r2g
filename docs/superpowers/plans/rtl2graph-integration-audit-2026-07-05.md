@@ -111,3 +111,36 @@ corrected reference dataset lives at
 `/proj/workarea/user5/rtl2graph_verify/aes_core_fixcheck/` until the corpus
 regeneration runs. Detail: failure-patterns.md "Dataset-Extraction
 Silent-Value Defects" #5/#6.
+
+## 2026-07-05 (wave 2 addendum): three more defects from the agent audits (commit dd88a0b)
+
+The parallel audit agents' full reports landed after the first addendum and
+surfaced three MORE confirmed silent-value defects, all fixed + re-validated
+end-to-end on the aes_core_fixcheck copy (failure-patterns #7/#8/#9):
+
+1. **Congestion vertical-demand transposition** (all platforms, latent since
+   the RTL2Graph ancestor): vertical demand keyed `(y,x)` vs the `(x,y)`
+   convention — 79.7% of aes_core congestion labels wrong (mean |Δ| 0.052,
+   max 0.323). The demand grid had zero test coverage; directional tests added.
+2. **capacitive_load_unit quoted "pf"** (sky130): cap_scale_ff stayed 1.0 →
+   every sky130 pin cap 1000× too small. The 0574308 quote sweep missed this
+   sibling — lesson upgraded to "sweep the whole file in one pass".
+3. **parse_nets dropped `+ USE` on dash lines** (all platforms): `use`
+   populated for 1,666/30,345 nets (line-wrapping artifact) → 30,345/30,345.
+
+Independently re-verified by the features agent vs ODB truth (sink mismatches
+390→0; 29,825 nets zero cap mismatch vs a raw ×1000 parse; 0 USE
+misclassifications). Also documented as modeling choices (not bugs): timing
+I/O paths unconstrained (no set_input_delay/set_output_delay; 4% of aes_core
+logic cells), sky130 fill/tap/decap → UNKNOWN ids (physical-only cells), power
+iopin-edge rows dangling at CSV level (filtered graph-side). Verified-clean
+list: wirelength exact vs report_wire_length (0.00µm on non-RECT nets), timing
+join complete (2,476/2,476 registers), RECT strip complete + single-sourced,
+GCELLGRID/units, LEF layer parse, resolve/profile paths.
+
+**Final state:** suite 986 passed / 0 failed; corrected reference dataset at
+`/proj/workarea/user5/rtl2graph_verify/aes_core_fixcheck/` (congestion labels
+changed for 25,196/29,712 graph gates; pin-cap x-features ×1000; y2 populated;
+manifest label_health all-ok). The live-tree `design_cases/aes_core`
+labels/dataset and ALL pre-wave-2 sky130 CSVs remain stale — regenerate before
+training (congestion #7 affects every platform).

@@ -188,3 +188,52 @@ def test_sum_pin_cap_is_input_loads_only(mini_case, monkeypatch):
     assert float(by_pin[("i2", "ZN")]["sum_pin_cap_fF"]) == pytest.approx(2.0)
     # n_in's load = i1/A capacitance (1.5).
     assert float(by_pin[("i1", "A")]["sum_pin_cap_fF"]) == pytest.approx(1.5)
+
+
+# --- 2026-07-05 wave 2: sky130-style QUOTED liberty must extract identically -
+
+# The same STD_LIB rewritten the way sky130hd actually writes liberty: quoted
+# direction/clock values, quoted pf cap unit, caps in pf (1000x smaller
+# numbers). End-to-end feature outputs must equal the unquoted twin — this is
+# the fixture gap that let the quote bugs (failure-patterns #5/#8) pass tests
+# while every sky130 pin lost its direction and caps landed 1000x small.
+SKY_QUOTED_LIB = textwrap.dedent(
+    """
+    library (std) {
+      capacitive_load_unit(1.0000000000, "pf");
+      nom_voltage : 1.10;
+      cell ("INV") {
+        area : 1.0;
+        cell_leakage_power : 2.0;
+        pin ("A") {
+          direction : "input";
+          capacitance : 0.0015;
+        }
+        pin ("ZN") {
+          direction : "output";
+          max_capacitance : 0.0500;
+        }
+      }
+    }
+    """
+)
+
+
+def test_quoted_sky130_style_lib_extracts_identically(mini_case, monkeypatch, tmp_path):
+    case_dir, def_file = mini_case
+    baseline = _run_worker(monkeypatch, nodes_pin, def_file, case_dir / "pins_unquoted.csv")
+
+    quoted_lib = tmp_path / "std_quoted.lib"
+    quoted_lib.write_text(SKY_QUOTED_LIB)
+    macro_lib = case_dir / "macro.lib"
+    monkeypatch.setenv("R2G_LIB_FILES", f"{quoted_lib} {macro_lib}")
+    monkeypatch.setenv("R2G_SC_LIB_FILES", str(quoted_lib))
+    quoted = _run_worker(monkeypatch, nodes_pin, def_file, case_dir / "pins_quoted.csv")
+
+    assert len(baseline) == len(quoted) > 0
+    for b, q in zip(baseline, quoted):
+        assert b["inst_name"] == q["inst_name"] and b["pin_name"] == q["pin_name"]
+        assert b["pin_type_id"] == q["pin_type_id"], (
+            f"{b['inst_name']}/{b['pin_name']}: quoted direction must classify identically")
+        assert abs(float(b["sum_pin_cap_fF"]) - float(q["sum_pin_cap_fF"])) < 1e-6, (
+            f"{b['inst_name']}/{b['pin_name']}: quoted pf unit must scale to the same fF")
