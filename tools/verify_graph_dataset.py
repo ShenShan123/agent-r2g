@@ -443,9 +443,13 @@ def extended_checks(case, design, feat, labs, views, b):
         check("ext.macro masters share one dedicated id",
               len(macro_ids) == 1 and not (macro_ids & std_ids),
               f"macro ids {macro_ids} std overlap {macro_ids & std_ids}")
-    std_masters = [m for m in id_of.index if str(m).upper() not in blocks]
+    # Injectivity applies only to masters PRESENT in the liberty — physical-only
+    # cells absent from the timing liberty (sky130 decap/fakediode/…) legitimately
+    # collapse onto the shared UNKNOWN id (documented modeling choice).
+    std_masters = [m for m in id_of.index
+                   if str(m).upper() not in blocks and str(m).upper() in lib]
     dup = len(std_masters) - len({int(id_of[m]) for m in std_masters})
-    check("ext.distinct std masters get distinct ids", dup == 0, f"{dup} collisions")
+    check("ext.distinct liberty masters get distinct ids", dup == 0, f"{dup} collisions")
 
     # ---- X pins: macro pins classified + net-load-sum vs liberty ----
     full_pin = pd.read_csv(os.path.join(feat, "nodes_pin.csv"))
