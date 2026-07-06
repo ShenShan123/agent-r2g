@@ -236,16 +236,24 @@ def _merge_liberty_file(lib_path, db):
                 current_pin_depth = brace_depth + open_count
 
             if current_pin is not None:
-                m_dir = re.match(r"direction\s*:\s*([A-Za-z_]+)\s*;", line)
+                # Simple attribute values may be QUOTED (sky130hd/hs write
+                # `direction : "input";` and `clock : "true";`; ihp macro libs
+                # `clock : "true" ;`) — same class as the sky130 quoted-value
+                # bug (commit 363a8b2). The unquoted-only regexes here silently
+                # dropped direction on every sky130 std-cell pin (pin_type_id
+                # collapse + num_drivers/num_sinks undercount) and the clock
+                # flag on every sky130 DFF — see failure-patterns.md
+                # ("Label/feature extraction pitfalls", 2026-07-05).
+                m_dir = re.match(r'direction\s*:\s*"?([A-Za-z_]+)"?\s*;', line)
                 if m_dir:
                     current_pin["direction"] = m_dir.group(1).upper()
-                m_cap = re.match(r"capacitance\s*:\s*([0-9eE+.\-]+)\s*;", line)
+                m_cap = re.match(r'capacitance\s*:\s*"?([0-9eE+.\-]+)"?\s*;', line)
                 if m_cap:
                     try:
                         current_pin["capacitance"] = float(m_cap.group(1)) * db["cap_scale_ff"]
                     except Exception:
                         pass
-                m_max = re.match(r"max_capacitance\s*:\s*([0-9eE+.\-]+)\s*;", line)
+                m_max = re.match(r'max_capacitance\s*:\s*"?([0-9eE+.\-]+)"?\s*;', line)
                 if m_max:
                     try:
                         current_pin["max_capacitance"] = float(m_max.group(1)) * db["cap_scale_ff"]
@@ -254,7 +262,7 @@ def _merge_liberty_file(lib_path, db):
                 m_fn = re.match(r'function\s*:\s*"([^"]*)"\s*;', line)
                 if m_fn:
                     current_pin["function"] = m_fn.group(1)
-                if re.match(r"clock\s*:\s*true\s*;", line, flags=re.I):
+                if re.match(r'clock\s*:\s*"?true"?\s*;', line, flags=re.I):
                     current_pin["clock"] = True
 
         brace_depth += open_count - close_count

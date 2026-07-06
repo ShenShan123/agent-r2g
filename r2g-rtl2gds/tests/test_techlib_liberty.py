@@ -269,3 +269,59 @@ def test_no_liberty_warning_none_input(capsys, monkeypatch):
     captured = capsys.readouterr()
     assert "WARN" in captured.err
     assert db_new["cells"] == {}
+
+
+def test_quoted_attribute_values_parse(tmp_path):
+    """sky130hd/hs write `direction : "input";` and `clock : "true";` (ihp:
+    `clock : "true" ;`) — quoted simple-attribute values must parse identically
+    to unquoted ones. Regression for the 2026-07-05 sky130 direction/clock
+    quote bug (every sky130 std-cell pin lost its direction; every DFF its
+    clock flag)."""
+    lib = tmp_path / "quoted.lib"
+    lib.write_text(
+        'library (quoted) {\n'
+        '  cell ("dff_q") {\n'
+        '    area : 5.0;\n'
+        '    ff ("IQ","IQ_N") { clocked_on : "CLK"; }\n'
+        '    pin ("D") {\n'
+        '      direction : "input";\n'
+        '      capacitance : "0.0021";\n'
+        '    }\n'
+        '    pin ("CLK") {\n'
+        '      direction : input ;\n'
+        '      clock : "true" ;\n'
+        '      capacitance : 0.0017;\n'
+        '    }\n'
+        '    pin ("Q") {\n'
+        '      direction : "output";\n'
+        '      max_capacitance : "0.30";\n'
+        '    }\n'
+        '  }\n'
+        '}\n'
+    )
+    db = liberty.load_liberty_db(str(lib))
+    pins = db["cells"]["DFF_Q"]["pins"]  # cell keys are _norm_key-uppercased
+    assert pins["D"]["direction"] == "INPUT"
+    assert pins["D"]["capacitance"] == pytest.approx(0.0021 * db["cap_scale_ff"])
+    assert pins["CLK"]["direction"] == "INPUT"
+    assert pins["CLK"]["clock"] is True
+    assert pins["Q"]["direction"] == "OUTPUT"
+    assert pins["Q"]["max_capacitance"] == pytest.approx(0.30 * db["cap_scale_ff"])
+
+
+def test_real_sky130hd_pins_have_directions():
+    """On the real sky130hd tt lib, (nearly) every std-cell pin must resolve a
+    direction — the quote bug made this 0/1771 before the fix."""
+    path = _lib_path("sky130hd")
+    if not path:
+        pytest.skip("sky130hd liberty not available")
+    db = liberty.load_liberty_db(path)
+    total = empty = clocks = 0
+    for info in db["cells"].values():
+        for pi in info.get("pins", {}).values():
+            total += 1
+            empty += 0 if pi.get("direction") else 1
+            clocks += 1 if pi.get("clock") else 0
+    assert total > 1000
+    assert empty == 0, f"{empty}/{total} pins lost direction"
+    assert clocks > 0, "no clock pins flagged (quoted `clock : \"true\";` missed)"
