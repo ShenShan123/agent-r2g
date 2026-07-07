@@ -103,8 +103,26 @@ fi
 # --- Platform lib resolution for the netlist graph's cell-type vocabulary ---
 RESOLVED="$(bash "$(dirname "${BASH_SOURCE[0]}")/resolve_platform_paths.sh" "$CONFIG_MK" "$PLATFORM" 2>/dev/null || true)"
 LIB_FILES=$(echo "$RESOLVED" | sed -n 's/^LIB_FILES=//p')
+ADDITIONAL_LIBS=$(echo "$RESOLVED" | sed -n 's/^ADDITIONAL_LIBS=//p')
 export R2G_PLATFORM="$PLATFORM"
-export R2G_SC_LIB_FILES="$LIB_FILES"
+# The netlist-graph cell-type map must be built the SAME way as the feature stage
+# (nodes_gate.py): lib_db from the FULL liberty (std + per-design macro libs), but the
+# id space keyed on the STD-CELL-ONLY subset. So export BOTH: R2G_LIB_FILES (full) and
+# R2G_SC_LIB_FILES (std-cell-only, subtracting the macro libs ORFS already folded into
+# LIB_FILES — mirrors run_features.sh). Exporting only R2G_SC_LIB_FILES=$LIB_FILES made
+# netlist_graph interleave each macro into the sorted std vocabulary, drifting std-cell
+# ids off the feature graphs on every macro design (failure-patterns.md
+# "Dataset-Extraction Silent-Value Defects" #12/#19).
+export R2G_LIB_FILES="$LIB_FILES $ADDITIONAL_LIBS"
+SC_LIB_FILES=""
+for _lf in $LIB_FILES; do
+  _is_macro_lib=0
+  for _al in $ADDITIONAL_LIBS; do
+    [[ "$_lf" == "$_al" ]] && _is_macro_lib=1 && break
+  done
+  [[ "$_is_macro_lib" == 0 ]] && SC_LIB_FILES="${SC_LIB_FILES:+$SC_LIB_FILES }$_lf"
+done
+export R2G_SC_LIB_FILES="$SC_LIB_FILES"
 
 mkdir -p "$DATASET_DIR"
 GRAPH_TIMEOUT="${GRAPH_TIMEOUT:-2400}"

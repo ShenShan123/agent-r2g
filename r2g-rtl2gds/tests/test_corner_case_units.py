@@ -300,6 +300,68 @@ def test_netlist_parses_named_connections_and_vocab(tmp_path):
     assert set(nets["n1"]) == {("g1", "ZN"), ("g2", "A")}
 
 
+def test_netlist_macro_gets_shared_macro_id_not_interleaved(tmp_path):
+    """netlist_graph's cell-type vocabulary must match the feature stage on a macro
+    design: the macro collapses to the shared MACRO id (= N_std + 1) and std-cell ids
+    are NOT shifted by it. Regression for the 2026-07-07 env-wiring bug — run_graphs.sh
+    exported R2G_SC_LIB_FILES=$LIB_FILES (macro libs folded in) and netlist_graph loaded
+    lib_db from that subset, so macros were either interleaved into the sorted std vocab
+    (drifting std ids) or dropped to UNKNOWN. The fix builds lib_db from the FULL liberty
+    but keys the id space on the STD-CELL-ONLY subset (failure-patterns.md #12/#19)."""
+    import os
+    import subprocess
+    import sys
+
+    torch = pytest.importorskip("torch")
+    skill_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    ng_py = os.path.join(skill_root, "scripts", "extract", "graph", "netlist_graph.py")
+
+    std = tmp_path / "std.lib"
+    std.write_text(textwrap.dedent("""
+        library (std) {
+          cell (INV_X1) {
+            area : 0.5;
+          }
+          cell (NAND2_X1) {
+            area : 0.8;
+          }
+        }
+    """))
+    macro = tmp_path / "macro.lib"
+    macro.write_text(textwrap.dedent("""
+        library (macro) {
+          cell (SRAM_8x4) {
+            area : 250.0;
+          }
+        }
+    """))
+    v = tmp_path / "n.v"
+    v.write_text(textwrap.dedent("""
+        module top (a, y);
+          input a; output y;
+          wire n1, n2;
+          INV_X1 g_inv ( .A(a), .ZN(n1) );
+          NAND2_X1 g_nand ( .A1(n1), .A2(a), .ZN(n2) );
+          SRAM_8x4 u_sram ( .clk(a), .rd_out(y) );
+        endmodule
+    """))
+    out = tmp_path / "netlist_graph.pt"
+    env = dict(os.environ)
+    # exactly what run_graphs.sh now exports: full liberty + std-cell-only subset
+    env["R2G_LIB_FILES"] = f"{std} {macro}"
+    env["R2G_SC_LIB_FILES"] = str(std)
+    env["R2G_PLATFORM"] = "nangate45"
+    r = subprocess.run([sys.executable, ng_py, str(v), str(out), "top"],
+                       env=env, capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    data = torch.load(str(out), weights_only=False)
+    idof = {data.cell_names[i]: int(data.x[i][0]) for i in range(len(data.cell_names))}
+    # std vocab sorted: INV_X1=0, NAND2_X1=1 ; UNKNOWN=2 ; MACRO=3
+    assert idof["g_inv"] == 0, "std-cell id drifted (macro interleaved into std vocab)"
+    assert idof["g_nand"] == 1, "std-cell id drifted (macro interleaved into std vocab)"
+    assert idof["u_sram"] == 3, "macro must map to the shared MACRO id, not UNKNOWN(2) or an interleaved std id"
+
+
 # --------------------------------------------------------------------------- #
 # compute_feature_stats: honesty gate (feature-side mirror of the label gate)    #
 # --------------------------------------------------------------------------- #

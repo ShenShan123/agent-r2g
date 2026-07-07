@@ -76,3 +76,41 @@ def test_summarize_nonnumeric_label_is_invalid(tmp_path):
     res = cls.summarize(str(tmp_path), "wirelength", cls.SPECS["wirelength"])
     assert res["status"] == "invalid"
     assert "no numeric values" in res["reason"]
+
+
+def test_summarize_all_nan_label_is_invalid_not_ok(tmp_path):
+    # float("nan") does NOT raise, so an all-NaN label column previously sailed past
+    # the honesty gate (status 'ok' with NaN summary stats) and json.dump emitted
+    # invalid-JSON `NaN`. It must read as 'invalid' and the report must be strict JSON.
+    (tmp_path / "wirelength.csv").write_text(
+        "Design,Net,NetType,WireLength_um,label,mask_wl\n"
+        "d,n1,SIGNAL,3.0,nan,true\n"
+        "d,n2,SIGNAL,5.0,NaN,true\n"
+    )
+    res = cls.summarize(str(tmp_path), "wirelength", cls.SPECS["wirelength"])
+    assert res["status"] == "invalid"
+    assert "no numeric values" in res["reason"]
+    out = tmp_path / "labels_stats.json"
+    cls.build_report(str(tmp_path), str(out), design="d", platform="nangate45")
+    # strict JSON (json.loads rejects a `NaN` token when allow_nan is disabled)
+    json.loads(out.read_text(), parse_constant=_reject_nan)
+
+
+def _reject_nan(tok):
+    raise AssertionError(f"non-finite JSON token emitted: {tok!r}")
+
+
+def test_summarize_new_congestion_two_vector_format(tmp_path):
+    # the c9b9e3a 2-vector congestion CSV: label (smoothed sqrt) + cell_congestion
+    # (smoothed util) + label_raw (raw sqrt). compute_label_stats reads label + the
+    # 'cell_congestion' metric — confirm the new header summarizes cleanly.
+    (tmp_path / "cell_congestion.csv").write_text(
+        "Design,Cell,cell_type,cell_congestion,label,label_raw\n"
+        "d,c1,INV_X1,0.10,0.31,0.22\n"
+        "d,c2,NAND2_X1,0.20,0.44,0.40\n"
+    )
+    res = cls.summarize(str(tmp_path), "congestion", cls.SPECS["congestion"])
+    assert res["status"] == "ok"
+    assert res["rows"] == 2
+    assert res["label"]["max"] > res["label"]["min"]
+    assert res["cell_congestion"]["min"] == 0.10

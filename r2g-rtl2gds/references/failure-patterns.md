@@ -3176,6 +3176,83 @@ live in SPECIALNETS) — the graph stage's net_type filter + inner joins drop th
   line (the dash-line branch already did), so `+ DIRECTION OUTPUT;` with no space would
   store `OUTPUT;`. DEF normally spaces the `;`; fixed for parity.
 
+### 19. Congestion 2-vector method (radius-4 Gaussian) merged without re-running the corner guardrail (2026-07-07)
+
+The congestion-label merge (`c9b9e3a`, "adapt `Congestion_Parse.py` method") replaced the retired
+manual **3×3 (radius-1)** smoothing with a faithful port of the reference's scipy
+`gaussian_filter(util, sigma=1.0)` — a **radius = `int(4*sigma+0.5)` = 4** (9-tap) separable
+reflect convolution — and made `cell_congestion.csv` a **2-vector** per cell:
+
+- `cell_congestion = mean(gaussian_util)` (smoothed utilization),
+- `label           = mean(sqrt(gaussian_util))` (the canonical training target `graph_lib` gate `y1`
+  reads == reference `node_label[1]`),
+- `label_raw       = mean(sqrt(util))` (raw target == reference `node_label[0]`, new column),
+
+each averaged over the cell's **orientation-aware bbox** GCells (origin-GCell fallback when no cell
+`SIZE`). The port is correct: on sky130+nangate45 the pre-gaussian `util` and the label formula match
+the reference (verified <1e-8 on DMA_top/gcd/Md5Core), and the anisotropic `PITCH` trap is benign —
+sky130's only two-value-`PITCH` routing layer is `li1` (VERTICAL), where the reference's `split()[1]`
+and the port's per-direction x-pitch coincide.
+
+**The defect was process, not math:** the merge changed the kernel but did **not** re-run the
+corner-case guardrail, leaving `tests/test_corner_case_pipeline.py::test_congestion_label_is_sqrt_and_
+fill_is_empty` **RED on `main`**. That test baked in the *retired* radius-1 kernel's locality — it
+asserted a fill cell far from any wire has `cell_congestion == 0.0 ± 1e-9`. Under the wider radius-4
+kernel that is **false and correct**: the fixture's `i_fill` (GCell (4,4), STEP 2000) reads `0.0104`
+because the Gaussian spreads congestion in from routed GCells up to **4** cells away.
+
+**Fix (2026-07-07):** the test is renamed `test_congestion_two_vector_raw_and_smoothed` and now
+asserts the NEW semantics — `label_raw` is **exactly 0** for a cell whose own GCell carries no routed
+demand (raw, un-smoothed), while `cell_congestion` is **small-but-nonzero** from the radius-4 spread —
+turning a rotted assertion into a guardrail that actively documents the 2-vector method.
+
+**Two siblings to watch:**
+- `label == sqrt(cell_congestion)` holds **only when a cell's bbox is a single GCell** (the fixture
+  supplies no cell LEF, so every cell falls back to its origin GCell). For a **multi-GCell macro**
+  `mean(sqrt(g)) ≠ sqrt(mean(g))` (Jensen) — do NOT re-introduce that as a universal invariant.
+- `scipy` is **not** on the graph venv (the label stage's pure-python `gaussian_filter_2d` is the
+  whole point of having no runtime scipy dep), so `test_gaussian_matches_scipy` **SKIPS** on this
+  machine — the pure-python↔scipy bit-match claim is asserted only where a scipy env exists. Run it
+  under a scipy python after any change to `gaussian_filter_2d`/`_reflect_index`/`_gaussian_weights`.
+
+**Lesson:** an extractor-semantics change MUST re-run `test_corner_case_pipeline.py` (5c of
+`/r2g-debug`) in the same commit — a guardrail that isn't re-run rots into either a CI blocker or a
+`-k`'d vacuous test. See `/r2g-debug` Step 5c.
+
+**Fallout fixed in the same 2026-07-07 audit (the merge changed one extractor; three consumers rotted):**
+
+- **`tools/verify_graph_dataset.py` — the ground-truth harness itself false-FAILed every correct
+  new-method build.** Its independent congestion recompute (`gaussian(util, x//gs, y//gs)`) used the
+  *retired* radius-1 (3×3), zero-boundary, single-origin-GCell kernel, and it asserted
+  `label == sqrt(cell_congestion)` for ALL cells. Both are false under the new radius-4 separable
+  reflect Gaussian averaged over the cell's bbox (`mean(sqrt(g)) != sqrt(mean(g))` by Jensen). Measured:
+  292/400 cells "mismatched" on a correct `aes_core` build; DMA_fsm went 83/85 → exit 1. A verifier that
+  false-reds correct output is worse than none — the rational response is to mute it, and then real
+  regressions sail through; `--batch` reporting the whole corpus red also *masks* real failures. Fixed:
+  the recompute is now an independent radius-4 separable REFLECT Gaussian (`dense_gaussian_r4`) over a
+  dense grid, averaged over each cell's orientation-aware bbox (`_lef_macro_sizes` from SC_LEF +
+  ADDITIONAL_LEFS), checking all three columns (`cell_congestion`, `label`, `label_raw`); the demand/util
+  grid stays re-derived in `read_def_truth` so a transpose/dbu/capacity bug still shows. Now 86/86 on
+  DMA_fsm and the three congestion checks PASS on `aes_core` (its stale 2026-07-05 `.pt` still — correctly
+  — fails the tensor checks). Helpers pinned in `test_verify_graph_dataset_helpers.py`.
+- **`run_graphs.sh` + `netlist_graph.py` — netlist cell-type vocabulary diverged from the feature stage
+  on macro designs (the #12 class, re-opened).** `run_graphs.sh` exported only
+  `R2G_SC_LIB_FILES="$LIB_FILES"` (the FULL list, macro libs folded in) and `netlist_graph.py` loaded its
+  liberty DB from that subset, so `build_runtime_map` interleaved each macro into the sorted std-cell
+  vocabulary (drifting every std id after it) — or, loaded std-only, dropped macros to UNKNOWN. Latent on
+  pure-std-cell designs (LIB_FILES == std libs) but wrong on any fakeram/macro design. Fixed to mirror
+  `nodes_gate.py`: `run_graphs.sh` now exports BOTH `R2G_LIB_FILES` (full) and `R2G_SC_LIB_FILES`
+  (std-cell-only subset), and `netlist_graph.py` builds `lib_db` from the full liberty but keys the id
+  space on the std-only subset → macros get the shared MACRO id, std ids match the b–f feature graphs.
+  Regression: `test_corner_case_units.py::test_netlist_macro_gets_shared_macro_id_not_interleaved`.
+- **`compute_label_stats.py` / `compute_feature_stats.py` — the honesty gate passed vacuously on an
+  all-NaN column.** `float("nan")` does NOT raise, so `_col_floats` returned a non-empty NaN list: the
+  label gate reported `status:"ok"` with NaN summary stats and `json.dump` emitted invalid-JSON `NaN`
+  tokens. Latent today (the wirelength/timing/irdrop extractors guard against NaN) but a hole in the
+  stated backstop. Fixed: `_col_floats` drops NaN (`v == v`), so an all-NaN column reads as "no numeric
+  values" → `invalid`, and the report stays strict JSON. Regression:
+  `test_compute_label_stats.py::test_summarize_all_nan_label_is_invalid_not_ok`.
+
 ### Corner-case verification infrastructure (2026-07-06)
 
 The bugs above (and the 2026-07-05 batch) live in code paths the REAL nangate45 designs

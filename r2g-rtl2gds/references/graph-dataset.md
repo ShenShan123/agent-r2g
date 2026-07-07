@@ -103,6 +103,16 @@ expected-NaN counts + sampled values for every y slot, node_name order,
 global_feat, netlist-graph counts vs an independent regex, manifest
 consistency, and physical-range sanity.
 
+The **congestion** recompute (2026-07-07) reproduces the 2-vector method exactly:
+an independent radius-4 separable REFLECT Gaussian (`dense_gaussian_r4`) over the
+dense util grid, averaged over each cell's orientation-aware bbox GCells
+(`_lef_macro_sizes`), checking all three emitted columns
+(`cell_congestion`/`label`/`label_raw`). The demand/util grid it smooths is still
+re-derived from the raw DEF (`read_def_truth`), so a transpose/dbu/capacity bug in
+the extractor still surfaces as a mismatch. (The pre-2026-07-07 check used the
+retired radius-1 single-GCell kernel and a universal `label == sqrt(cell_congestion)`
+identity, both false under bbox averaging — see failure-patterns.md #19.)
+
 The 2026-07-06 wide-coverage extension additionally re-parses the RAW
 liberty/LEF/DEF with its own independent parsers (never `techlib`) and
 verifies CSV↔tool truth end-to-end: gate area/leakage/x/y/orientation,

@@ -366,14 +366,72 @@ def resolve_platform_files(case_dir):
     return out
 
 
-def gaussian(grid_util, gx, gy, radius=1, sigma=1.0):
-    ws = wsum = 0.0
-    for dx in range(-radius, radius + 1):
-        for dy in range(-radius, radius + 1):
-            w = math.exp(-((dx * dx + dy * dy) / (2.0 * sigma * sigma)))
-            ws += w * grid_util.get((gx + dx, gy + dy), 0.0)
-            wsum += w
-    return ws / wsum if wsum else 0.0
+def _lef_macro_sizes(lef_paths):
+    """``{macro_name: (w_um, h_um)}`` from LEF ``SIZE w BY h`` lines — an
+    independent (non-techlib) parse of the std-cell + macro LEFs, so the
+    congestion recompute below can reproduce the extractor's orientation-aware
+    bbox mapping. Keyed by the RAW master name (matches the DEF master lookup)."""
+    sizes = {}
+    for lef in lef_paths:
+        if not lef or not os.path.isfile(lef):
+            continue
+        cur = None
+        for line in open(lef, errors="ignore"):
+            t = line.replace(";", " ").split()
+            if not t:
+                continue
+            if t[0] == "MACRO" and len(t) >= 2:
+                cur = t[1]
+            elif cur and t[0] == "SIZE":
+                try:
+                    by = t.index("BY")
+                    sizes[cur] = (float(t[by - 1]), float(t[by + 1]))
+                except (ValueError, IndexError):
+                    pass
+            elif cur and t[0] == "END" and len(t) >= 2 and t[1] == cur:
+                cur = None
+    return sizes
+
+
+def _reflect(p, n):
+    """scipy 'reflect' boundary index: (d c b a | a b c d | d c b a)."""
+    if n == 1:
+        return 0
+    period = 2 * n
+    r = p % period
+    if r < 0:
+        r += period
+    return r if r < n else period - 1 - r
+
+
+def dense_gaussian_r4(util, gxn, gyn, sigma=1.0, truncate=4.0):
+    """Independent radius-4 separable REFLECT-boundary Gaussian over a dense
+    ``gxn x gyn`` grid — a clean-room reimplementation of the scipy
+    ``gaussian_filter(sigma=1.0)`` that ``extract_congestion.py`` ports
+    (radius = int(4*sigma+0.5) = 4, axis-0 then axis-1). Used ONLY to VERIFY that
+    extractor; the demand/util grid it smooths is re-derived independently in
+    read_def_truth, so a transpose/dbu/capacity bug still shows as a mismatch."""
+    radius = int(truncate * sigma + 0.5)
+    w = [math.exp(-0.5 * (k * k) / (sigma * sigma)) for k in range(-radius, radius + 1)]
+    s = sum(w)
+    w = [x / s for x in w]
+    tmp = [[0.0] * gyn for _ in range(gxn)]
+    for y in range(gyn):
+        for x in range(gxn):
+            acc = 0.0
+            for k, wk in enumerate(w):
+                acc += wk * util[_reflect(x + k - radius, gxn)][y]
+            tmp[x][y] = acc
+    out = [[0.0] * gyn for _ in range(gxn)]
+    for x in range(gxn):
+        row = tmp[x]
+        orow = out[x]
+        for y in range(gyn):
+            acc = 0.0
+            for k, wk in enumerate(w):
+                acc += wk * row[_reflect(y + k - radius, gyn)]
+            orow[y] = acc
+    return out
 
 
 def extended_checks(case, design, feat, labs, views, b):
@@ -600,34 +658,86 @@ def extended_checks(case, design, feat, labs, views, b):
                   abs(float(row["V_nom"]) - lib_vnoms[0]) <= 1e-6,
                   f"csv={row['V_nom']} lib={lib_vnoms[0]}")
 
-    # ---- Y congestion: full independent recompute, sampled cells ----
+    # ---- Y congestion: full independent recompute matching extract_congestion's
+    # PORTED 2-vector method (commit c9b9e3a) — a radius-4 separable REFLECT
+    # Gaussian over the dense util grid, averaged over each cell's orientation-aware
+    # bbox GCells (origin-GCell fallback when the master SIZE is unknown). Verifies
+    # ALL THREE emitted columns: cell_congestion = mean(gaussian_util),
+    # label = mean(sqrt(gaussian_util)), label_raw = mean(sqrt(util)). demand_h/v are
+    # re-derived in read_def_truth, so a transpose/dbu/gcell/capacity bug still shows.
+    # (The pre-2026-07-07 check used a radius-1 single-origin-GCell gaussian and a
+    # universal label==sqrt(cell_congestion) identity — both false under the new
+    # bbox averaging (mean(sqrt) != sqrt(mean)); see failure-patterns.md #19.) ----
     gs_x, gs_y = dt["gstep"]
-    if gs_x and gs_y and layers:
+    die = dt["diearea"]
+    if gs_x and gs_y and layers and die:
         gw, gh = gs_x / dt["dbu"], gs_y / dt["dbu"]
         cap_h = sum(gw * (gh / p) for p, d in layers.values() if d == "HORIZONTAL" and p > 0)
         cap_v = sum(gh * (gw / p) for p, d in layers.values() if d == "VERTICAL" and p > 0)
-        util = {}
+        gxn = max(1, math.ceil((die[2] - die[0]) / gs_x))
+        gyn = max(1, math.ceil((die[3] - die[1]) / gs_y))
+        udense = [[0.0] * gyn for _ in range(gxn)]
         for g in set(dt["demand_h"]) | set(dt["demand_v"]):
-            hu = dt["demand_h"].get(g, 0.0) / cap_h if cap_h else 0.0
-            vu = dt["demand_v"].get(g, 0.0) / cap_v if cap_v else 0.0
-            util[g] = max(hu, vu)
+            gx, gy = g
+            if 0 <= gx < gxn and 0 <= gy < gyn:
+                hu = dt["demand_h"].get(g, 0.0) / cap_h if cap_h else 0.0
+                vu = dt["demand_v"].get(g, 0.0) / cap_v if cap_v else 0.0
+                udense[gx][gy] = max(hu, vu)
+        gdense = dense_gaussian_r4(udense, gxn, gyn)
+        sizes = _lef_macro_sizes([plat.get("SC_LEF", "")] + plat.get("ADDITIONAL_LEFS", "").split())
         cong = pd.read_csv(os.path.join(labs, "cell_congestion.csv"))
         if "Design" in cong.columns:
             cong = cong[cong["Design"] == design]
-        bad_c = checked_c = 0
+        has_raw = "label_raw" in cong.columns
+        bad_c = bad_l = bad_r = checked_c = 0
         for _, row in cong.head(400).iterrows():
             comp = dt["comps"].get(row["Cell"])
             if not comp or comp["x"] is None:
                 continue
-            exp = gaussian(util, comp["x"] // gs_x, comp["y"] // gs_y)
+            ox, oy = comp["x"], comp["y"]
+            wh = sizes.get(str(comp["master"]))
+            if wh:
+                o = (comp["orient"] or "N").upper()
+                if "N" in o or "S" in o:      # mirror extract_congestion.cell_bbox_dbu
+                    bw, bh = wh[0], wh[1]
+                elif "W" in o or "E" in o:
+                    bw, bh = wh[1], wh[0]
+                else:
+                    bw, bh = wh[0], wh[1]
+                gx0 = min(max(int(ox) // gs_x, 0), gxn - 1)
+                gx1 = min(max(int(ox + bw * dt["dbu"]) // gs_x, 0), gxn - 1)
+                gy0 = min(max(int(oy) // gs_y, 0), gyn - 1)
+                gy1 = min(max(int(oy + bh * dt["dbu"]) // gs_y, 0), gyn - 1)
+            else:
+                gx0 = gx1 = min(max(ox // gs_x, 0), gxn - 1)
+                gy0 = gy1 = min(max(oy // gs_y, 0), gyn - 1)
+            sg = ssg = ssu = 0.0
+            cnt = 0
+            for gx in range(gx0, gx1 + 1):
+                for gy in range(gy0, gy1 + 1):
+                    u = udense[gx][gy]
+                    g = gdense[gx][gy]
+                    sg += g
+                    ssg += math.sqrt(g) if g > 0 else 0.0
+                    ssu += math.sqrt(u) if u > 0 else 0.0
+                    cnt += 1
+            if not cnt:
+                continue
             checked_c += 1
-            if abs(exp - float(row["cell_congestion"])) > max(1e-6, 0.001 * exp):
+            tol = lambda e: max(1e-6, 0.003 * e)
+            if abs(sg / cnt - float(row["cell_congestion"])) > tol(sg / cnt):
                 bad_c += 1
-        check("ext.congestion == independent demand/capacity recompute",
+            if abs(ssg / cnt - float(row["label"])) > tol(ssg / cnt):
+                bad_l += 1
+            if has_raw and abs(ssu / cnt - float(row["label_raw"])) > tol(ssu / cnt):
+                bad_r += 1
+        check("ext.congestion cell_congestion == independent radius-4 bbox recompute",
               checked_c > 0 and bad_c == 0, f"{bad_c}/{checked_c} mismatched")
-        lab_sq = (pd.to_numeric(cong["label"]) ** 2
-                  - pd.to_numeric(cong["cell_congestion"])).abs().max()
-        check("ext.congestion label == sqrt(cell_congestion)", lab_sq <= 1e-6, lab_sq)
+        check("ext.congestion label == mean sqrt(gaussian_util) over bbox",
+              checked_c > 0 and bad_l == 0, f"{bad_l}/{checked_c} mismatched")
+        if has_raw:
+            check("ext.congestion label_raw == mean sqrt(util) over bbox",
+                  checked_c > 0 and bad_r == 0, f"{bad_r}/{checked_c} mismatched")
 
     # ---- Y wirelength: sampled nets vs independent DEF route walk.
     # Raw um lives in WireLength_um; label is the log1p transform of it. ----

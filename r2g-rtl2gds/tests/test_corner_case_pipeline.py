@@ -182,16 +182,35 @@ def test_wirelength_values_and_rect_stripped(built):
 
 
 # ---------------------------------------------------------------------------- #
-# congestion labels (per-cell; label = sqrt(cell_congestion))                    #
+# congestion labels — the 2-vector method (label_raw = raw, label = smoothed)    #
 # ---------------------------------------------------------------------------- #
-def test_congestion_label_is_sqrt_and_fill_is_empty(built):
+def test_congestion_two_vector_raw_and_smoothed(built):
+    """The congestion extractor (Congestion_Parse.py port, commit c9b9e3a) emits
+    a 2-vector per cell, each averaged over the cell's bbox GCells:
+        cell_congestion = mean(gaussian_util)         (smoothed utilization)
+        label           = mean(sqrt(gaussian_util))   (== ref node_label[1])
+        label_raw       = mean(sqrt(util))            (== ref node_label[0], raw)
+    No cell LEF is supplied by this fixture, so every cell falls back to its single
+    ORIGIN GCell -> the bbox is one GCell -> label == sqrt(cell_congestion) exactly.
+
+    i_fill sits at (9000,9000) -> GCell (4,4) at STEP 2000, which no routed wire
+    crosses, so its RAW congestion (label_raw) is EXACTLY 0. Its SMOOTHED
+    cell_congestion is small-but-nonzero because the scipy-matched Gaussian
+    (sigma=1.0, radius=int(4*sigma+0.5)=4) spreads congestion in from routed
+    GCells up to 4 cells away — WIDER than the retired 3x3 (radius-1) kernel, whose
+    locality this test previously (wrongly) assumed. The merge that changed the
+    kernel must re-run this guardrail; see failure-patterns.md
+    "Congestion 2-vector method (radius-4 Gaussian)"."""
     import math
     c = cs.rows_by(built["cell_congestion.csv"], "Cell")
     assert len(built["cell_congestion.csv"]) == 8  # one row per placed component
     for r in built["cell_congestion.csv"]:
+        # single-GCell fallback => label is the sqrt of the smoothed value
         assert float(r["label"]) == pytest.approx(math.sqrt(float(r["cell_congestion"])), abs=1e-6)
-    # i_fill sits at (9000,9000), far from every routed wire -> ~zero congestion
-    assert float(c["i_fill"]["cell_congestion"]) == pytest.approx(0.0, abs=1e-9)
+    # i_fill's own GCell carries no routed demand -> RAW congestion is exactly 0 ...
+    assert float(c["i_fill"]["label_raw"]) == pytest.approx(0.0, abs=1e-12)
+    # ... but the radius-4 Gaussian spreads a small SMOOTHED value into it (>0).
+    assert 0.0 < float(c["i_fill"]["cell_congestion"]) < 0.1
 
 
 # ---------------------------------------------------------------------------- #

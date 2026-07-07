@@ -204,9 +204,19 @@ def main():
     design = sys.argv[3] if len(sys.argv) > 3 else os.path.splitext(os.path.basename(verilog))[0]
 
     platform = os.environ.get("R2G_PLATFORM", "nangate45")
-    sc_libs = os.environ.get("R2G_SC_LIB_FILES", os.environ.get("R2G_LIB_FILES", ""))
-    lib_db = load_liberty_db(sc_libs) if sc_libs.strip() else {"cells": {}}
-    sc_lib_list = [t for t in sc_libs.replace(":", " ").split() if t]
+    # Match the feature stage (nodes_gate.py): build the cell-type map from the FULL
+    # liberty (std + per-design macro libs) but key the id space on the STD-CELL-ONLY
+    # subset. That way macros collapse to the shared MACRO id (they are known nodes,
+    # not UNKNOWN) instead of being interleaved into the sorted std vocabulary — which
+    # would drift std-cell ids off the b-f feature graphs on macro designs. Loading
+    # lib_db from R2G_SC_LIB_FILES alone dropped every macro cell (-> UNKNOWN); using
+    # R2G_SC_LIB_FILES as BOTH source and subset interleaved them. Both are wrong.
+    # (failure-patterns.md "Dataset-Extraction Silent-Value Defects" #12/#19)
+    lib_files = os.environ.get("R2G_LIB_FILES", "")
+    sc_libs = os.environ.get("R2G_SC_LIB_FILES", "")
+    lib_src = lib_files.strip() or sc_libs.strip()   # full lib when available
+    lib_db = load_liberty_db(lib_src) if lib_src else {"cells": {}}
+    sc_lib_list = [t for t in (sc_libs or lib_files).replace(":", " ").split() if t]
     type_map = resolve_cell_type_map(platform, lib_db, sc_lib_list or None)
 
     print(f"[netlist_graph] parsing {verilog}")

@@ -148,6 +148,33 @@ END DESIGN
     assert t["tracks"] == {"metal2": 50, "metal1": 60}
 
 
-def test_gaussian_neutral_on_uniform_grid():
-    util = {(x, y): 0.5 for x in range(5) for y in range(5)}
-    assert vgd.gaussian(util, 2, 2) == pytest.approx(0.5)
+def test_dense_gaussian_r4_neutral_on_uniform_grid():
+    # a radius-4 REFLECT-boundary separable gaussian preserves a constant field
+    # (normalized weights sum to 1; reflect duplicates the constant at the edges)
+    grid = [[0.5] * 6 for _ in range(7)]  # asymmetric 7x6
+    out = vgd.dense_gaussian_r4(grid, 7, 6)
+    assert all(abs(out[x][y] - 0.5) < 1e-12 for x in range(7) for y in range(6))
+
+
+def test_dense_gaussian_r4_spreads_a_spike_symmetrically():
+    # a single spike well away from the boundary spreads to its 4-neighbourhood and
+    # conserves total mass (a proper normalized smoother)
+    n = 11
+    grid = [[0.0] * n for _ in range(n)]
+    grid[5][5] = 1.0
+    out = vgd.dense_gaussian_r4(grid, n, n)
+    assert out[5][5] > out[5][6] > out[5][7] > 0.0          # decays with distance
+    assert out[5][6] == pytest.approx(out[6][5], abs=1e-12)  # isotropic
+    total = sum(out[x][y] for x in range(n) for y in range(n))
+    assert total == pytest.approx(1.0, abs=1e-9)             # mass-conserving
+
+
+def test_lef_macro_sizes_parses_size_by(tmp_path):
+    lef = tmp_path / "cells.lef"
+    lef.write_text(
+        "MACRO INV_X1\n  SIZE 0.5 BY 2.72 ;\nEND INV_X1\n"
+        "MACRO SRAM_8x4\n  SIZE 40.0 BY 60.5 ;\nEND SRAM_8x4\n")
+    sizes = vgd._lef_macro_sizes([str(lef)])
+    assert sizes["INV_X1"] == pytest.approx((0.5, 2.72))
+    assert sizes["SRAM_8x4"] == pytest.approx((40.0, 60.5))
+    assert vgd._lef_macro_sizes(["/nonexistent.lef"]) == {}

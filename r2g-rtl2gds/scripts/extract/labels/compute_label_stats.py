@@ -54,9 +54,15 @@ def _col_floats(rows, col):
     out = []
     for row in rows:
         try:
-            out.append(float(row[col]))
+            v = float(row[col])
         except (ValueError, KeyError, TypeError):
-            pass
+            continue
+        # Drop NaN (NaN != NaN): float("nan") does NOT raise, so without this an
+        # all-NaN label column sailed past the honesty gate below (status 'ok' with
+        # NaN summary stats) AND json.dump emitted invalid-JSON `NaN` tokens. An
+        # all-NaN column must read as "no numeric values" -> 'invalid' (2026-07-07).
+        if v == v:
+            out.append(v)
     return out
 
 
