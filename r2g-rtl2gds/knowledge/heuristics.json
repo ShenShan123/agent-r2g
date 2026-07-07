@@ -1,9 +1,9 @@
 {
-  "generated_at": "2026-07-07T06:32:13-07:00",
-  "source_run_count": 3042,
+  "generated_at": "2026-07-07T10:06:27-07:00",
+  "source_run_count": 3066,
   "min_successful_runs_required": 3,
   "schema_version": 3,
-  "generation": 5097,
+  "generation": 5125,
   "families": {
     "rv32i": {
       "platforms": {
@@ -97,11 +97,11 @@
                     "median_reduction_pct": 1.0
                   }
                 },
-                "n_sessions": 45
+                "n_sessions": 47
               },
               "null": {
                 "strategies": {},
-                "n_sessions": 63
+                "n_sessions": 65
               }
             },
             "lvs": {
@@ -206,9 +206,9 @@
           }
         },
         "sky130hd": {
-          "sample_size": 34,
-          "success_count": 32,
-          "success_rate": 0.9411764705882353,
+          "sample_size": 38,
+          "success_count": 36,
+          "success_rate": 0.9473684210526315,
           "core_utilization": {
             "min_safe": 17.0,
             "max_safe": 25.0,
@@ -242,7 +242,7 @@
             "drc": {
               "null": {
                 "strategies": {},
-                "n_sessions": 19
+                "n_sessions": 23
               }
             },
             "orfs_stage": {
@@ -503,8 +503,8 @@
           }
         },
         "sky130hd": {
-          "sample_size": 18,
-          "success_count": 18,
+          "sample_size": 22,
+          "success_count": 22,
           "success_rate": 1.0,
           "core_utilization": {
             "min_safe": 12.0,
@@ -551,7 +551,7 @@
               },
               "null": {
                 "strategies": {},
-                "n_sessions": 11
+                "n_sessions": 15
               }
             },
             "lvs": {
@@ -1794,9 +1794,9 @@
           }
         },
         "sky130hd": {
-          "sample_size": 27,
-          "success_count": 26,
-          "success_rate": 0.9629629629629629,
+          "sample_size": 31,
+          "success_count": 30,
+          "success_rate": 0.967741935483871,
           "core_utilization": {
             "min_safe": 12.0,
             "max_safe": 25.0,
@@ -1830,7 +1830,7 @@
             "drc": {
               "null": {
                 "strategies": {},
-                "n_sessions": 19
+                "n_sessions": 23
               },
               "m3.2": {
                 "strategies": {
@@ -4728,9 +4728,9 @@
           }
         },
         "sky130hd": {
-          "sample_size": 13,
+          "sample_size": 17,
           "success_count": 6,
-          "success_rate": 0.46153846153846156,
+          "success_rate": 0.35294117647058826,
           "core_utilization": {
             "min_safe": 15.0,
             "max_safe": 25.0,
@@ -6741,9 +6741,9 @@
           }
         },
         "sky130hd": {
-          "sample_size": 120,
+          "sample_size": 128,
           "success_count": 109,
-          "success_rate": 0.9083333333333333,
+          "success_rate": 0.8515625,
           "core_utilization": {
             "min_safe": 8.0,
             "max_safe": 25.0,
@@ -11041,7 +11041,7 @@
         "wishbone_master",
         "zipdma"
       ],
-      "n_sessions": 2217,
+      "n_sessions": 2233,
       "strategies": {
         "lvs_resolve_unknown": {
           "attempts": 7,
