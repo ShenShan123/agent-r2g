@@ -67,10 +67,10 @@ class TechProfile:
         ``_PLATFORM_TAP_EXTRA`` from ``techlib.liberty`` / ``features/lib_db.py``.
         (The ``R2G_TAP_PATTERNS`` env override is intentionally NOT baked in — it is a
         runtime override, not a per-platform constant.)
-      * ``cell_type_strategy`` — ``"curated"`` for nangate45 (uses the curated
-        ``NANGATE45_CELL_TYPE_MAPPING``), ``"runtime"`` for every other platform (a map
-        built at runtime from the resolved liberty). Mirrors
-        ``techlib.cell_types.resolve_cell_type_map``.
+      * ``cell_type_strategy`` — ``"runtime"`` on EVERY platform since the 2026-07-06
+        curated-map retirement (the frozen nangate45 map had drifted 22 masters behind
+        the deployed liberty). Mirrors ``techlib.cell_types.resolve_cell_type_map``;
+        the ``"curated"`` literal stays in the type only for old readers of the field.
       * ``fallback_routing_layers`` — congestion's nangate45 ``DEFAULT_LAYER_INFO``
         (per-layer pitch/direction), used when a tech LEF yields no routing layers.
     """
@@ -119,9 +119,8 @@ def _tap_patterns_for(platform: str) -> Tuple[str, ...]:
     return tuple([_BASE_TAP_PATTERN] + list(_PLATFORM_TAP_EXTRA.get(platform, [])))
 
 
-# The six ORFS platforms this checkout ships. nangate45 uses the curated cell-type map
-# (cell_type_strategy="curated"), mirroring resolve_cell_type_map's
-# `(platform or "asap7").lower() == "nangate45"` test; everyone else is "runtime".
+# The six ORFS platforms this checkout ships. All use the runtime liberty-derived
+# cell-type map (nangate45's curated map retired 2026-07-06 — see techlib.cell_types).
 _ORFS_PLATFORMS = ("nangate45", "sky130hd", "sky130hs", "asap7", "gf180", "ihp-sg13g2")
 
 
@@ -132,7 +131,7 @@ def _build_profile(platform: str) -> TechProfile:
         supply_voltage=float(sv_str),
         supply_voltage_str=sv_str,
         tap_patterns=_tap_patterns_for(platform),
-        cell_type_strategy="curated" if platform == "nangate45" else "runtime",
+        cell_type_strategy="runtime",
         # Per-profile copy of techlib.lef.DEFAULT_LAYER_INFO (congestion's nangate
         # fallback) — equal value, no shared inner-dict aliasing.
         fallback_routing_layers=_copy_layer_info(lef.DEFAULT_LAYER_INFO),
@@ -150,7 +149,7 @@ def get_profile(name: str) -> TechProfile:
 
       * ``supply_voltage = 1.0`` / ``supply_voltage_str = "1.0"`` — shell's ``*)``.
       * ``tap_patterns = ("TAP",)``      — lib_db's base ``["TAP"]`` (no per-platform extras).
-      * ``cell_type_strategy = "runtime"`` — resolve_cell_type_map's non-nangate path.
+      * ``cell_type_strategy = "runtime"`` — the only strategy since 2026-07-06.
       * ``fallback_routing_layers``      — the same nangate ``DEFAULT_LAYER_INFO``.
 
     The returned profile's ``name`` is the lower-cased input so callers can tell which

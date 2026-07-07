@@ -25,6 +25,24 @@ SUMMARY_COLS = {
 # graph-level metadata scalars surfaced directly (single-row CSV).
 METADATA_SCALARS = ["num_cells", "num_nets", "num_ios", "avg_fanout", "C_total"]
 
+# Honesty gate: the identity/key columns each feature CSV MUST carry. A CSV that
+# has rows but is missing these is NOT a usable feature set (a raw/wrong-schema
+# dump at the canonical path, or a stage killed mid-write) and is reported
+# "invalid" instead of "ok" — the feature-side mirror of compute_label_stats.py's
+# gate (the 2026-07-05 irdrop raw-dump incident, but for the X side). Without
+# this, a truncated nodes_gate.csv silently summarized as "ok" and the graph
+# built on it lost features with no signal (2026-07-06 nangate45 audit).
+REQUIRED_COLS = {
+    "metadata": ["graph_id", "num_cells", "num_nets", "num_ios", "dbu_unit"],
+    "nodes_gate": ["graph_id", "inst_name", "master", "cell_type_id", "cell_area", "cell_power"],
+    "nodes_net": ["graph_id", "net_name", "net_type_id", "fanout", "pin_count", "num_layer"],
+    "nodes_iopin": ["graph_id", "iopin_name", "net_name", "pin_direction_id"],
+    "nodes_pin": ["graph_id", "inst_name", "pin_name", "pin_type_id", "sum_pin_cap_fF"],
+    "edges_gate_pin": ["graph_id", "inst_name", "pin_name", "cell_type_id", "pin_type_id"],
+    "edges_pin_net": ["graph_id", "inst_name", "pin_name", "net_name", "net_type_id"],
+    "edges_iopin_net": ["graph_id", "iopin_name", "net_name", "net_type_id"],
+}
+
 ORDER = ["metadata", "nodes_gate", "nodes_net", "nodes_iopin", "nodes_pin",
          "edges_gate_pin", "edges_pin_net", "edges_iopin_net"]
 
@@ -70,18 +88,36 @@ def _col_floats(rows, col):
 
 def _read_rows(path):
     if not os.path.exists(path):
-        return None, "csv missing"
+        return None, [], "csv missing"
     with open(path, newline="") as f:
-        rows = list(csv.DictReader(f))
+        reader = csv.DictReader(f)
+        header = reader.fieldnames or []
+        rows = list(reader)
     if not rows:
-        return None, "csv empty"
-    return rows, None
+        return None, header, "csv empty"
+    return rows, header, None
 
 
 def summarize(features_dir, name):
-    rows, reason = _read_rows(os.path.join(features_dir, f"{name}.csv"))
+    rows, header, reason = _read_rows(os.path.join(features_dir, f"{name}.csv"))
     if rows is None:
         return {"status": "skipped", "reason": reason}
+
+    # Honesty gate (mirrors compute_label_stats.py): rows exist, but is this a
+    # real feature set? A missing identity column == raw/wrong-schema dump; a
+    # required column left None on some row == a truncated/interrupted write.
+    required = REQUIRED_COLS.get(name, [])
+    missing = [c for c in required if c not in header]
+    if missing:
+        return {"status": "invalid", "rows": len(rows),
+                "reason": (f"missing required column(s) {missing} — raw/unprocessed "
+                           f"or wrong-schema csv (header: {list(header)[:6]})")}
+    truncated = sum(1 for r in rows if any(r.get(c) in (None, "") for c in required))
+    if truncated:
+        return {"status": "invalid", "rows": len(rows),
+                "reason": (f"{truncated} row(s) missing a required column value — "
+                           f"interrupted/partial write")}
+
     res = {"status": "ok", "rows": len(rows)}
     if name == "metadata":
         first = rows[0]
@@ -125,6 +161,9 @@ def main():
     spef_present = _parse_spef_arg(sys.argv[5]) if len(sys.argv) > 5 else None
     report = build_report(features_dir, out_path, design, platform, spef_present)
     ok = sum(1 for v in report["features"].values() if v["status"] == "ok")
+    for fname, v in report["features"].items():
+        if v["status"] == "invalid":
+            sys.stderr.write(f"WARNING: feature set '{fname}' is INVALID: {v['reason']}\n")
     print(f"Wrote {out_path}: {ok}/{len(report['features'])} feature sets present")
 
 

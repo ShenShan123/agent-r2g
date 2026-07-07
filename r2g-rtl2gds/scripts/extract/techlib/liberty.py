@@ -42,6 +42,38 @@ def _norm_key(s):
     return _strip_name_token(s).upper()
 
 
+def norm_cell_key(s):
+    """Public master-name canonicalizer (upper-cased, quote/backslash-stripped).
+
+    The same normalization the cells dict is keyed on — use this when comparing a
+    DEF master name against key sets returned by ``macro_cell_keys``.
+    """
+    return _norm_key(s)
+
+
+def macro_cell_keys(lib_files, sc_lib_files):
+    """Normalized cell keys that come from macro/extra liberty files ONLY.
+
+    ``lib_files`` is the full resolved liberty list; ``sc_lib_files`` the std-cell
+    subset (run_features.sh exports both as R2G_LIB_FILES / R2G_SC_LIB_FILES).
+    The difference is the per-design macro libs (e.g. fakeram45_*), whose cells
+    are the design's macros — the source for ``connects_macro_flag``. Returns an
+    empty set for pure std-cell designs (no extra libs), where flag 0 is correct.
+    """
+    def _as_list(paths):
+        if paths is None:
+            return []
+        if isinstance(paths, str):
+            return [t for t in paths.replace(":", " ").split() if t]
+        return [p for p in paths if p]
+
+    sc = {os.path.abspath(p) for p in _as_list(sc_lib_files)}
+    extra = [p for p in _as_list(lib_files) if os.path.abspath(p) not in sc]
+    if not extra:
+        return set()
+    return set(load_liberty_db(extra).get("cells", {}).keys())
+
+
 def _sample_std(vals):
     if len(vals) < 2:
         return 0.0
@@ -109,7 +141,12 @@ def _merge_liberty_file(lib_path, db):
         if not line:
             continue
 
-        m_cap_unit = re.search(r"capacitive_load_unit\s*\(\s*([0-9eE+.\-]+)\s*,\s*([A-Za-z]+)\s*\)", line)
+        # The unit token may be QUOTED — sky130 writes
+        # `capacitive_load_unit(1.0000000000, "pf");`, nangate45 bare `(1,ff)`.
+        # Missing the quoted form left cap_scale_ff at 1.0 (no pf->ff scaling):
+        # every sky130 pin capacitance landed 1000x too small — the sibling of
+        # the direction/clock quoted-value bug (failure-patterns.md #5).
+        m_cap_unit = re.search(r"capacitive_load_unit\s*\(\s*([0-9eE+.\-]+)\s*,\s*\"?([A-Za-z]+)\"?\s*\)", line)
         if m_cap_unit:
             try:
                 mag = float(m_cap_unit.group(1))
@@ -151,7 +188,14 @@ def _merge_liberty_file(lib_path, db):
             current_pin_depth = -1
 
         if current_cell is not None:
-            if re.match(r"(ff|latch)\s*\(", line):
+            # statetable(): clock-gate cells (nangate45 CLKGATE*/CLKGATETST*) hold
+            # state via a statetable group, not ff()/latch() (2026-07-06 audit F4).
+            # ff_bank()/latch_bank(): MULTIBIT sequential cells (asap7 ships 27 such
+            # libs, e.g. DFFHQNx*_ASAP7 -> ``ff_bank(...)``) — the plain ``ff|latch``
+            # regex missed them because ``ff`` is not followed by ``(`` in ``ff_bank(``.
+            # Longer alternatives listed first so the match is unambiguous
+            # (2026-07-06 nangate45 verification round, failure-patterns.md #15).
+            if re.match(r"(ff_bank|ff|latch_bank|latch|statetable)\s*\(", line):
                 current_cell["is_sequential"] = True
 
             if current_pin is None:
@@ -188,7 +232,14 @@ def _merge_liberty_file(lib_path, db):
                         except Exception:
                             pass
 
-            m_pin = re.match(r"pin\s*\(\s*([^)]+?)\s*\)\s*\{", line)
+            # bus()/bundle() groups are parsed exactly like pin() groups: macro
+            # liberty (fakeram45_*) declares direction/capacitance at the BUS
+            # level with NO per-bit pin() members, while the DEF connects per-bit
+            # (addr_in[3]). Storing the bus base name + the [idx]-fallback in
+            # get_pin_info make those lookups resolve; without this every macro
+            # bus pin classified 14/cap 0 (2026-07-06 nangate45 fakeram audit;
+            # failure-patterns.md "Dataset-Extraction Silent-Value Defects" #11).
+            m_pin = re.match(r"(?:pin|bus|bundle)\s*\(\s*([^)]+?)\s*\)\s*\{", line)
             if m_pin:
                 pin_name = _strip_name_token(m_pin.group(1))
                 current_pin = current_cell["pins"].setdefault(
@@ -204,16 +255,24 @@ def _merge_liberty_file(lib_path, db):
                 current_pin_depth = brace_depth + open_count
 
             if current_pin is not None:
-                m_dir = re.match(r"direction\s*:\s*([A-Za-z_]+)\s*;", line)
+                # Simple attribute values may be QUOTED (sky130hd/hs write
+                # `direction : "input";` and `clock : "true";`; ihp macro libs
+                # `clock : "true" ;`) — same class as the sky130 quoted-value
+                # bug (commit 363a8b2). The unquoted-only regexes here silently
+                # dropped direction on every sky130 std-cell pin (pin_type_id
+                # collapse + num_drivers/num_sinks undercount) and the clock
+                # flag on every sky130 DFF — see failure-patterns.md
+                # ("Label/feature extraction pitfalls", 2026-07-05).
+                m_dir = re.match(r'direction\s*:\s*"?([A-Za-z_]+)"?\s*;', line)
                 if m_dir:
                     current_pin["direction"] = m_dir.group(1).upper()
-                m_cap = re.match(r"capacitance\s*:\s*([0-9eE+.\-]+)\s*;", line)
+                m_cap = re.match(r'capacitance\s*:\s*"?([0-9eE+.\-]+)"?\s*;', line)
                 if m_cap:
                     try:
                         current_pin["capacitance"] = float(m_cap.group(1)) * db["cap_scale_ff"]
                     except Exception:
                         pass
-                m_max = re.match(r"max_capacitance\s*:\s*([0-9eE+.\-]+)\s*;", line)
+                m_max = re.match(r'max_capacitance\s*:\s*"?([0-9eE+.\-]+)"?\s*;', line)
                 if m_max:
                     try:
                         current_pin["max_capacitance"] = float(m_max.group(1)) * db["cap_scale_ff"]
@@ -222,7 +281,7 @@ def _merge_liberty_file(lib_path, db):
                 m_fn = re.match(r'function\s*:\s*"([^"]*)"\s*;', line)
                 if m_fn:
                     current_pin["function"] = m_fn.group(1)
-                if re.match(r"clock\s*:\s*true\s*;", line, flags=re.I):
+                if re.match(r'clock\s*:\s*"?true"?\s*;', line, flags=re.I):
                     current_pin["clock"] = True
 
         brace_depth += open_count - close_count
@@ -259,7 +318,19 @@ def get_cell_power(master_name, lib_db):
 def get_pin_info(master_name, pin_name, lib_db):
     pkey = _strip_name_token(pin_name)
     cell = lib_db.get("cells", {}).get(_norm_key(master_name), {})
-    return cell.get("pins", {}).get(pkey, {})
+    pins = cell.get("pins", {})
+    info = pins.get(pkey)
+    if info is not None:
+        return info
+    # Bus-member fallback: DEF/netlist pins are per-bit (`addr_in[3]`) while
+    # macro liberty declares attributes once at the bus() level (`bus(addr_in)`)
+    # — resolve the member to its bus base entry.
+    m_bus = re.match(r"^(.*)\[\d+\]$", pkey)
+    if m_bus:
+        info = pins.get(m_bus.group(1))
+        if info is not None:
+            return info
+    return {}
 
 
 def get_pin_direction(master_name, pin_name, lib_db):
@@ -276,6 +347,20 @@ def get_pin_cap_fF(master_name, pin_name, lib_db):
     if max_cap is not None and get_pin_direction(master_name, pin_name, lib_db) == "OUTPUT":
         return float(max_cap)
     return 0.0
+
+
+def get_pin_load_cap_fF(master_name, pin_name, lib_db):
+    """Pin *load* capacitance only — 0.0 for pins without a liberty ``capacitance``.
+
+    Unlike ``get_pin_cap_fF`` this NEVER falls back to an output pin's
+    ``max_capacitance`` (a drive *limit*, not a load). Summed per net for
+    ``sum_pin_cap_fF``, the fallback dominated the feature: measured on cordic
+    nangate45 net _0062_, the true load is 3.19 fF but the summed value came out
+    62.54 fF because NAND2_X1/ZN's max_capacitance (59.36 fF) was added in
+    (2026-07-05 fix).
+    """
+    cap = get_pin_info(master_name, pin_name, lib_db).get("capacitance")
+    return float(cap) if cap is not None else 0.0
 
 
 # Physical-only / well-tap cell detection. The "TAP" substring matches Nangate
@@ -367,7 +452,10 @@ def classify_pin_type(master_name, pin_name, lib_db, is_io=False):
         return 8
     if _looks_like_scan(n):
         return 9
-    if _looks_like_select(n):
+    # Select is an INPUT concept: nangate45 FA_X1/HA_X1 declare the SUM output as
+    # `pin (S) { direction : output }` — without the direction guard it lands on
+    # id 10 instead of 4 (2026-07-06 audit F3). MUX2_X1's S (input) still gets 10.
+    if _looks_like_select(n) and direction != "OUTPUT":
         return 10
     if direction == "INPUT":
         if n.startswith("A"):

@@ -19,6 +19,66 @@ skipped as library-pre-verified).
 
 ---
 
+## 2026-07-06 — nangate45 RTL→Graph verification round 2; 4 more extraction fixes + wide-coverage corner-case infra
+
+Re-verified the graph-dataset pipeline on **nangate45** and built the corner-case verification
+infrastructure the earlier rounds lacked. Branch `feat/rtl2graph-integration`, commit `031a12f`
+(+ docs `17dca99`); full record in
+`docs/superpowers/plans/rtl2graph-integration-audit-2026-07-05.md` (2026-07-06 round-2 addendum).
+
+- **Baseline honest:** `verify_graph_dataset --batch` green 85/85 (84–87) × 10 nangate45 designs;
+  wirelength INDEPENDENTLY cross-checked vs OpenROAD `net.getWire().getLength()` over **32,005
+  aes_core nets → 0 real mismatches** (only a benign 0.07 µm/IO-net end-extension delta);
+  NetType/mask/log1p-label all correct, power/ground excluded. The pipeline is genuinely correct
+  on nangate45.
+- **Four defects fixed** (all in paths real nangate45 files never reach → invisible to the raw-file
+  verifier; behavior-neutral on nangate45; failure-patterns.md #15–#18): (15) liberty
+  `ff_bank`/`latch_bank` multibit-sequential undetected (`is_sequential` false; asap7 ships 27 such
+  libs) — currently *inert* (field unconsumed), fixed defensively; (16) `compute_feature_stats` had
+  NO honesty gate (X-side of the #6 irdrop lesson) — a raw/truncated feature CSV summarized "ok",
+  now flagged "invalid"; (17) `netlist_graph` tie-off constant in a concat (`{1'b0, sig}`) leaked a
+  phantom net `b0`; (18) latent parity: `run_labels.sh` exports `R2G_PLATFORM`, `edges_iopin_net`
+  rstrips a continuation DIRECTION.
+- **New corner-case infra:** `tests/fixtures/corner_synth.py` (a hand-computable synthetic
+  nangate45-style design) driven through the REAL workers → labels → PyG builder by
+  `tests/test_corner_case_pipeline.py` (asserts vs hand-derived truth across **all five graph views
+  b–f**) + `tests/test_corner_case_units.py` (focused corners incl. the congestion demand-key
+  transpose guard under an asymmetric grid). Complementarity: the raw-file cross-check proves the
+  extractors match the tools on inputs you HAVE; the fixture proves they handle inputs you might GET.
+- Full extract/graph/techlib test surface: 298 passed. Datasets built after the 2026-07-06 round-1
+  regeneration remain valid (these fixes don't change nangate45 output).
+
+---
+
+## 2026-07-05 — RTL2Graph integrated as the PyG graph-dataset stage; 5 extraction defects found + fixed
+
+Audited the operator-provided `RTL2Graph/` pipeline against OpenDB/OpenROAD ground truth
+(cordic nangate45 + aes_core sky130hd) before integrating it, then shipped it as skill
+stage 13d (`scripts/flow/run_graphs.sh` → `<project>/dataset/{b..f}_graph.pt` +
+`netlist_graph.pt` + `graph_manifest.json`). Branch `feat/rtl2graph-integration`,
+commits `4d8e032`/`6b09000`/`69c10e2`; full record:
+`docs/superpowers/plans/rtl2graph-integration-audit-2026-07-05.md`.
+
+- **RTL2Graph's `feature_test_v3`/`label_test` = stale ancestors** of the skill's extract
+  stages (still carried the sky130 quote-bug, nangate-only `num_layer`, dead fakeram
+  keys) — not ported; the skill's stages are the substrate.
+- **Five silent-wrong-value defects found; four lived in the skill's own extractors**
+  (fixed + regression-tested; detail in failure-patterns.md "Dataset-Extraction
+  Silent-Value Defects"): (1) timing labels lost on EVERY register (escaped-vs-unescaped
+  name join; aes_core sky130hd 5/2476 → 2476/2476 labeled); (2) sky130 DEF `RECT` patch
+  groups parsed as route points (wirelength ~350× inflated on 1283/30k nets, congestion
+  "utilization" 11×); (3) DEF PIN direction inverted in `num_drivers`/`num_sinks` (+
+  `connects_macro_flag` implemented, was hardwired 0); (4) driver `max_capacitance`
+  summed into `sum_pin_cap_fF` (62.5 fF vs true 3.19 fF); (5) RTL2Graph c–f variants
+  misaligned `edge_attr`/`edge_type`/`edge_y` with `edge_index` (171/3001 sampled
+  pin-edges aligned; the consolidated port scores 3001/3001).
+- Port equivalence-proven vs the originals (node tensors + edge sets exact, all five
+  variants, identical inputs); five ~700-line near-duplicate scripts consolidated into
+  `scripts/extract/graph/`. torch/PyG/pandas are graph-stage-only deps — `run_graphs.sh`
+  probes `R2G_GRAPH_PYTHON` and SKIPs cleanly without them.
+- **Operator action:** label/feature CSVs generated before 2026-07-05 carry the old,
+  wrong values — regenerate before training. Suite: 964 passed / 16 skipped.
+
 ## 2026-06-16 — Gate B FIRED on the live store: A/B loop's first end-to-end verdict + density_relief
 
 Ran the deferred compute-bound **Tier −1 Gate B** for real on the live `knowledge.sqlite`

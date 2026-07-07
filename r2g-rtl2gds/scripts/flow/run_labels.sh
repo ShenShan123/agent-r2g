@@ -111,8 +111,14 @@ run_soft() {  # name + command...; never aborts the orchestrator
 }
 
 # --- Congestion (DEF + tech.lef) -------------------------------------------
+# R2G_PLATFORM must be passed (run_features.sh exports it): extract_congestion
+# reads it to pick the routing-layer fallback profile. Without it the extractor
+# defaulted to asap7's profile — currently harmless (all platforms share one
+# fallback table AND it only fires when the tech LEF yields no routing layers),
+# but a latent cross-platform hazard the moment the fallback becomes
+# platform-specific (2026-07-06 nangate45 audit).
 if [[ -n "$DEF" ]]; then
-  TECH_LEF="$TECH_LEF" run_soft congestion \
+  R2G_PLATFORM="$PLATFORM" TECH_LEF="$TECH_LEF" run_soft congestion \
     python3 "$LABELS_SRC/extract_congestion.py" "$DEF" "$LABELS_DIR/cell_congestion.csv" "$DESIGN_NAME"
 fi
 

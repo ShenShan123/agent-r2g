@@ -5,10 +5,12 @@ the migration (Task 4) and is held by the byte-for-byte CSV gate
 (tests/test_techlib_crossplatform.py). That oracle module was deleted in Task 9, so
 these tests pin ``techlib.cell_types`` against KNOWN values:
 
-  * Curated map preserved — UNKNOWN=95, INV_X1=0, DFF_X2=72, FAKERAM45_* keys upper-cased.
-  * ``cell_type_id`` — curated hits, lowercase inputs, non-existent master -> UNKNOWN.
-  * ``build_runtime_map`` determinism — two calls equal, UNKNOWN=N, macro/garbage->UNKNOWN.
-  * ``resolve_cell_type_map`` strategy — nangate45 returns the curated dict; sky130hd builds runtime.
+  * Curated map RETIRED 2026-07-06 (22-master drift) — kept only as an import shim.
+  * ``cell_type_id`` — lookup mechanics (strip/upper/None) against the shim dict.
+  * ``build_runtime_map`` determinism — two calls equal, UNKNOWN=N, MACRO=N+1 shared
+    by macro-lib cells, garbage->UNKNOWN.
+  * ``resolve_cell_type_map`` — runtime map on EVERY platform incl. nangate45; the
+    drifted masters (SDFF*/CLKGATE*/TLAT/AOI222_X1/...) heal to real ids.
   * sky130 real masters resolve via the runtime map — differentiated ids (quote-bug fixed).
 
 The no-file tests run unconditionally. Liberty-backed tests SKIP (never fail) when the
@@ -68,48 +70,15 @@ def _sky130hd_lib_or_skip() -> str:
 # 1. Curated map preserved (no files needed)
 # ---------------------------------------------------------------------------
 
-def test_curated_map_pinned_anchors():
-    """The curated nangate45 map carries its known anchor ids.
+def test_retired_curated_map_still_importable_shim():
+    """The curated map is retired (2026-07-06) but kept as an import-compat shim.
 
-    These are the durable id contract the feature dataset depends on (a reshuffle
-    would silently relabel every nangate45 cell across the corpus).
+    Nothing may RESOLVE through it (see test_resolve_cell_type_map_nangate45_is_runtime)
+    — but old imports must not break, and the alias identity is preserved.
     """
     m = cell_types.NANGATE45_CELL_TYPE_MAPPING
-    assert m["INV_X1"] == 0
-    assert m["DFF_X2"] == 72
-    assert m["FAKERAM45_512X64"] == 113
-    assert m["UNKNOWN"] == 95
-    # A real curated map is large (>90 std-cell entries + macros).
-    assert len(m) > 90, f"curated map shrank unexpectedly ({len(m)} entries)"
-
-
-def test_unknown_is_95():
-    """UNKNOWN = 95 in the curated map."""
-    assert cell_types.NANGATE45_CELL_TYPE_MAPPING["UNKNOWN"] == 95
-
-
-def test_fakeram45_keys_upper_cased():
-    """FAKERAM45_* keys are upper-cased and present in the curated map."""
-    expected_keys = [
-        "FAKERAM45_512X64",
-        "FAKERAM45_64X96",
-        "FAKERAM45_256X32",
-        "FAKERAM45_32X64",
-        "FAKERAM45_64X32",
-        "FAKERAM45_256X96",
-        "FAKERAM45_64X15",
-        "FAKERAM45_64X7",
-    ]
-    for key in expected_keys:
-        assert key in cell_types.NANGATE45_CELL_TYPE_MAPPING, \
-            f"FAKERAM45 key {key!r} missing from techlib.cell_types curated map"
-        # Must be upper-cased (no lowercase variant present)
-        assert key == key.upper(), f"Key {key!r} is not fully upper-cased"
-
-
-def test_complete_cell_type_mapping_alias():
-    """COMPLETE_CELL_TYPE_MAPPING is the same object as NANGATE45_CELL_TYPE_MAPPING."""
-    assert cell_types.COMPLETE_CELL_TYPE_MAPPING is cell_types.NANGATE45_CELL_TYPE_MAPPING
+    assert m["UNKNOWN"] == 95  # shim contents frozen as documentation of the old space
+    assert cell_types.COMPLETE_CELL_TYPE_MAPPING is m
 
 
 # ---------------------------------------------------------------------------
@@ -194,17 +163,55 @@ def test_build_runtime_map_sc_set_deterministic():
 # 4. resolve_cell_type_map strategy (needs sky130hd liberty)
 # ---------------------------------------------------------------------------
 
-def test_resolve_cell_type_map_nangate45_returns_curated():
-    """resolve_cell_type_map('nangate45', ...) returns the curated dict.
+def test_resolve_cell_type_map_nangate45_is_runtime():
+    """resolve_cell_type_map('nangate45', ...) builds a runtime map (curated retired).
 
-    This runs unconditionally (no ORFS liberty needed): the nangate45 branch
-    short-circuits to the curated map and ignores the ``lib_db`` argument, so an
-    empty-dict placeholder exercises the same code path.
+    The frozen curated map had drifted 22 masters behind the deployed liberty
+    (SDFF*/CLKGATE*/TLAT/AOI222_X1/... -> UNKNOWN=95), so nangate45 now self-heals
+    from liberty like every other platform (2026-07-06).
     """
-    result_new = cell_types.resolve_cell_type_map("nangate45", {})
+    fake_db = {"cells": {"INV_X1": {"source_lib": "x"}, "SDFF_X1": {"source_lib": "x"}}}
+    result = cell_types.resolve_cell_type_map("nangate45", fake_db)
+    assert result is not cell_types.NANGATE45_CELL_TYPE_MAPPING
+    assert result == cell_types.build_runtime_map(fake_db)
+    # The drifted master that the curated map silently aliased onto UNKNOWN now
+    # resolves to a real id.
+    assert cell_types.cell_type_id("SDFF_X1", result) != result["UNKNOWN"]
 
-    assert result_new is cell_types.NANGATE45_CELL_TYPE_MAPPING, \
-        "resolve_cell_type_map('nangate45') should return the curated dict"
+
+def test_nangate45_runtime_map_heals_drifted_masters():
+    """Real nangate45 liberty: the 22 curated-map absentees resolve to real ids."""
+    pdir = _platforms_dir()
+    lib = os.path.join(pdir or "", "nangate45", "lib", "NangateOpenCellLibrary_typical.lib")
+    if not pdir or not os.path.isfile(lib):
+        pytest.skip("nangate45 liberty absent (machine-local ORFS platforms)")
+    from techlib import liberty
+    db = liberty.load_liberty_db([lib])
+    mp = cell_types.resolve_cell_type_map("nangate45", db, sc_lib_paths=[lib])
+    unknown = mp["UNKNOWN"]
+    for master in ("SDFF_X1", "SDFFRS_X2", "CLKGATE_X1", "CLKGATETST_X8",
+                   "TLAT_X1", "AOI222_X1", "OAI222_X1"):
+        assert cell_types.cell_type_id(master, mp) != unknown, \
+            f"{master} still collapses to UNKNOWN — curated-map drift regressed"
+
+
+def test_runtime_map_macro_cells_get_shared_macro_id():
+    """Macro-lib cells share the dedicated MACRO id (= N+1), not UNKNOWN (= N)."""
+    std, macro = "/p/std.lib", "/p/fakeram45_512x64.lib"
+    db = {"cells": {
+        "INV_X1": {"source_lib": std}, "NAND2_X1": {"source_lib": std},
+        "FAKERAM45_512X64": {"source_lib": macro},
+        "FAKERAM45_256X32": {"source_lib": macro},
+    }}
+    mp = cell_types.build_runtime_map(db, sc_lib_paths=[std])
+    assert mp["UNKNOWN"] == 2
+    assert mp["MACRO"] == 3
+    # both macros share the MACRO id; std ids unaffected by macro presence
+    assert cell_types.cell_type_id("fakeram45_512x64", mp) == 3
+    assert cell_types.cell_type_id("fakeram45_256x32", mp) == 3
+    assert cell_types.cell_type_id("INV_X1", mp) == 0
+    # a garbage master still lands on UNKNOWN, distinguishable from macros
+    assert cell_types.cell_type_id("NO_SUCH_CELL", mp) == 2
 
 
 def test_resolve_cell_type_map_sky130hd_returns_runtime():

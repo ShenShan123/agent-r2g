@@ -205,9 +205,10 @@ def test_fallback_routing_layers_copy_independence():
 # --------------------------------------------------------------------------- #
 # cell_type_strategy
 # --------------------------------------------------------------------------- #
-def test_cell_type_strategy_nangate_curated_others_runtime():
-    assert profile.get_profile("nangate45").cell_type_strategy == "curated"
-    for p in ("sky130hd", "sky130hs", "asap7", "gf180", "ihp-sg13g2"):
+def test_cell_type_strategy_runtime_everywhere():
+    # nangate45's curated strategy was retired 2026-07-06 (frozen map drifted 22
+    # masters behind the deployed liberty) — every platform is "runtime" now.
+    for p in ("nangate45", "sky130hd", "sky130hs", "asap7", "gf180", "ihp-sg13g2"):
         assert profile.get_profile(p).cell_type_strategy == "runtime", p
 
 
@@ -216,21 +217,14 @@ def test_cell_type_strategy_unknown_is_runtime():
 
 
 def test_cell_type_strategy_ties_to_resolve_cell_type_map():
-    # "curated" for nangate45 must mean resolve_cell_type_map returns the curated map
-    # (identity with NANGATE45_CELL_TYPE_MAPPING) — independent of any liberty.
-    assert profile.get_profile("nangate45").cell_type_strategy == "curated"
-    assert (
-        cell_types.resolve_cell_type_map("nangate45", {})
-        is cell_types.NANGATE45_CELL_TYPE_MAPPING
-    )
-
-    # "runtime" for a non-nangate platform must mean a runtime map is BUILT (not the
-    # curated identity). Feed a tiny synthetic lib_db so build_runtime_map has cells.
+    # "runtime" everywhere must mean a runtime map is BUILT for nangate45 too — never
+    # the retired curated identity. Feed a tiny synthetic lib_db.
     fake_db = {"cells": {"FOO": {"source_lib": "x"}, "BAR": {"source_lib": "x"}}}
-    runtime_map = cell_types.resolve_cell_type_map("sky130hd", fake_db)
-    assert runtime_map is not cell_types.NANGATE45_CELL_TYPE_MAPPING
-    assert runtime_map == {"BAR": 0, "FOO": 1, "UNKNOWN": 2}
-    assert profile.get_profile("sky130hd").cell_type_strategy == "runtime"
+    for p in ("nangate45", "sky130hd"):
+        runtime_map = cell_types.resolve_cell_type_map(p, fake_db)
+        assert runtime_map is not cell_types.NANGATE45_CELL_TYPE_MAPPING
+        assert runtime_map == {"BAR": 0, "FOO": 1, "UNKNOWN": 2, "MACRO": 3}
+        assert profile.get_profile(p).cell_type_strategy == "runtime"
 
 
 # --------------------------------------------------------------------------- #

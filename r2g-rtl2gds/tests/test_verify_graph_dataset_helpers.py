@@ -1,0 +1,153 @@
+"""Unit tests for tools/verify_graph_dataset.py's INDEPENDENT truth parsers.
+
+The verifier re-derives ground truth with its own local parsers (never techlib) so a
+parser bug on either side surfaces as a check mismatch instead of agreeing with
+itself. These tests pin the verifier-side parsers on synthetic liberty/LEF/DEF
+fixtures — including the platform hinges the 2026-07-06 nangate45 round exercised
+(dbu=2000, bus() macro pins, CLASS BLOCK masters, vertical-demand keying).
+
+torch is NOT required: the helpers under test are pure stdlib+re, and the module
+import is guarded to skip when torch/pandas are absent (bare CI checkout).
+"""
+from __future__ import annotations
+
+import importlib.util
+import os
+import sys
+
+import pytest
+
+_TOOLS = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
+    os.path.abspath(__file__)))), "tools")
+
+pytest.importorskip("pandas")
+pytest.importorskip("torch")
+
+spec = importlib.util.spec_from_file_location(
+    "verify_graph_dataset", os.path.join(_TOOLS, "verify_graph_dataset.py"))
+vgd = importlib.util.module_from_spec(spec)
+sys.modules["verify_graph_dataset"] = vgd
+spec.loader.exec_module(vgd)
+
+
+def test_read_liberty_truth_bus_and_units(tmp_path):
+    lib = tmp_path / "m.lib"
+    lib.write_text("""
+library (m) {
+  capacitive_load_unit (1,ff);
+  nom_voltage : 1.10;
+  cell (SRAM_1) {
+    area : 100.5;
+    statetable ("CK", "IQ") {
+    }
+    pin(clk) {
+      direction : input;
+      capacitance : 25.0;
+    }
+    bus(addr) {
+      direction : input;
+      capacitance : 5.0;
+    }
+  }
+}
+""")
+    cells = vgd.read_liberty_truth([str(lib)])
+    assert cells["SRAM_1"]["area"] == 100.5
+    assert cells["SRAM_1"]["is_seq"] is True
+    assert vgd.lib_pin_truth(cells, "SRAM_1", "clk") == ("INPUT", 25.0)
+    # per-bit member resolves through the bus base
+    assert vgd.lib_pin_truth(cells, "sram_1", "addr[7]") == ("INPUT", 5.0)
+    assert vgd.lib_pin_truth(cells, "SRAM_1", "nope") == ("", None)
+
+
+def test_read_liberty_truth_pf_scaling(tmp_path):
+    lib = tmp_path / "p.lib"
+    lib.write_text("""
+library (p) {
+  capacitive_load_unit (1.0000000000, "pf");
+  cell (INV_1) {
+    pin(A) {
+      direction : input;
+      capacitance : 0.0021;
+    }
+  }
+}
+""")
+    cells = vgd.read_liberty_truth([str(lib)])
+    assert vgd.lib_pin_truth(cells, "INV_1", "A")[1] == pytest.approx(2.1)
+
+
+def test_read_lef_truth_layers_and_blocks(tmp_path):
+    tech = tmp_path / "t.lef"
+    tech.write_text("""
+LAYER metal1
+  TYPE ROUTING ;
+  PITCH 0.14 ;
+  DIRECTION HORIZONTAL ;
+END metal1
+LAYER via1
+  TYPE CUT ;
+END via1
+LAYER metal2
+  TYPE ROUTING ;
+  PITCH 0.19 ;
+  DIRECTION VERTICAL ;
+END metal2
+""")
+    macro = tmp_path / "m.lef"
+    macro.write_text("""
+MACRO fakeram45_64x7
+  CLASS BLOCK ;
+  SIZE 50.0 BY 40.0 ;
+END fakeram45_64x7
+MACRO BUF_X1
+  CLASS CORE ;
+END BUF_X1
+""")
+    layers, blocks = vgd.read_lef_truth(str(tech), [str(macro)])
+    assert layers == {"metal1": (0.14, "HORIZONTAL"), "metal2": (0.19, "VERTICAL")}
+    assert blocks == {"FAKERAM45_64X7"}
+
+
+def test_read_def_truth_dbu_demand_orientation(tmp_path):
+    """dbu=2000 scaling + vertical demand keyed (x,y) — the transpose regression."""
+    d = tmp_path / "t.def"
+    d.write_text("""
+DESIGN t ;
+UNITS DISTANCE MICRONS 2000 ;
+DIEAREA ( 0 0 ) ( 20000 20000 ) ;
+GCELLGRID X 0 DO 5 STEP 4000 ;
+GCELLGRID Y 0 DO 5 STEP 4000 ;
+TRACKS X 100 DO 50 STEP 400 LAYER metal2 ;
+TRACKS Y 100 DO 60 STEP 280 LAYER metal1 ;
+COMPONENTS 2 ;
+ - u1 INV_X1 + PLACED ( 2000 4000 ) N ;
+ - u2 SRAM_1 + PLACED ( 8000 8000 ) FS ;
+END COMPONENTS
+PINS 1 ;
+ - clk + NET clk + DIRECTION INPUT + USE SIGNAL
+  + PLACED ( 100 200 ) N ;
+END PINS
+NETS 1 ;
+ - n1 ( u1 ZN ) ( u2 addr[0] )
+  + ROUTED metal2 ( 6000 2000 ) ( 6000 10000 )
+  + USE SIGNAL ;
+END NETS
+END DESIGN
+""")
+    t = vgd.read_def_truth(str(d))
+    assert t["dbu"] == 2000.0
+    assert t["comps"]["u1"] == {"master": "INV_X1", "x": 2000, "y": 4000, "orient": "N"}
+    assert t["pins"]["clk"]["dir"] == "INPUT" and t["pins"]["clk"]["x"] == 100
+    assert t["nets"]["n1"] == [("u1", "ZN"), ("u2", "addr[0]")]
+    # 8000 dbu vertical wire = 4 um
+    assert t["net_len"]["n1"] == pytest.approx(4.0)
+    # vertical demand keys are (x_gcell, y_gcell): x=6000//4000=1, y spans 0..2
+    assert set(t["demand_v"]) == {(1, 0), (1, 1), (1, 2)}
+    assert not t["demand_h"]
+    assert t["tracks"] == {"metal2": 50, "metal1": 60}
+
+
+def test_gaussian_neutral_on_uniform_grid():
+    util = {(x, y): 0.5 for x in range(5) for y in range(5)}
+    assert vgd.gaussian(util, 2, 2) == pytest.approx(0.5)

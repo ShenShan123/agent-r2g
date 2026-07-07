@@ -19,6 +19,7 @@ Install the `r2g-rtl2gds` skill, then ask Claude: *"synthesize this UART at 100 
 | Magic + Netgen | optional | sky130 DRC / LVS |
 | OpenSTA | optional | standalone STA |
 | sky130A PDK | optional | sky130 signoff |
+| torch + torch_geometric + pandas | optional | PyG graph datasets (`run_graphs.sh`; venv on /proj, `R2G_GRAPH_PYTHON`) |
 
 ---
 
@@ -293,7 +294,7 @@ With tools verified, open any Claude Code session and ask something like:
 > *"Run DRC and LVS on my design"*
 > *"Generate a simple arbiter and produce a GDS"*
 
-Claude matches these requests to the `r2g-rtl2gds` skill and drives every stage — spec normalization, RTL generation, lint, simulation, synthesis, place-and-route, timing gate, and signoff.
+Claude matches these requests to the `r2g-rtl2gds` skill and drives every stage — spec normalization, RTL generation, lint, simulation, synthesis, place-and-route, timing gate, and signoff — plus optional ML dataset extraction (label/feature CSVs and training-ready PyG graphs).
 
 The skill works from **existing RTL** (drop your file into `rtl/design.v`) or from a **natural-language spec** (Claude writes the RTL for you).
 
@@ -333,6 +334,9 @@ Key scripts involved:
 | PPA extract | `scripts/extract/extract_ppa.py` | `reports/ppa.json` |
 | Timing gate | `scripts/reports/check_timing.py` | pass / minor-fix / escalate |
 | Signoff fix | `scripts/flow/fix_signoff.sh` | `reports/fix_log.jsonl` |
+| Dataset labels (Y) | `scripts/flow/run_labels.sh` | `labels/*.csv` + `reports/labels_stats.json` |
+| Dataset features (X) | `scripts/flow/run_features.sh` | `features/*.csv` + `reports/features_stats.json` |
+| PyG graph datasets | `scripts/flow/run_graphs.sh` | `dataset/{b..f}_graph.pt`, `netlist_graph.pt`, `graph_manifest.json` |
 
 ---
 
@@ -469,8 +473,9 @@ agent-r2g/
 │   │   │   └── orfs_hooks/            #     Tcl sourced into ORFS stages (PRE/POST_<STAGE>_TCL)
 │   │   ├── extract/                   #   Parse tool output → JSON
 │   │   │   ├── extract_route.py       #     Route-stage abort extractor → reports/route.json ★NEW
-│   │   │   └── features/
-│   │   │       └── presynth.py        #     Pre-synthesis KNN feature extractor (Win 5) ★NEW
+│   │   │   ├── features/
+│   │   │   │   └── presynth.py        #     Pre-synthesis KNN feature extractor (Win 5) ★NEW
+│   │   │   └── graph/                 #     PyG graph datasets: b–f variants + netlist graph (run_graphs.sh) ★NEW
 │   │   ├── project/                   #   init / normalize / validate
 │   │   ├── reports/                   #   Timing gate, diagnosis (diagnose_signoff_fix.py), history
 │   │   └── dashboard/                 #   GDS preview + multi-project HTML dashboard
@@ -488,7 +493,7 @@ agent-r2g/
 │   │   └── escalations.py             #     Open escalation records for the agent tier
 │   ├── references/                    #   Failure patterns, engineer-loop runbook, PPA guide, …
 │   ├── assets/                        #   config.mk / constraint.sdc templates + examples
-│   └── tests/                         #   pytest suite (625 tests)
+│   └── tests/                         #   pytest suite (1,058 tests)
 ├── install.sh                         # ★ One-command installer
 ├── .claude-plugin/plugin.json         #   Claude Code plugin manifest
 ├── tools/                             #   Batch orchestration helpers (not part of skill install)
@@ -542,6 +547,16 @@ python3 $SKILL/scripts/reports/fmax_search.py   $PROJ  nangate45
 bash    $SKILL/scripts/flow/run_drc.sh  $PROJ  nangate45
 bash    $SKILL/scripts/flow/run_lvs.sh  $PROJ  nangate45
 bash    $SKILL/scripts/flow/run_rcx.sh  $PROJ  nangate45
+
+# (optional) ML dataset: label/feature CSVs + training-ready PyG graphs
+# run_graphs.sh auto-runs the labels/features stages when their CSVs are stale.
+# Needs a torch venv (install on /proj, never $HOME):
+#   python3 -m venv /proj/<you>/pyenvs/r2g-graph
+#   .../pip install torch --index-url https://download.pytorch.org/whl/cpu
+#   .../pip install torch_geometric pandas
+R2G_GRAPH_PYTHON=/proj/<you>/pyenvs/r2g-graph/bin/python \
+bash    $SKILL/scripts/flow/run_graphs.sh  $PROJ  nangate45
+# -> $PROJ/dataset/{b..f}_graph.pt, netlist_graph.pt, graph_manifest.json
 ```
 
 A worked example: `r2g-rtl2gds/assets/examples/simple-arbiter/`.
@@ -595,7 +610,7 @@ config.mk — see `r2g-rtl2gds/SKILL.md` ("Netgen LVS") and
 
 ## Validated scale
 
-The skill has been validated on **682 RTL designs** spanning ICCAD benchmarks, RISC-V cores, BOOM/Chipyard, VTR, zipcpu, verilog-ethernet, wb2axip, and more. The test suite covers **625 tests** (pytest, as of 2026-06-17).
+The skill has been validated on **682 RTL designs** spanning ICCAD benchmarks, RISC-V cores, BOOM/Chipyard, VTR, zipcpu, verilog-ethernet, wb2axip, and more. The test suite covers **1,058 tests** (pytest, as of 2026-07-06), including an end-to-end synthetic corner-case suite that drives the real feature/label/graph extractors and asserts all five PyG graph views (b–f) against hand-derived ground truth.
 
 **ORFS backend (place & route → GDS):** 476 / 495 designs from the original `rtl_designs/` batch pass (96.2%); 19 remaining have understood root causes (megadesign synthesis budgets, missing netlists, zero-logic stubs).
 

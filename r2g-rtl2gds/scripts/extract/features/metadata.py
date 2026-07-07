@@ -244,12 +244,18 @@ def main():
     h_um = (area[3] - area[1]) / dbu if dbu else 0
     core_area = w_um * h_um
     tr = parse_tracks(def_path)
+    # tracks_per_layer feeds global_feat[12] and MUST be numeric — the old pipe-joined
+    # "metal1:228|..." string was to_numeric-coerced to NaN -> 0.0 by load_global_feat
+    # on EVERY platform (2026-07-06 audit). Emit the mean per-layer track count there
+    # and keep the per-layer detail in a separate trailing column (loaders read
+    # metadata.csv by column name, so the extra column is inert).
+    tr_mean = (sum(tr.values()) / len(tr)) if tr else 0.0
     tr_str = "|".join([f"{k}:{tr[k]}" for k in sorted(tr.keys())])
     af = avg_fanout_v2(def_path)
     with open(out_csv, "w", newline="") as f:
         w = csv.writer(f)
-        w.writerow(["graph_id", "num_cells", "num_nets", "num_ios", "avg_fanout", "die_width", "die_height", "core_area", "dbu_unit", "PLACE_DENSITY", "CORE_UTILIZATION", "ABC_AREA", "C_total", "tracks_per_layer", "V_nom", "freq_Hz"])
-        w.writerow([graph_id, comps, nets, ios, af, f"{w_um:.3f}", f"{h_um:.3f}", f"{core_area}", dbu, place_density, core_util, abc_area, f"{c_total_fF:.6f}", tr_str, v_nom, freq_hz])
+        w.writerow(["graph_id", "num_cells", "num_nets", "num_ios", "avg_fanout", "die_width", "die_height", "core_area", "dbu_unit", "PLACE_DENSITY", "CORE_UTILIZATION", "ABC_AREA", "C_total", "tracks_per_layer", "V_nom", "freq_Hz", "tracks_detail"])
+        w.writerow([graph_id, comps, nets, ios, af, f"{w_um:.3f}", f"{h_um:.3f}", f"{core_area}", dbu, place_density, core_util, abc_area, f"{c_total_fF:.6f}", f"{tr_mean:.3f}", v_nom, freq_hz, tr_str])
 
 
 if __name__ == "__main__":

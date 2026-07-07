@@ -14,7 +14,7 @@ Written to `design_cases/<design>/features/` and `design_cases/<design>/reports/
 
 | File | Rows | Columns |
 |------|------|---------|
-| `features/metadata.csv` | per design (1 row) | `graph_id,num_cells,num_nets,num_ios,avg_fanout,die_width,die_height,core_area,dbu_unit,PLACE_DENSITY,CORE_UTILIZATION,ABC_AREA,C_total,tracks_per_layer,V_nom,freq_Hz` |
+| `features/metadata.csv` | per design (1 row) | `graph_id,num_cells,num_nets,num_ios,avg_fanout,die_width,die_height,core_area,dbu_unit,PLACE_DENSITY,CORE_UTILIZATION,ABC_AREA,C_total,tracks_per_layer,V_nom,freq_Hz,tracks_detail` — `tracks_per_layer` is the numeric MEAN per-layer track count (2026-07-06 fix: the old pipe-joined string coerced `global_feat[12]` to 0 on every platform); the per-layer detail string moved to `tracks_detail` |
 | `features/nodes_gate.csv` | per placed instance | `graph_id,inst_name,master,cell_type_id,cell_area,cell_power,x_um,y_um,orientation,orientation_id,placement_status,placement_status_id` |
 | `features/nodes_net.csv` | per net | `graph_id,net_name,net_type_id,fanout,pin_count,num_drivers,num_sinks,connects_macro_flag,num_layer,hpwl_um` |
 | `features/nodes_iopin.csv` | per top-level I/O pin | `graph_id,iopin_name,net_name,pin_x_um,pin_y_um,pin_owner_master,pin_name,pin_layer_hint,nearest_tap_distance_um,pin_direction,pin_direction_id,net_use,net_type_id` |
@@ -71,15 +71,17 @@ layers) are stored in `scripts/extract/techlib/profile.py` as a `TechProfile` pe
 platform, retrieved via `techlib.profile.get_profile(name)`. The workers import the
 consolidated `techlib.*` modules instead of maintaining per-extractor copies.
 
-- **cell_type_id** — provided by `techlib.cell_types`. `nangate45` uses a curated
-  function-family + drive-strength map (`techlib.cell_types.NANGATE45_CELL_TYPE_MAPPING`,
-  IDs 0–128, `UNKNOWN`=95, incl. the known `fakeram45_*` macros). Any other platform gets
-  a deterministic map built from the platform's **standard-cell** liberty only
-  (`R2G_SC_LIB_FILES` = `LIB_FILES`, sorted → 0..N-1) so the ids are stable across every
-  design of that platform; per-design macro cells (`ADDITIONAL_LIBS`) resolve to `UNKNOWN`
-  rather than reshuffling the std-cell ids. Which strategy applies is recorded in the
-  `TechProfile.cell_type_strategy` field (`"curated"` for nangate45, `"runtime"` for all
-  others).
+- **cell_type_id** — provided by `techlib.cell_types`. EVERY platform (nangate45
+  included since 2026-07-06) gets a deterministic map built from the platform's
+  **standard-cell** liberty only (`R2G_SC_LIB_FILES` = `LIB_FILES` minus
+  `ADDITIONAL_LIBS`, sorted → 0..N-1, `UNKNOWN` = N) so the ids are stable across every
+  design of that platform; per-design macro cells (`ADDITIONAL_LIBS`) share the
+  dedicated `MACRO` id (= N+1) rather than reshuffling the std-cell ids or aliasing
+  onto `UNKNOWN`. nangate45's former curated map
+  (`techlib.cell_types.NANGATE45_CELL_TYPE_MAPPING`) was retired 2026-07-06 after it
+  drifted 22 masters behind the deployed liberty (every SDFF*/CLKGATE*/TLAT →
+  UNKNOWN=95; failure-patterns.md #12) — the dict remains only as an import shim, and
+  nangate45 datasets built against it must be regenerated.
 - **num_layer** — distinct routing layers a net traverses, derived from the tech LEF's
   `TYPE ROUTING` layer names via `techlib.lef.routing_layers` / `routing_layer_regex`
   (nangate `metal1..10`, sky130 `li1`/`met1..5`, asap7 `M1..9`); falls back to `metal\d+`
@@ -129,3 +131,39 @@ memory-light). With no design args it auto-discovers designs that have a collect
 - Hand-rolled regex parsers tuned to ORFS `write_def`/`write_spef` output. The stats JSON
   carries row counts; a quick sanity check is `nodes_gate` rows ≈ DEF `COMPONENTS`.
 - Designs that never reached `6_final` are skipped (status recorded), not errored.
+
+## Downstream consumer
+
+`scripts/flow/run_graphs.sh` (SKILL.md step 13d) joins these feature CSVs with the
+label CSVs into training-ready PyG graphs — see `graph-dataset.md`.
+
+## 2026-07-05 semantics corrections (RTL2Graph integration audit)
+
+Three feature values changed meaning on this date (commit `fix(skill): feature
+extractors — PIN-direction inversion, macro flag, load-only pin caps`); CSVs
+generated before it carry the OLD, wrong semantics:
+
+- `num_drivers`/`num_sinks`: DEF PIN direction is now interpreted from the
+  chip's perspective (an INPUT port drives its net; an OUTPUT port sinks it).
+  Previously every output-port net counted 2 drivers / 0 sinks.
+- `connects_macro_flag`: now real (1 when the net touches a master that only
+  exists in the per-design macro libs, e.g. fakeram45_*). Previously always 0.
+- `sum_pin_cap_fF`: now the sum of INPUT-pin load caps only. Previously the
+  driver's liberty `max_capacitance` (a drive limit ~20x the loads) was added
+  in, dominating the value.
+
+A second 2026-07-05 wave (sky130 verification round) fixed three more — sky130
+CSVs from between the two waves are STILL wrong on these (failure-patterns.md
+#5/#8/#9):
+
+- `pin_type_id` + liberty-side `num_drivers`/`num_sinks` (sky130 only): quoted
+  `direction : "input";` / `clock : "true";` never parsed — 95% of pins
+  collapsed to the catch-all id 14 and every net took the assume-1-driver
+  fallback. Now quote-tolerant.
+- `sum_pin_cap_fF` (sky130 only): quoted `capacitive_load_unit(1.0, "pf")`
+  left the pf→fF scale at 1.0 — every sky130 pin cap was 1000× too small.
+- net `use` (all platforms): `+ USE` on the net's dash line was dropped, so
+  `use` was populated only for line-wrapped nets (1,666/30,345 on aes_core;
+  now 30,345/30,345). `net_type_id` was mostly saved by name-token fallback.
+
+Full defect table: failure-patterns.md "Dataset-Extraction Silent-Value Defects".

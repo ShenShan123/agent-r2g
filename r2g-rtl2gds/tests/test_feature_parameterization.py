@@ -15,20 +15,20 @@ from techlib import lef
 
 # --- cell-type map ---------------------------------------------------------
 
-def test_nangate45_uses_curated_map():
-    mp = cell_type_map.resolve_cell_type_map("nangate45", {"cells": {}})
-    assert mp["INV_X1"] == 0
-    assert mp["UNKNOWN"] == 95
-    # C9: fakeram keys are upper-cased so master.upper() lookups now match.
-    assert mp["FAKERAM45_512X64"] == 113
-    assert cell_type_map.cell_type_id("fakeram45_512x64", mp) == 113
+def test_nangate45_uses_runtime_map():
+    # Curated map retired 2026-07-06 — nangate45 builds from liberty like everyone else.
+    lib_db = {"cells": {"INV_X1": {"source_lib": "s"}, "SDFF_X1": {"source_lib": "s"}}}
+    mp = cell_type_map.resolve_cell_type_map("nangate45", lib_db)
+    assert mp == {"INV_X1": 0, "SDFF_X1": 1, "UNKNOWN": 2, "MACRO": 3}
+    assert cell_type_map.cell_type_id("sdff_x1", mp) == 1  # drifted master heals
 
 
 def test_other_platform_builds_deterministic_runtime_map():
     lib_db = {"cells": {"SKY130_FD_SC_HD__NAND2_1": {}, "SKY130_FD_SC_HD__INV_1": {}}}
     mp = cell_type_map.resolve_cell_type_map("sky130hd", lib_db)
-    # sorted cell names -> 0..N-1 (INV_1 < NAND2_1), UNKNOWN last; stable across calls.
-    assert mp == {"SKY130_FD_SC_HD__INV_1": 0, "SKY130_FD_SC_HD__NAND2_1": 1, "UNKNOWN": 2}
+    # sorted cell names -> 0..N-1 (INV_1 < NAND2_1), UNKNOWN=N, MACRO=N+1; stable across calls.
+    assert mp == {"SKY130_FD_SC_HD__INV_1": 0, "SKY130_FD_SC_HD__NAND2_1": 1,
+                  "UNKNOWN": 2, "MACRO": 3}
     assert cell_type_map.cell_type_id("sky130_fd_sc_hd__inv_1", mp) == 0
     assert cell_type_map.cell_type_id("not_a_cell", mp) == 2  # UNKNOWN
 
@@ -50,9 +50,12 @@ def test_runtime_map_is_stable_across_designs_via_std_cell_filter():
     # std-cell ids identical whether or not a macro lib was loaded
     assert mp1["INV_1"] == mp2["INV_1"] == 0
     assert mp1["NAND2_1"] == mp2["NAND2_1"] == 1
-    # macro cell is excluded from the id space -> UNKNOWN
-    assert "AMACRO_64X32" not in mp1
-    assert cell_type_map.cell_type_id("amacro_64x32", mp1) == mp1["UNKNOWN"]
+    # macro cell is excluded from the std id space -> shared MACRO id (N+1), NOT
+    # UNKNOWN (N) — macros are known nodes, distinguishable from unmapped masters
+    # (2026-07-06 nangate45 fakeram audit).
+    assert cell_type_map.cell_type_id("amacro_64x32", mp1) == mp1["MACRO"]
+    assert mp1["MACRO"] == mp1["UNKNOWN"] + 1
+    assert cell_type_map.cell_type_id("not_a_cell_at_all", mp1) == mp1["UNKNOWN"]
     # without the std-cell filter, the macro WOULD shift std-cell ids (the bug #8 prevents)
     unfiltered = cell_type_map.build_runtime_map(with_macro)
     assert unfiltered["NAND2_1"] != mp1["NAND2_1"]  # AMACRO_64X32 sorts before, shifts +1

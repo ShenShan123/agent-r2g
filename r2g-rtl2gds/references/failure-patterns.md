@@ -2865,3 +2865,339 @@ slow arm.)
   `::test_zombie_judged_nonterminal_entry_does_not_block_cohort`.
 - **Skill-level alarm:** any v2 trial whose `metrics_json.repeats` differs between arms, or
   differs from `R2G_AB_REPEATS`, is a fragmentation lead.
+
+## Dataset-Extraction Silent-Value Defects (features/labels; found by the 2026-07-05 RTL2Graph audit)
+
+A new failure class: the flow completes green, the CSVs materialize, and the VALUES are
+wrong — nothing crashes, so only ground-truth cross-checks catch it. All four instances
+below were found by verifying the external RTL2Graph pipeline against OpenDB/OpenROAD
+ground truth (cordic nangate45 + aes_core sky130hd) and traced back into the skill's own
+extractors (shared feature_test_v2/v3 ancestry). Verification recipe (reusable): dump
+truth via `openroad -python` (odb counts, ITerm directions, placements), compare per-net
+wirelength against `report_wire_length -net ... -detailed_route`, and diff per-cell slack
+against `report_checks`.
+
+### 1. Timing labels lost on EVERY register (STA-vs-ODB name-escaping join miss)
+
+- **Symptom:** `timing_features.csv` has `INF,0.0,in_sta_path=false` for all bus-named
+  cells — which is every register (`...\[16\]$_SDFF_PP0_`); `report_checks` shows those
+  same cells as the worst endpoints. Measured: 0/56 registers labeled on cordic
+  nangate45; 5/2476 on aes_core sky130hd. Downstream GNN datasets got timing label 0.0
+  (not NaN!) on exactly the timing-critical nodes.
+- **Root cause:** `extract_timing.tcl` keyed pin slacks by STA `get_full_name` (names
+  UNESCAPED: `U.x_1[16]$_SDFF_PP0_/D`) but looked them up by odb `$inst getName` (names
+  DEF-ESCAPED: `U.x_1\[16\]$_SDFF_PP0_`). Cells without escaped chars (yosys `_1503_`)
+  matched, so the CSV looked plausible.
+- **Fix (2026-07-05):** join on the backslash-stripped canonical form on both sides
+  (`r2g_canon_name`); CSV rows keep the odb escaped name so feature-CSV joins still work.
+  After fix: 56/56 cordic registers labeled; worst-cell slack matches `report_checks`.
+
+### 2. sky130 RECT patch groups parsed as routing points (wirelength/congestion inflation)
+
+- **Symptom:** on sky130hd, RECT-bearing nets (1283/30k nets on aes_core) report
+  wirelengths 100-400x too long (`_00005_`: 1168 um vs OpenROAD's 3.29 um) and
+  congestion "utilization" reaches a nonphysical 11x. nangate45 is untouched (its DEFs
+  carry no RECT inside NETS) — which is why the original correspondence tests passed.
+- **Root cause:** DEF 5.8 `RECT ( dx1 dy1 dx2 dy2 )` patch-metal groups (min-area/
+  enclosure patches ORFS emits pervasively on sky130) carry RELATIVE offsets; the blind
+  point regex in `techlib.def_parse.route_segments` read the first two as an absolute
+  next point, adding a phantom segment to e.g. `(-70, -85)`.
+- **Fix (2026-07-05):** strip well-formed 4-integer `RECT ( ... )` groups before point
+  extraction (`_ROUTE_RECT_RE`). Note the fixed lengths are CENTERLINE lengths — OpenROAD
+  counts patch metal too, so RECT nets read ~0.2 um below `report_wire_length`; that
+  residual is patch metal, by-design excluded.
+
+### 3. DEF PIN direction inverted in net driver/sink counts
+
+- **Symptom:** every net touching a chip OUTPUT port counted 2 drivers / 0 sinks
+  (`theta_o[10]` on cordic); INPUT-port nets leaned on the "no driver found" fallback.
+- **Root cause:** DEF `PINS ... DIRECTION` is the port's direction from the CHIP's
+  perspective — an INPUT port DRIVES the net internally, an OUTPUT port SINKS it.
+  `nodes_net.py` used the raw direction as if it were a cell pin's.
+- **Fix (2026-07-05):** invert the mapping for `PIN` connections. Also implemented the
+  until-then hardwired-0 `connects_macro_flag` via `techlib.liberty.macro_cell_keys`
+  (masters only present in R2G_LIB_FILES minus R2G_SC_LIB_FILES = per-design macro libs).
+
+### 4. Driver max_capacitance summed into net "load" caps
+
+- **Symptom:** `nodes_pin.csv` `sum_pin_cap_fF` dominated by a constant ~59 fF per net on
+  nangate45 (NAND2_X1/ZN max_capacitance) — measured 62.54 fF where the true load is
+  3.19 fF (cordic `_0062_`).
+- **Root cause:** `get_pin_cap_fF` falls back to an OUTPUT pin's `max_capacitance` (a
+  drive LIMIT) when it has no `capacitance` attribute; the per-net summing treated it as
+  a load.
+- **Fix (2026-07-05):** `get_pin_load_cap_fF` (input loads only) used for the per-net
+  sums; `get_pin_cap_fF` kept for callers that want the legacy semantics.
+
+**Tests:** `tests/test_feature_semantics_fixes.py` (synthetic DEF/liberty),
+`tests/test_techlib_def_parse.py` (RECT cases). **Baseline note:** the machine-local
+byte-for-byte extractor baseline (`tools/regen_extract_baseline.sh`) must be REGENERATED
+after these fixes — nodes_net/nodes_pin/wirelength/congestion/timing outputs
+intentionally diverge from the pre-2026-07-05 baseline.
+
+### 5. sky130 quoted liberty attribute values — pin direction (and DFF clock flag) lost on EVERY std-cell pin
+
+- **Symptom (aes_core sky130hd):** `nodes_pin.csv` `pin_type_id` collapsed to the
+  catch-all id 14 for 93,390/98,343 pins (95%); `nodes_net.csv` `num_drivers` was 1 for
+  every net (the "no driver found → assume 1" fallback firing universally — plausible
+  values, which is what hid it); 390 nets carried wrong driver/sink counts and 1,065 pins
+  a wrong `sum_pin_cap_fF` (load classification needs direction). nangate45 unaffected.
+- **Root cause:** sky130hd/hs liberty writes QUOTED simple-attribute values —
+  `direction : "input";`, `clock : "true";` (ihp macro libs: `clock : "true" ;`) — and
+  `liberty.py`'s unquoted-only regexes (`direction\s*:\s*([A-Za-z_]+)\s*;`) never
+  matched, so every sky130 std-cell pin parsed with `direction == ""` and `clock ==
+  False`. Same class as the sky130 quoted-cell-name bug (commit 363a8b2) — that fix
+  covered cell names/area/power/leakage `value` but missed the four pin attributes.
+  Clock pins survived only via the `_looks_like_clock` NAME heuristic.
+- **Fix (2026-07-05):** optional-quote tolerance on `direction` / `capacitance` /
+  `max_capacitance` / `clock` in `techlib/liberty.py`. Verified on the real sky130hd tt
+  lib: 1,771/1,771 pins now carry a direction (was 0), 69 clock pins flagged (was 0).
+- **Lesson:** when a value-quoting bug is found for ONE liberty attribute, sweep ALL
+  simple-attribute regexes in the parser — the format allows quotes on any of them.
+
+### 6. Interrupted irdrop stage leaves the RAW PDNSim dump at the canonical ir_drop.csv path (silent all-NaN y2)
+
+- **Symptom (aes_core sky130hd, 2026-07-05):** `labels/ir_drop.csv` contained PDNSim's
+  raw `Instance,Terminal,Layer,X location,Y location,Voltage` format (no Design/Cell/
+  label columns); the graph stage built all five variants with **y2 (irdrop) 100% NaN**
+  and manifest `status: "ok"`; `reports/labels_stats.json` was missing entirely.
+- **Root cause (chain of four):** (1) `extract_irdrop.tcl` had `analyze_power_grid`
+  write its raw voltage file AT the canonical path and post-processed it IN PLACE — an
+  external kill (here: a 120s harness-timeout kill of the whole `run_labels.sh` process
+  group, landing between the raw write and the rewrite) leaves a valid-looking wrong
+  file; (2) `compute_label_stats.py` reported `status: "ok"` for a CSV with zero
+  parseable `label` values; (3) `graph_lib.build_*_label_values` silently `continue` on
+  missing Design/Cell/label columns → all-NaN y with no warning; (4) `run_graphs.sh`
+  judged label freshness by `wirelength.csv` alone, so the half-finished labels dir
+  passed as fresh on the next graph build.
+- **Fix (2026-07-05):** (1) PDNSim writes to `ir_drop.csv.raw`; the processed CSV is
+  published by atomic `file rename`; any pre-existing canonical file is deleted at stage
+  start (an interrupted run now leaves an honestly-missing CSV); (2) stats report
+  `status: "invalid"` + reason when rows exist but no label parses; (3) new
+  `graph_lib.label_health()` — build_graphs warns per unusable file and records
+  `label_health` + `status: "ok_with_label_gaps"` in the manifest; (4) `needs_stage`
+  requires the stage-completion marker (`features_stats.json`/`labels_stats.json`,
+  written LAST) to be present and DEF-fresh.
+- **Lesson:** every fail-soft fallback needs a loud, machine-readable trace. All four
+  links produced *plausible* outputs; only a ground-truth NaN-fraction check caught it.
+
+**Tests (5+6):** `tests/test_techlib_liberty.py` (quoted attributes, real-lib direction
+coverage), `tests/test_compute_label_stats.py` (raw/non-numeric → invalid),
+`tests/test_graph_stage.py` (label_health, manifest gap flag, duplicate-key guards).
+
+### 7. Congestion vertical demand keyed TRANSPOSED — ~80% of congestion labels wrong
+
+- **Symptom (aes_core sky130hd):** fixing the key changes `cell_congestion` for
+  151,335/189,774 cells (79.7%); mean |Δ| 0.052, max 0.323 on a 0–0.44 scale (e.g.
+  ANTENNA_30 read 0.009 where the true value is 0.096 — 10×). A cell physically ON a
+  vertical wire could read 0.0 while its diagonal-mirror cell read the phantom demand.
+- **Root cause:** `extract_congestion.add_split_segment` keys demand `(main_grid,
+  fixed_grid)`. For horizontal wires main=x → `(x, y)` ✓; for vertical wires main=y →
+  `(y, x)` ✗ — transposed vs. the `(x_gcell, y_gcell)` convention that
+  `build_grid_utilization` (which `max()`es h/v at the SAME key) and the cell mapper
+  use. Every cell's v_util came from its diagonal-mirror gcell; on non-square grids
+  transposed keys also fall off-grid (demand silently orphaned). Latent since the
+  original RTL2Graph ancestor; ORTHOGONAL to the #2 RECT fix (that validated point
+  extraction, which is upstream and was correct). The demand grid had zero test
+  coverage — `test_extract_congestion.py` only exercised LEF layer parsing.
+- **Fix (2026-07-05):** `add_split_segment(..., vertical=True)` emits `(fixed, main)`
+  = `(x, y)` for vertical wires; directional demand-grid tests added (a vertical wire
+  must fill a COLUMN; on-wire cell sees congestion, mirror cell sees none).
+
+### 8. capacitive_load_unit quoted unit — every sky130 pin cap 1000× too small
+
+- **Symptom:** sky130 `sum_pin_cap_fF` ≈ 0.002 fF per pin (impossible); nangate45 fine.
+- **Root cause:** the #5 quote sweep missed its sibling: sky130 writes
+  `capacitive_load_unit(1.0000000000, "pf");` and the bare-`[A-Za-z]+` unit regex
+  rejected `"pf"`, so `cap_scale_ff` stayed 1.0 and pf→fF scaling never happened
+  (nangate45's bare `(1,ff)` correctly needs no scaling — which is why only sky130
+  broke). The #5 direction fix *widened* the damage: output pins became correctly
+  OUTPUT, so the `max_capacitance` fallback (also unscaled) started firing too.
+- **Fix (2026-07-05):** optional quotes on the unit token. Real-lib check:
+  `cap_scale_ff` 1.0 → 1000.0; nand2_1/A = 2.315 fF (physically sane).
+- **Lesson (upgrade of #5's):** when a quoting bug is found, sweep the WHOLE file for
+  every value-capturing regex — including complex attributes — in ONE pass; fixing
+  only the reported sites left this one live through two audit waves.
+
+### 9. `parse_nets` drops `+ USE` on the net's dash line — `use` an artifact of line-wrapping
+
+- **Symptom (aes_core sky130hd):** `use` populated for only 1,666/30,345 nets — exactly
+  the ones whose connection list happened to wrap to a continuation line. ORFS emits
+  `+ USE` ON the `-` declaration line for single-line nets (28,679 of them here).
+- **Root cause:** the `-` branch in `techlib/def_parse.parse_nets` extracted conns and
+  `continue`d without scanning USE; the USE regex ran only on continuation lines.
+  Masked because `infer_net_type_id` falls back to name tokens (all 329 USE=CLOCK nets
+  are named `*clk*`) — a USE=CLOCK net with a non-clocky name would misclassify as
+  signal. `nodes_net.parse_pin_dirs` already scanned its dash line (the #3 fix) —
+  `parse_nets` simply never mirrored it.
+- **Fix (2026-07-05):** the same `m_use` search inside the `-` branch before `continue`.
+  Real-DEF check: USE coverage 1,666 → 30,345/30,345 (30,016 SIGNAL + 329 CLOCK).
+
+**Tests (7-9):** `tests/test_extract_congestion.py` (directional demand grid),
+`tests/test_techlib_liberty.py` (quoted cap unit), `tests/test_techlib_def_parse.py`
+(USE on dash line). **Regeneration note:** waves 1 AND 2 of the 2026-07-05 fixes both
+change sky130 outputs — congestion labels (#7), `sum_pin_cap_fF` (#8), `pin_type_id` /
+`num_drivers` / `num_sinks` (#5), irdrop labels (#6). ALL sky130 feature/label CSVs and
+graph datasets predating BOTH waves are wrong; regenerate before training.
+
+**Known modeling choices (documented, not bugs):** `extract_timing.tcl` constrains only
+the clock — no `set_input_delay`/`set_output_delay` — so pure I/O paths are
+unconstrained (input→reg slacks optimistic; cells feeding only output ports get
+`in_sta_path=false`, 4% of aes_core logic cells; reg↔reg labels unaffected). sky130
+physical-only fill/tap/decap cells are absent from the timing liberty → `cell_area`/
+`cell_power` 0 + `cell_type_id` UNKNOWN in nodes_gate.csv (84% of rows are such cells;
+the graph stage filters them — nangate45's curated map differs, a platform asymmetry).
+Power/ground iopin→net edge rows reference nets absent from nodes_net.csv (power nets
+live in SPECIALNETS) — the graph stage's net_type filter + inner joins drop them.
+
+### 10. `connects_macro_flag` ≡ 0 on every macro design — SC-lib list already contained the macro libs (2026-07-06 nangate45 round)
+
+- **Symptom:** on a fakeram45 design (mem_soc, 2 SRAM macros, ~230 macro-connected
+  nets) `nodes_net.csv` had `connects_macro_flag=0` for ALL 1,248 nets. No error
+  anywhere — pure std-cell designs legitimately have all-0, so the column looked alive.
+- **Root cause:** ORFS's resolved `LIB_FILES` **already folds `ADDITIONAL_LIBS` in**,
+  so `run_features.sh`'s `R2G_SC_LIB_FILES="$LIB_FILES"` (the "std-cell subset")
+  contained the macro libs too. `macro_cell_keys()` = lib_files − sc_lib_files = ∅ →
+  the flag can never fire, on ANY platform. Same wiring also fed macro cells into the
+  runtime cell-type map's "std-cell-only" id space — a LATENT cross-design id reshuffle
+  (nangate45 escaped only because uppercase std names sort before `fakeram45_*`).
+- **Fix:** `run_features.sh` now subtracts `ADDITIONAL_LIBS` from `LIB_FILES` when
+  exporting `R2G_SC_LIB_FILES`. Verified live: mem_soc regenerated with 237 flag=1
+  nets matching the DEF∩LEF-BLOCK truth (verifier check
+  `ext.net connects_macro_flag == DEF∩LEF-BLOCK truth`).
+
+### 11. Liberty `bus()`/`bundle()` groups unparsed — every macro bus pin unclassified with cap 0 (all platforms)
+
+- **Symptom:** fakeram45 bus pins (`addr_in[3]`, `wd_in[5]`, `rd_out[0]`, …) got
+  `pin_type_id=14` (the untyped fallback) and contributed 0 to `sum_pin_cap_fF`,
+  while the SAME macro's scalar pins (clk/we_in/ce_in) were typed with real caps —
+  the mixed result made the CSV look plausible.
+- **Root cause:** macro liberty declares direction/capacitance ONCE at the `bus()`
+  group level with NO per-bit `pin()` members; `techlib/liberty.py` only matched
+  `pin (...) {`. The DEF connects per-bit, so every lookup missed. Std-cell-only
+  platforms never exposed this (no bus groups in std liberty).
+- **Fix:** the pin-group regex now also enters `bus()`/`bundle()` groups, and
+  `get_pin_info` falls back from `name[idx]` to the bus base entry. Regression:
+  `test_bus_group_members_resolve` + verifier check
+  `ext.macro pins classified (no type-14 bus fallout)`.
+
+### 12. nangate45 curated cell-type map drifted 22 masters behind the deployed liberty (RETIRED → runtime map)
+
+- **Symptom:** every instance of AOI211_X1/AOI222_X1/OAI211_X1/OAI222_X1/OAI222_X4,
+  ALL scan FFs (SDFF*/SDFFR*/SDFFS*/SDFFRS*), ALL clock gates (CLKGATE*/CLKGATETST*),
+  and TLAT_X1 took `cell_type_id=95` — the literal UNKNOWN sentinel — silently aliased
+  onto genuinely-unknown masters. Reverse diff proved version drift: the map still
+  carried DFFSR/DLHR/DLHS/TINV_X2 keys the current liberty no longer ships. Dormant on
+  the default corpus (no DFT/clock-gating ⇒ 0.001% of 46.7M instances), a cliff the
+  moment SYNTH clock gating, scan, or latch inference is enabled.
+- **Root cause:** nangate45 was the ONLY platform hardwired to a frozen curated map
+  (`resolve_cell_type_map` special case); every other platform builds the map from the
+  resolved liberty at runtime and cannot miss a cell.
+- **Fix:** curated special-case retired — nangate45 uses the runtime liberty-derived
+  map like everyone else (self-heals future liberty drift, covers all 23 fakeram
+  sizes). Macro-lib cells now take a dedicated shared `MACRO` id (= UNKNOWN+1) instead
+  of collapsing into UNKNOWN. **Any nangate45 dataset built against the curated ids
+  must be regenerated** (they were already invalidated by #7). Regression:
+  `test_nangate45_runtime_map_heals_drifted_masters` + verifier checks
+  `ext.macro masters share one dedicated id` / `ext.distinct std masters get distinct ids`.
+
+### 13. `metadata.csv` tracks_per_layer was a pipe-joined STRING — `global_feat[12]` = 0.0 on every platform
+
+- **Symptom:** `global_feat[12]` was 0.0 in every graph of every platform; the CSV
+  column held `metal1:228|metal10:12|…`, which `load_global_feat`'s `pd.to_numeric`
+  coerced to NaN → 0.0. Same mechanism zeroes PLACE_DENSITY/CORE_UTILIZATION when they
+  hold non-numeric strings like "Default" (those are accepted as honest absences).
+- **Fix:** `metadata.py` emits the numeric MEAN per-layer track count in
+  `tracks_per_layer` and moved the per-layer detail to a new trailing
+  `tracks_detail` column (loaders read by column name — inert). Regression: verifier
+  checks `ext.metadata tracks_per_layer numeric mean` + `ext.global_feat[12] tracks nonzero`.
+
+### 14. `classify_pin_type` name-heuristic ordering — FA/HA sum output `S` labeled "select"; ICGs not sequential
+
+- **Symptom:** nangate45 FA_X1/HA_X1 declare the SUM output as `pin (S) { direction :
+  output }`; `_looks_like_select` ran before the OUTPUT branch, so adder sum pins got
+  pin_type_id 10 (select input) instead of 4 (output) — platform-agnostic, hits
+  arithmetic-heavy designs. Related: CLKGATE*/CLKGATETST* hold state via `statetable()`
+  (not ff/latch), so `is_sequential` mis-flagged ICGs combinational.
+- **Fix:** select classification now requires `direction != OUTPUT` (MUX2_X1's S input
+  still classifies 10); `statetable(` marks sequential. Regression:
+  `test_select_name_on_output_pin_is_output`, `test_statetable_marks_sequential`.
+
+### 15. Liberty `ff_bank`/`latch_bank` (multibit sequential) not detected — `is_sequential` false on every asap7 multibit flop (2026-07-06 nangate45 verification round)
+
+- **Symptom:** `load_liberty_db` marks a cell sequential when its body opens an
+  `ff(`/`latch(`/`statetable(` group, but MULTIBIT flops/latches declare state via
+  `ff_bank(...)`/`latch_bank(...)`. The old regex `(ff|latch|statetable)\s*\(` fails to
+  match `ff_bank(` (after `ff` comes `_`, not `\s*\(`), so `is_sequential` stayed False.
+  asap7 ships 27 liberty files using `ff_bank`; nangate45/sky130/gf180/ihp have none.
+- **Impact:** currently **inert** — `is_sequential` is written but consumed by no
+  feature/label (dead field). Fixed defensively so a future consumer (or an asap7 graph
+  build) is correct, and because it is a genuine shared-parser defect surfaced by the
+  synthetic corner-case suite (real nangate45 files never exercise `ff_bank`).
+- **Fix:** regex widened to `(ff_bank|ff|latch_bank|latch|statetable)\s*\(` (longer
+  alternatives first so the match is unambiguous). Regression:
+  `test_ff_and_latch_bank_are_sequential`, `test_ff_latch_statetable_still_sequential_combinational_not`.
+
+### 16. `compute_feature_stats` had no honesty gate — a raw/truncated feature CSV summarized as "ok" (X-side mirror of #6)
+
+- **Symptom:** `compute_label_stats.py` flags a label CSV `invalid` when it has rows but
+  no numeric label column (the #6 irdrop raw-dump lesson). `compute_feature_stats.py` had
+  **no** equivalent: it returned `status:"ok"` for ANY non-empty CSV. A worker killed
+  mid-write (truncated rows) or a stale/raw CSV left at the canonical path was reported
+  fresh and healthy — the exact honesty failure the label side already guards. Asymmetric
+  and silent; not triggered on a clean nangate45 run (all workers succeed).
+- **Fix:** `compute_feature_stats.summarize` now checks each CSV's identity columns
+  against a `REQUIRED_COLS` schema — a missing column ⇒ `invalid` (raw/wrong-schema
+  dump), a required column left unset on any row ⇒ `invalid` (truncated write) — and
+  `main()` warns to stderr, mirroring the label gate. Behavior-neutral on well-formed
+  nangate45 CSVs (all 8 feature sets stay `ok`). Regression:
+  `test_feature_stats_flags_missing_columns_invalid`,
+  `test_feature_stats_flags_truncated_rows_invalid`, `test_feature_stats_ok_on_complete_csv`.
+
+### 17. `netlist_graph` tie-off constants in a concatenation leaked a phantom net (`{1'b0, sig}` → net `b0`)
+
+- **Symptom:** `extract_signal_names` tokenizes a concatenation with the plain-id regex;
+  a Verilog sized constant `1'b0` inside `{...}` is split by the `'` and its fragment
+  `b0` was emitted as a (fake) net node/edge. ORFS mapped netlists tie constants through
+  `LOGIC0_X1`/`LOGIC1_X1` cells (verified: zero literal constants across the sampled
+  corpus), so this never fired in production — a latent defect a hand-written or
+  non-ORFS netlist would trip.
+- **Fix:** sized constant literals (`\d+'[bodh]…`) are stripped from a concatenation
+  before tokenizing (standalone-constant normalization to CONST0/CONST1 unchanged).
+  Regression: `test_netlist_constants_in_concat_are_dropped`.
+
+### 18. Minor latent parity fixes (2026-07-06 audit) — no nangate45 impact
+
+- `run_labels.sh` did not export `R2G_PLATFORM` to `extract_congestion.py`, which fell
+  back to asap7's routing-layer profile — harmless today (all platforms share one
+  fallback table AND it only fires when the tech LEF yields no routing layers) but a
+  cross-platform hazard once the fallback becomes platform-specific. Now passed through.
+- `edges_iopin_net.py` did not `rstrip(';')` a DIRECTION captured on a *continuation*
+  line (the dash-line branch already did), so `+ DIRECTION OUTPUT;` with no space would
+  store `OUTPUT;`. DEF normally spaces the `;`; fixed for parity.
+
+### Corner-case verification infrastructure (2026-07-06)
+
+The bugs above (and the 2026-07-05 batch) live in code paths the REAL nangate45 designs
+never exercise, so `tools/verify_graph_dataset.py` (which cross-checks a built dataset
+against the raw liberty/LEF/DEF) stays green while they hide. Two new suites close that
+gap by exercising corner cases on inputs the extractors control:
+
+- `tests/fixtures/corner_synth.py` + `tests/test_corner_case_pipeline.py` — a
+  hand-computable synthetic nangate45-style design (std cells + a bus-pin macro, a
+  clock/reset/multi-layer/RECT-patch/2-driver net mix) driven through the REAL feature
+  workers → label extractors → PyG builder, asserting every output against
+  independently hand-derived ground truth, across **all five graph views b–f** (node/edge
+  counts, folded-entity `edge_attr` features + `edge_y` labels, clock-tree/FILL/TAP
+  exclusion, undirected symmetry).
+- `tests/test_corner_case_units.py` — focused unit corners: ff_bank/latch_bank/statetable
+  sequential detection, INOUT/FEEDTHRU + power/ground + multi-digit bus-index pin
+  classification, pf→fF cap scaling, CUT-vs-ROUTING LEF layers + VIA re-declaration, the
+  congestion demand-key (x_gcell, y_gcell) convention under an ASYMMETRIC grid (catches
+  the #7 transpose), netlist constant handling, and the #16 feature-stats honesty gate.
+
+**Lesson:** a raw-file cross-check and a corner-case fixture suite are complementary — the
+first proves the extractors match the tools on the inputs you HAVE, the second proves they
+handle the inputs you might GET. A liberty fixture MUST be one-attribute-per-line (the
+parser uses anchored `re.match`); a crammed pin silently drops direction/clock/cap and
+tests nothing.
