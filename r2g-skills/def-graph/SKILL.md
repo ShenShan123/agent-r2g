@@ -102,7 +102,9 @@ R2G_GRAPH_PYTHON=/proj/<you>/pyenvs/r2g-graph/bin/python \
 
 Needs torch + torch_geometric + pandas; machines without them SKIP cleanly with a HINT.
 `R2G_GRAPH_VARIANTS` selects variants (default `bcdef`); `GRAPH_TIMEOUT` (default 2400s);
-`R2G_DEF` pins a specific DEF. See `references/graph-dataset.md`.
+`R2G_DEF`/`R2G_ODB`/`R2G_SPEF` pin the DEF/ODB/SPEF for **both** the feature and label stages
+(so X and Y stay joined on the same DEF), enabling a backend-less reference-DEF build.
+See `references/graph-dataset.md`.
 
 **Check `status` + `label_health` in the manifest before training.** `status:
 "ok_with_label_gaps"` means ≥1 label file couldn't join (its y slot is all-NaN); the per-file

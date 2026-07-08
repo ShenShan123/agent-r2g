@@ -345,3 +345,24 @@ pollution). `read_def_truth` now also captures placement `status`;
   status `violations` → provenance FAIL; SDC period drift → timing-transform FAIL;
   `equiv_res`×1000 (ohm↔kΩ unit bug) → SPEF-bound FAIL.
 - Full def-graph suite: **331 passed, 14 skipped, 0 failed**.
+
+---
+
+## Follow-on — verifier override / no-backend support (2026-07-08 r2g-debug tick)
+
+A later r2g-debug tick fixed the labels stage to honor `R2G_DEF`/`R2G_ODB` (failure-patterns
+#23 — previously only `run_features.sh` honored `R2G_DEF`, so X and Y could read different
+DEFs). That *enabled* the nangate45 reference-DEF verification workflow to reach
+`verify_graph_dataset.py` for the first time, which exposed a matching blind spot in the verifier
+(failure-patterns **#24**): `extended_checks` + the netlist section did a bare
+`os.listdir(case+"/backend")` — `FileNotFoundError` on a no-backend override project **after 100+
+checks had already passed** (the `os.path.isdir` guard from this audit had been applied to two of
+the four `os.listdir` sites but missed these two), and the SPEF finders ignored `R2G_SPEF` →
+RC false-FAIL. **Fixed:** shared `_find_spef` (honors `R2G_SPEF`), `extended_checks` honors
+`R2G_DEF`, both remaining `os.listdir` sites guarded — all additive (backend-present `--batch`
+path byte-identical). Validated: nangate45 `cordic` override build **156/156**; sky130hd `--batch`
+7/7 (164–168 each); full def-graph suite **336 passed, 14 skipped**. Regression tests appended to
+`test_verify_comprehensive.py` (+ `test_label_stage_def_override.py` for the labels half).
+**Lesson:** adding a producer-side override that lets a new input shape reach a pipeline obliges
+the *verifier* of that pipeline to honor the same knobs — otherwise the workflow is only
+half-enabled.

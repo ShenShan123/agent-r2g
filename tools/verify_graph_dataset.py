@@ -492,17 +492,30 @@ def _spef_deesc(name):
     return re.sub(r"\\([^\[\]])", r"\1", name) if "\\" in name else name
 
 
-def read_spef_truth(case):
-    """Independent SPEF re-derivation (SEPARATE code from techlib.spef): per-net
-    ground cap (fF) and per-cross-net-pair coupling cap (fF), names de-escaped to
-    DEF convention. Returns {"present": False} when no SPEF (RC labels absent)."""
+def _find_spef(case):
+    """The SPEF the dataset was actually built from: the R2G_SPEF override first
+    (so an override / no-backend verification project matches how run_labels /
+    run_features located it), then the backend/rcx discovery. '' when none exists.
+    Without honoring R2G_SPEF the RC checks read the SPEF from a place an override
+    build never wrote, and a legitimately RC-populated override dataset false-FAILs
+    "no SPEF -> rc_health=no_rc_labels" (2026-07-08 verifier override-support fix)."""
+    env = os.environ.get("R2G_SPEF") or ""
+    if os.path.isfile(env):
+        return env
     cands = sorted(glob.glob(case + "/backend/RUN_*/rcx/6_final.spef")
                    + glob.glob(case + "/backend/RUN_*/results/6_final.spef"))
     if os.path.isfile(case + "/rcx/6_final.spef"):
         cands.append(case + "/rcx/6_final.spef")
-    if not cands:
+    return cands[-1] if cands else ""
+
+
+def read_spef_truth(case):
+    """Independent SPEF re-derivation (SEPARATE code from techlib.spef): per-net
+    ground cap (fF) and per-cross-net-pair coupling cap (fF), names de-escaped to
+    DEF convention. Returns {"present": False} when no SPEF (RC labels absent)."""
+    spef = _find_spef(case)
+    if not spef:
         return {"present": False}
-    spef = cands[-1]
     id2name, net_ids, inst_ids = {}, set(), set()
     pin_to_net, port_to_net = {}, {}
     cap_scale = 1.0
@@ -615,17 +628,25 @@ def extended_checks(case, design, feat, labs, views, b):
     lib = read_liberty_truth(lib_paths)
     layers, blocks = read_lef_truth(plat.get("TECH_LEF", ""),
                                     plat.get("ADDITIONAL_LEFS", "").split())
-    runs = sorted((r for r in os.listdir(case + "/backend") if r.startswith("RUN_")),
-                  reverse=True)
-    def_path = None
+    backend_dir = case + "/backend"
+    runs = sorted((r for r in os.listdir(backend_dir) if r.startswith("RUN_")),
+                  reverse=True) if os.path.isdir(backend_dir) else []
+    # Honor the same R2G_DEF override the build (run_features/run_labels) used, so an
+    # override / no-backend verification project (a nangate45 reference-DEF build,
+    # Step 5c) still gets the independent raw DEF re-parse rather than a bare
+    # os.listdir crash on a missing backend/ dir (2026-07-08; the isdir guard was
+    # already applied at the other two os.listdir sites but missed here).
+    def_path = os.environ.get("R2G_DEF") or None
+    if def_path and not os.path.isfile(def_path):
+        def_path = None
     for r in runs:
+        if def_path:
+            break
         for sub in ("final", "results"):
             p = f"{case}/backend/{r}/{sub}/6_final.def"
             if os.path.isfile(p):
                 def_path = p
                 break
-        if def_path:
-            break
     if not def_path:
         check("ext: 6_final.def present", False, "no DEF — extended checks skipped")
         return
@@ -1607,16 +1628,13 @@ def _sdc_clock_period(case):
 
 def _spef_resistances(case):
     """Independent flat list of all *RES values (ohms, R_UNIT-scaled)."""
-    cands = sorted(glob.glob(case + "/backend/RUN_*/rcx/6_final.spef")
-                   + glob.glob(case + "/backend/RUN_*/results/6_final.spef"))
-    if os.path.isfile(case + "/rcx/6_final.spef"):
-        cands.append(case + "/rcx/6_final.spef")
-    if not cands:
+    spef = _find_spef(case)
+    if not spef:
         return None
     rscale = 1.0
     vals = []
     insec = False
-    for raw in open(cands[-1], errors="ignore"):
+    for raw in open(spef, errors="ignore"):
         s = raw.strip()
         if s.startswith("*R_UNIT"):
             p = s.split()
@@ -2140,8 +2158,10 @@ def verify_case(case, design=None, json_out=None):
     npt = ds + "/netlist_graph.pt"
     if os.path.isfile(npt):
         g = torch.load(npt, weights_only=False)
+        _bk = case + "/backend"
         runs = sorted(
-            (r for r in os.listdir(case + "/backend") if r.startswith("RUN_")), reverse=True)
+            (r for r in os.listdir(_bk) if r.startswith("RUN_")), reverse=True) \
+            if os.path.isdir(_bk) else []
         yos = None
         for r in runs:
             p = f"{case}/backend/{r}/results/1_2_yosys.v"

@@ -394,3 +394,49 @@ def test_sdc_clock_period_and_spef_resistances(tmp_path):
     assert vgd._sdc_clock_period(case) == pytest.approx(3.14)
     rv = vgd._spef_resistances(case)
     assert rv and sum(rv) == pytest.approx(900.0)   # 500 + 400, R_UNIT 1 OHM
+
+
+# =========================================================================== #
+# GROUP D — R2G_DEF / R2G_SPEF override + no-backend tolerance (2026-07-08)     #
+# The reference-DEF verification workflow (Step 5c) builds a dataset from       #
+# R2G_DEF/R2G_SPEF into a project that has NO ORFS backend/ dir. The verifier   #
+# must honor those overrides and must never crash on the missing backend       #
+# (pre-fix: os.listdir(case+'/backend') raised FileNotFoundError AFTER 100+     #
+# checks had already passed; RC false-FAILED 'no SPEF -> no_rc_labels').        #
+# =========================================================================== #
+_SPEF_TEXT = ('*SPEF "IEEE 1481-1999"\n*R_UNIT 1 OHM\n'
+              '*D_NET n0 30\n*RES\n1 a b 500.0\n2 b c 400.0\n*END\n')
+
+
+def test_find_spef_honors_r2g_spef_override(tmp_path, monkeypatch):
+    """R2G_SPEF wins over (absent) backend discovery, so an override build's RC
+    labels are checked against the SPEF they were actually built from."""
+    spef = tmp_path / "ext_6_final.spef"
+    spef.write_text(_SPEF_TEXT)
+    case = tmp_path / "override_proj"          # deliberately NO backend/ dir
+    case.mkdir()
+    monkeypatch.setenv("R2G_SPEF", str(spef))
+    assert vgd._find_spef(str(case)) == str(spef)
+    assert vgd._spef_resistances(str(case)) == pytest.approx([500.0, 400.0])
+
+
+def test_find_spef_empty_and_rc_absent_without_env_or_backend(tmp_path, monkeypatch):
+    """No R2G_SPEF + no backend -> RC legitimately absent, never a crash."""
+    case = tmp_path / "bare_proj"
+    case.mkdir()
+    monkeypatch.delenv("R2G_SPEF", raising=False)
+    assert vgd._find_spef(str(case)) == ""
+    assert vgd.read_spef_truth(str(case)) == {"present": False}
+    assert vgd._spef_resistances(str(case)) is None
+
+
+def test_extended_checks_survives_missing_backend(mini, monkeypatch):
+    """extended_checks degrades to a graceful 'no DEF' skip -- never
+    FileNotFoundError -- when case/backend is absent. Pre-fix os.listdir crashed
+    here even though the isdir guard was already applied at the other two sites."""
+    monkeypatch.delenv("R2G_DEF", raising=False)
+    monkeypatch.setattr(vgd, "resolve_platform_files", lambda case: {})
+    # mini["tmp"] has feat/labs but NO backend/ subdir. _run raises if the fn does.
+    fails = _run(vgd.extended_checks, mini["tmp"], "mini",
+                 mini["feat"], mini["lab"], mini["views"], mini["tensors"]["b"])
+    assert any("6_final.def present" in f for f in fails), fails

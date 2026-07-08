@@ -48,9 +48,21 @@ fi
 PLATFORM="${PLATFORM:-asap7}"
 
 # --- Locate the collected 6_final.{odb,def} --------------------------------
-ODB=""; DEF=""; RUN_DIR=""  # RUN_DIR: the backend run the ODB/DEF came from (SPEF is paired from it)
+# Override via the namespaced R2G_DEF / R2G_ODB only (NOT the bare ORFS DEF_FILE):
+# run_features.sh honors R2G_DEF, so run_labels.sh MUST honor it too -- otherwise
+# X (features) and Y (labels) can key off DIFFERENT DEFs whenever R2G_DEF is set
+# and a backend is also present, silently misaligning the graph_id+inst_name /
+# net_name join the entire dataset rests on (the same-DEF data contract; see
+# graph-dataset.md + failure-patterns.md "R2G_DEF honored by features not labels").
+# R2G_ODB pairs the ODB for the ODB-only label (IR drop); the DEF-derivable labels
+# (congestion, wirelength, timing via the DEF fallback, RC via R2G_SPEF) all work
+# from R2G_DEF alone. Backend discovery still fills in whichever is NOT overridden,
+# exactly as run_features.sh pairs an override DEF with a discovered SPEF.
+ODB="${R2G_ODB:-}"; DEF="${R2G_DEF:-}"; RUN_DIR=""  # RUN_DIR: the backend run the ODB/DEF came from (SPEF is paired from it)
+{ [[ -n "$DEF" ]] || [[ -n "$ODB" ]]; } && \
+  echo "NOTE: labels DEF/ODB overridden (R2G_DEF=${DEF:-<none>} R2G_ODB=${ODB:-<none>})" >&2
 BACKEND_DIR="$PROJECT_DIR/backend"
-if [[ -d "$BACKEND_DIR" ]]; then
+if [[ ( -z "$ODB" || -z "$DEF" ) && -d "$BACKEND_DIR" ]]; then
   for run in $(ls -d "$BACKEND_DIR"/RUN_* 2>/dev/null | sort -r); do
     for sub in final results; do
       [[ -z "$ODB" && -f "$run/$sub/6_final.odb" ]] && { ODB="$run/$sub/6_final.odb"; RUN_DIR="$run"; }

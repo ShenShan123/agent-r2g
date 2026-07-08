@@ -40,7 +40,13 @@ python3 -m venv /proj/<you>/pyenvs/r2g-graph
 ```
 
 Knobs: `R2G_GRAPH_VARIANTS` (default `bcdef`), `GRAPH_TIMEOUT` (s, default 2400),
-`R2G_DEF` (pin a specific DEF).
+`R2G_DEF` (pin a specific DEF), `R2G_ODB` (pin the ODB for the IR-drop label),
+`R2G_SPEF` (pin the SPEF for RC labels). **Both** the feature and label stages honor
+`R2G_DEF`/`R2G_SPEF` (the labels stage honors `R2G_DEF` as of 2026-07-08 — failure-patterns
+#23), so X and Y always read the *same* DEF and stay joined. Together they enable a
+backend-less **reference-DEF** build (drive the extractors against a bare `6_final.def` with no
+ORFS `backend/`; the Step-5c nangate45 verification path), which `tools/verify_graph_dataset.py`
+also supports via the same overrides (#24).
 
 ## The five topologies (node counts: cordic nangate45 / aes_core sky130hd)
 

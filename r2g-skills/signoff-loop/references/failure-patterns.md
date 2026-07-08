@@ -3411,3 +3411,57 @@ Validated: pristine `iir` 106/106 (no false-FAIL); injections (NaN'd congestion,
 check that can't fail is worse than no check — it manufactures false confidence. Any
 `abs(a-b) > tol` value check must treat `NaN` as a mismatch, and any `checked>0` guard must
 count only rows where a real comparison happened.
+
+### 23. `R2G_DEF` honored by features but NOT labels — X/Y could key off different DEFs (2026-07-08)
+
+The data contract's load-bearing invariant is *"X (features) and Y (labels) read the SAME
+`6_final.def`, so rows join on `graph_id`+`inst_name`/`net_name`."* `run_features.sh` locates the
+DEF via the namespaced `R2G_DEF` override first (then backend/results); **`run_labels.sh` did NOT
+— it discovered the DEF/ODB ONLY from `$PROJECT_DIR/backend/RUN_*` or the live ORFS `results/`
+dir, ignoring `R2G_DEF` entirely** (it honored `R2G_SPEF` for the SPEF but not `R2G_DEF` for the
+DEF). Two consequences:
+- A verification / override build with **no backend** (e.g. driving the extractors against a bare
+  reference DEF — the nangate45 Step-5c workflow) **skipped the entire labels stage** with
+  `reason:"no backend artifacts"` while features built cleanly. Surfaced by an r2g-debug tick
+  building nangate45 `cordic` from `6_final.def` via `R2G_DEF`.
+- The silent-value trap: when `R2G_DEF` **was** set and a backend also existed, features read the
+  override DEF while labels read the backend DEF → X and Y keyed off **different** DEFs and the
+  name-join silently misaligned, with no error (the exact failure class this skill exists to
+  prevent; the skill even documents `R2G_DEF` as "the namespaced override ONLY").
+
+**Fix** (`run_labels.sh`): honor `R2G_DEF` / `R2G_ODB` as the highest-priority DEF/ODB source,
+mirroring `run_features.sh`; backend discovery still fills in whichever is *not* overridden, and
+with both unset the production path (631-design sky130hd corpus) is byte-identical (the
+`( -z "$ODB" || -z "$DEF" )` guard is true when both are empty). `R2G_ODB` pairs the ODB for the
+ODB-only label (IR drop); the DEF-derivable labels (congestion, wirelength, timing via the DEF
+fallback, RC via `R2G_SPEF`) work from `R2G_DEF` alone. Re-validated: nangate45 `cordic` built
+from `R2G_DEF`+`R2G_ODB`+`R2G_SPEF` → 7/7 labels `ok`, full b–f dataset, `rc_health=ok`. TDD:
+`test_label_stage_def_override.py` (control = no-override honest skip; experiment = override
+honored → not skipped; proven RED without the fix).
+
+### 24. Verifier assumed a backend + ignored `R2G_DEF`/`R2G_SPEF` — crash + RC false-FAIL on override builds (2026-07-08)
+
+Fixing #23 *enabled* the nangate45 reference-DEF verification workflow to reach
+`tools/verify_graph_dataset.py` for the first time — which then exposed the same "assumes a
+backend, ignores the `R2G_*` overrides" blind spot in the *verifier*:
+- **Hard crash:** `extended_checks` and the netlist section did a bare
+  `os.listdir(case+"/backend")`, raising `FileNotFoundError` on a no-backend override project —
+  **after 100+ checks had already passed** (the `os.path.isdir` guard had been applied to the two
+  *other* `os.listdir` sites in the 2026-07-07 hardening but missed these two). A verifier must
+  degrade to a clear SKIP when an input is legitimately absent, never abort the whole run.
+- **RC false-FAIL:** the SPEF finders (`read_spef_truth`, `_spef_resistances`) globbed
+  `backend/RUN_*/…` only and ignored `R2G_SPEF`, so a legitimately RC-populated override dataset
+  tripped `rc: no SPEF -> rc_health=no_rc_labels`.
+
+**Fix:** a shared `_find_spef(case)` helper that honors `R2G_SPEF` first (then the backend glob);
+`extended_checks` honors `R2G_DEF` for its independent raw DEF re-parse; the two unguarded
+`os.listdir` sites now use the `if os.path.isdir(...) else []` guard. All additive — with `R2G_*`
+unset and a backend present (the production `--batch` path) behavior is byte-identical.
+Re-validated: nangate45 `cordic` override build **156/156 checks passed**; sky130hd `--batch`
+7/7 designs 164–168 each; full def-graph suite 336 passed. TDD (added to
+`test_verify_comprehensive.py`): `test_find_spef_honors_r2g_spef_override`,
+`test_find_spef_empty_and_rc_absent_without_env_or_backend`,
+`test_extended_checks_survives_missing_backend` (proven RED without the fix). **Lesson:** when you
+add an override that lets a new input shape reach a pipeline, the *verifier* for that pipeline
+inherits the same override obligation — fixing the producer half-enables the workflow until the
+checker honors the same knobs.
