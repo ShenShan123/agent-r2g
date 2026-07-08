@@ -2,8 +2,12 @@
 
 `scripts/flow/run_labels.sh <project-dir> [platform]` runs after a completed ORFS
 backend and emits per-cell/per-net **regression-target** tables plus a per-design
-statistics JSON. It is fail-soft: each of the four label sets is independent, and a
+statistics JSON. It is fail-soft: each label set is independent, and a
 missing input or tool error records a per-label status without aborting the others.
+
+The label sets are the four tool-derived targets (congestion, wirelength, timing,
+IR drop) **plus RC parasitics** (ground cap / coupling cap / equivalent resistance),
+extracted from the SPEF — see "RC parasitic labels" below.
 
 ## Outputs
 
@@ -15,6 +19,10 @@ Written to `design_cases/<design>/labels/` and `design_cases/<design>/reports/`:
 | `labels/wirelength.csv` | per net | `Design,Net,NetType,WireLength_um,label,mask_wl` | `label = log1p(WireLength_um)`; `mask_wl = NetType==SIGNAL` |
 | `labels/timing_features.csv` | per placed instance | `Design,Cell,Cell_Slack_ns,Path_Delay_ns,label,in_sta_path` | `label = log(1+Path_Delay_ns)`; `Path_Delay_ns = clk_period - worst_slack` (floored at 0) |
 | `labels/ir_drop.csv` | per instance (fillers/tap/endcap filtered) | `Design,Cell,X,Y,Voltage_V,IR_Drop_mV,P95_mV,label,has_irdrop` | `label = log(1 + IR_Drop_mV/P95_mV)` |
+| `labels/net_ground_cap.csv` | per net | `Design,Net,ground_cap_fF,label` | `label = log1p(ground_cap_fF)` (RC — net-node label) |
+| `labels/coupling_cap.csv` | per cross-net pair | `Design,Net1,Net2,coupling_cap_fF,label` | `label = log1p(coupling_cap_fF)` (RC — net-pair edge label) |
+| `labels/equiv_res.csv` | per intra-net pin pair | `Design,Net,Inst1,Pin1,Inst2,Pin2,equiv_res_ohm,label` | `label = log1p(equiv_res_ohm)` (RC — pin-pair edge label) |
+| `labels/net_driver.csv` | per net | `Design,Net,DrvInst,DrvPin` | — (each net's driver pin; places coupling on driver pins in folded views) |
 | `reports/labels_stats.json` | — | per-label count + min/mean/p50/p90/p95/p99/max for `label` and the raw metric, plus mask/in_path/has_irdrop tallies | — |
 
 `Design` + `Cell`/`Net` are the join keys across the four tables. Note that `timing`
@@ -77,6 +85,59 @@ cells, 30×30 GCells): identical `util` ⇒ label diff `<1e-15`; full pipeline (
 float64 CLI vs. reference float32) label diff `<1e-8`. The residual is the reference's
 float32 storage vs. the skill's float64 — the skill is strictly more precise.
 
+## RC parasitic labels
+
+`extract_rc.py` parses the post-route **SPEF** (`6_final.spef`) into three RC
+prediction targets. RC parasitics are *labels* (Y), never features (X) — they are
+what a model predicts from the physical/logical topology, so they attach to the
+graph's `y` / parasitic-edge tensors, not to `x`. The shared SPEF parser is
+`techlib/spef.py` (ground-truthed on real nangate45 gcd + sky130hd apb_master
+SPEFs; both use `*C_UNIT 1 PF`, `*R_UNIT 1 OHM`).
+
+| Quantity | Entity | From SPEF |
+|----------|--------|-----------|
+| **ground cap** | a **net** | Σ grounded (2-arg) `*CAP` entries of the net (fF) |
+| **coupling cap** | a **net pair** | Σ cross-net (3-arg) `*CAP` coupling between two nets (fF) |
+| **equivalent resistance** | a **pin pair on one net** | reduced resistance between the two pins over the net's `*RES` segment tree (Ω) |
+
+- **Equivalent resistance** is computed **pure-Python** (no numpy/scipy, like the
+  congestion Gaussian): the net's `*RES` segments form a resistor graph; the
+  effective resistance between two pins is the resistance along the unique tree path
+  (SPEF signal nets are radial trees; a rare cyclic net uses the traversal spanning
+  tree). All-pairs over each net's pins (a clique, matching how nets fold in views
+  d/e). `R2G_RC_MAX_FANOUT` (default 0 = uncapped) skips + **logs** any net with more
+  pins than the cap (never a silent drop).
+- **Coupling symmetry + dedup:** `write_spef` emits each coupling capacitor
+  **symmetrically** — once in *each* participating net's `*CAP` block. The parser
+  counts each physical capacitor **once** by (a) skipping the mirror whose partner
+  resolves to the current net and (b) deduping the raw `(node1, node2)` token pair
+  (robust to either node order). So the per-pair dict holds each coupling once.
+  (Sanity identity, verified on gcd/apb_master/DMA_top real SPEFs: `Σ D_NET header
+  cap = Σ ground + 2·Σ coupling` — headers double-count coupling, the deduped dict does not.)
+- **Driver detection** picks the net's output pin (an instance `O` pin, else a top
+  input port); emitted to `net_driver.csv`.
+- **SPEF↔DEF name de-escaping (critical for the join).** `write_spef` escapes `.`,
+  `$`, etc. with a backslash while `write_def`/`def_parse` escape **only** the bus
+  brackets `[` `]`. `techlib/spef.py` de-escapes SPEF names to the DEF convention
+  (`\.`→`.`, `\$`→`$`, keep `\[`/`\]`) so RC names join the feature CSVs
+  (`nodes_net`/`nodes_pin`). **Without this the join drops every hierarchical net and
+  double-bus register** — measured on aes_core (sky130hd): 79–92% → **100%** join
+  (see failure-patterns.md "Dataset-Extraction Silent-Value Defects").
+
+**Attachment across the graph views (b–f)** — `graph_lib.attach_rc_labels`
+(see graph-dataset.md "RC parasitic labels"): ground cap rides `y5` (net node in b/c,
+broadcast to that net's pin nodes in d/e, dropped in f); coupling/equivalent
+resistance ride a **separate** parasitic edge set (`rc_edge_index`/`rc_edge_type`/
+`rc_edge_y`) — coupling on net↔net (driver-pin↔driver-pin where nets are folded),
+resistance on same-net pin↔pin. `graph_manifest.json` carries `rc_health` (per-design
+coverage) + per-variant `rc_edges`/`rc_coupling_edges`/`rc_resistance_edges`.
+
+**SPEF discovery + fail-soft.** `run_labels.sh` locates the SPEF from the same backend
+`RUN_*` the ODB/DEF came from (then any run, then `<project>/rcx/`) — the same order as
+`run_features.sh`. No SPEF (RCX not run / platform without RCX rules) → the three RC
+CSVs are header-only and the graph's RC slots are simply empty (`labels_stats.json`
+reports `skipped`). All six ORFS platforms with RCX rules are covered by the one parser.
+
 ## Why timing & IR drop read liberty
 
 Both the timing STA and PDNSim IR-drop analysis need cell timing/power models.
@@ -96,6 +157,8 @@ the ground net = 0), else it raises `PSM-0079`.
 | `SUPPLY_VOLTAGE` | nominal VDD for the IR-drop delta + PDNSim rail voltage |
 | `CLOCK_PERIOD` / `CLOCK_PORT` | timing clock (overrides SDC; empty `CLOCK_PORT` = auto-detect) |
 | `ODB_FILE` / `DEF_FILE` | explicit input design |
+| `R2G_SPEF` | explicit SPEF for RC labels (default: collected `6_final.spef`; empty = RC skipped) |
+| `R2G_RC_MAX_FANOUT` | skip+log equivalent-resistance pairs for nets with more than N pins (default 0 = uncapped) |
 | `LABEL_TIMEOUT` | per-label timeout seconds (default 2400) |
 
 ## Batch backfill

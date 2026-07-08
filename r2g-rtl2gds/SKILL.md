@@ -440,7 +440,7 @@ design_cases/<design-name>/
 │   ├── 6_final.spef           # SPEF parasitic data
 │   ├── rcx.log                # OpenRCX extraction log
 │   └── run_rcx.tcl            # Generated Tcl extraction script
-├── labels/                    # Dataset labels (Y): congestion/wirelength/timing/irdrop CSVs (run_labels.sh)
+├── labels/                    # Dataset labels (Y): congestion/wirelength/timing/irdrop + RC (ground/coupling/equiv-res) CSVs (run_labels.sh)
 ├── features/                  # Dataset features (X): nodes/edges/metadata CSVs (run_features.sh)
 ├── dataset/                   # PyG graphs: {b..f}_graph.pt, netlist_graph.pt, graph_manifest.json (run_graphs.sh)
 ├── reports/
@@ -529,6 +529,11 @@ design_cases/<design-name>/
     - `scripts/flow/run_labels.sh <project-dir> [platform]`
     - Emits per-cell/per-net label CSVs to `<project-dir>/labels/` (congestion,
       wirelength, timing, IR drop) and a per-design `reports/labels_stats.json`.
+    - Also emits **RC parasitic labels** from the SPEF (`6_final.spef`): ground cap
+      (`net_ground_cap.csv`, net-node label), coupling cap (`coupling_cap.csv`,
+      net-pair edge label), equivalent resistance (`equiv_res.csv`, pin-pair edge
+      label), + `net_driver.csv`. Fail-soft: no SPEF (RCX not run / platform w/o RCX
+      rules) → header-only RC CSVs. Both nangate45 and sky130hd carry RCX rules.
     - Fail-soft: a missing input or per-label tool error is recorded, not fatal.
     - Platform-agnostic: liberty/lef/supply-voltage are resolved from the ORFS
       platform config. See `references/label-extraction.md`.

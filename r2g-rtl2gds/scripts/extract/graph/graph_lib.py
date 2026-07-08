@@ -59,12 +59,23 @@ LABEL_SPECS = [
     {"node_type": NODE_TYPE_NET, "order": 3, "file": "wirelength.csv", "column": "label"},
 ]
 
+# y tensor width = 1 (node_type) + 5 label orders. Orders 0-3 are the tool labels
+# in LABEL_SPECS (congestion/irdrop/timing/wirelength); order 4 (y5) is the RC
+# ground-cap label, placed by attach_rc_labels (net node in b/c, broadcast to pin
+# nodes in d/e, dropped in f) rather than by the generic LABEL_SPECS folding — so
+# it is deliberately NOT in LABEL_SPECS (which also folds net labels onto d/e/f
+# clique edge_y, which is exactly where ground cap must NOT go). edge_y shares the
+# width for schema symmetry; its y5 is always NaN (ground cap is never an edge label).
+Y_WIDTH = 6
+GROUND_CAP_Y = 5  # column index of the ground-cap label in the y tensor
+
 Y_SCHEMA_BASE = {
     "y0": "node_type",
     "y1": "congestion_label (gate)",
     "y2": "irdrop_label (gate)",
     "y3": "timing_label (pin; per-cell min pin slack -> log1p path delay)",
     "y4": "wirelength_label (net; log1p um)",
+    "y5": "ground_cap_label (net; log1p fF — on net node b/c, broadcast to pin nodes d/e, dropped f)",
 }
 
 
@@ -389,7 +400,7 @@ def build_directed_edges(base_src, base_dst, base_attr, base_y, base_type):
             torch.empty((2, 0), dtype=torch.long),
             torch.zeros((0, width), dtype=torch.float32),
             torch.empty((0,), dtype=torch.long),
-            torch.zeros((0, 5), dtype=torch.float32),
+            torch.zeros((0, Y_WIDTH), dtype=torch.float32),
         )
     src = torch.tensor(base_src, dtype=torch.long)
     dst = torch.tensor(base_dst, dtype=torch.long)
@@ -452,3 +463,198 @@ def node_names_for(node_type, gate_df, net_df, iopin_df, pin_df) -> list[str]:
         pin_full = []
     fill(NODE_TYPE_PIN, pin_full)
     return names
+
+
+# --- RC parasitic labels (Y side; extract_rc.py -> per-view attachment) --------
+# Three CSVs from the label stage, joined here onto the graph's y / parasitic-edge
+# tensors. Ground cap is a NET label (y5); coupling cap is a net-PAIR edge label;
+# equivalent resistance is a pin-PAIR (same-net) edge label. The parasitic edges
+# live on their OWN edge set (rc_edge_index / rc_edge_type / rc_edge_y), separate
+# from the physical-topology edge_index (they are "not the physical topology").
+RC_GROUND_CAP_FILE = "net_ground_cap.csv"
+RC_COUPLING_FILE = "coupling_cap.csv"
+RC_EQUIV_RES_FILE = "equiv_res.csv"
+RC_DRIVER_FILE = "net_driver.csv"
+RC_EDGE_TYPE_COUPLING = 0
+RC_EDGE_TYPE_RESISTANCE = 1
+
+
+def load_rc_label_cache(label_root: str) -> dict[str, "pd.DataFrame"]:
+    """Load the RC label CSVs, fail-soft (missing/unreadable -> empty frame). A
+    design with no SPEF has header-only CSVs -> empty frames -> no RC labels."""
+    cache: dict[str, pd.DataFrame] = {}
+    for fn in (RC_GROUND_CAP_FILE, RC_COUPLING_FILE, RC_EQUIV_RES_FILE, RC_DRIVER_FILE):
+        path = os.path.join(label_root, fn)
+        try:
+            cache[fn] = pd.read_csv(path, dtype=str) if os.path.isfile(path) else pd.DataFrame()
+        except Exception:
+            cache[fn] = pd.DataFrame()
+    return cache
+
+
+def _rc_rows(rc, fname, design_key):
+    df = rc.get(fname)
+    if df is None or df.empty or "Design" not in df.columns:
+        return None
+    sub = df[df["Design"].astype(str) == str(design_key)]
+    return sub if not sub.empty else None
+
+
+def rc_ground_cap_by_net(rc, design_key) -> dict[str, float]:
+    sub = _rc_rows(rc, RC_GROUND_CAP_FILE, design_key)
+    out: dict[str, float] = {}
+    if sub is None or not {"Net", "label"} <= set(sub.columns):
+        return out
+    for net, lab in zip(sub["Net"], pd.to_numeric(sub["label"], errors="coerce")):
+        if lab == lab:  # not NaN
+            out[str(net)] = float(lab)
+    return out
+
+
+def rc_net_driver(rc, design_key) -> dict[str, tuple[str, str]]:
+    """{net_name: (inst, pin)} — inst == 'PIN' for a top-level port driver."""
+    sub = _rc_rows(rc, RC_DRIVER_FILE, design_key)
+    out: dict[str, tuple[str, str]] = {}
+    if sub is None or not {"Net", "DrvInst", "DrvPin"} <= set(sub.columns):
+        return out
+    for net, di, dp in zip(sub["Net"], sub["DrvInst"], sub["DrvPin"]):
+        out[str(net)] = (str(di), str(dp))
+    return out
+
+
+def rc_coupling_rows(rc, design_key):
+    """[(net1, net2, label)] cross-net coupling-cap edges."""
+    sub = _rc_rows(rc, RC_COUPLING_FILE, design_key)
+    rows = []
+    if sub is None or not {"Net1", "Net2", "label"} <= set(sub.columns):
+        return rows
+    for n1, n2, lab in zip(sub["Net1"], sub["Net2"], pd.to_numeric(sub["label"], errors="coerce")):
+        if lab == lab:
+            rows.append((str(n1), str(n2), float(lab)))
+    return rows
+
+
+def rc_resistance_rows(rc, design_key):
+    """[((inst1,pin1),(inst2,pin2), label)] same-net pin-pair equiv-resistance edges."""
+    sub = _rc_rows(rc, RC_EQUIV_RES_FILE, design_key)
+    rows = []
+    if sub is None or not {"Inst1", "Pin1", "Inst2", "Pin2", "label"} <= set(sub.columns):
+        return rows
+    labs = pd.to_numeric(sub["label"], errors="coerce")
+    for i1, p1, i2, p2, lab in zip(sub["Inst1"], sub["Pin1"], sub["Inst2"], sub["Pin2"], labs):
+        if lab == lab:
+            rows.append(((str(i1), str(p1)), (str(i2), str(p2)), float(lab)))
+    return rows
+
+
+def build_parasitic_edges(coupling, resistance):
+    """Assemble the parasitic edge tensors from resolved node-index edge lists.
+
+    coupling/resistance: lists of (src_idx, dst_idx, label). Returns symmetrized
+    (rc_edge_index[2,E], rc_edge_type[E], rc_edge_y[E,3]) with rc_edge_y columns
+    [type, coupling_cap_label, equiv_res_label] (off-type column = NaN). Edges are
+    interleaved fwd/rev so the pairwise-repeated type/y rows align with edge_index
+    (same convention as build_directed_edges)."""
+    torch = _torch()
+    src, dst, etype, yrows = [], [], [], []
+    nan = float("nan")
+    for s, t, lab in coupling:
+        if s is None or t is None or s == t:
+            continue
+        src.append(int(s)); dst.append(int(t)); etype.append(RC_EDGE_TYPE_COUPLING)
+        yrows.append((float(RC_EDGE_TYPE_COUPLING), lab, nan))
+    for s, t, lab in resistance:
+        if s is None or t is None or s == t:
+            continue
+        src.append(int(s)); dst.append(int(t)); etype.append(RC_EDGE_TYPE_RESISTANCE)
+        yrows.append((float(RC_EDGE_TYPE_RESISTANCE), nan, lab))
+    if not src:
+        return (torch.empty((2, 0), dtype=torch.long),
+                torch.empty((0,), dtype=torch.long),
+                torch.zeros((0, 3), dtype=torch.float32))
+    s_t = torch.tensor(src, dtype=torch.long)
+    d_t = torch.tensor(dst, dtype=torch.long)
+    fwd = torch.stack([s_t, d_t], dim=0)
+    rev = torch.stack([d_t, s_t], dim=0)
+    edge_index = torch.stack([fwd, rev], dim=2).reshape(2, -1)
+    edge_type = torch.repeat_interleave(torch.tensor(etype, dtype=torch.long), 2)
+    edge_y = torch.repeat_interleave(torch.tensor(yrows, dtype=torch.float32), 2, dim=0)
+    return edge_index, edge_type, edge_y
+
+
+def attach_rc_labels(data, rc, design_key, *, net_idx=None, pin_idx=None,
+                     iopin_idx=None, pin_net_map=None):
+    """Place the RC labels onto ``data`` per the view's available node types.
+
+    Endpoint-resolution rule (see references/label-extraction.md): a net-endpoint
+    resolves to a net NODE if present, else the net's driver PIN node, else the
+    label is dropped. Ground cap: net node (net_idx) -> broadcast to pin nodes
+    (pin_idx + pin_net_map) -> dropped. Coupling (net-pair): net<->net -> driver
+    pin<->driver pin -> dropped. Resistance (pin-pair, same net): only where pin
+    nodes exist. Always attaches rc_edge_* (possibly empty) so the schema is
+    uniform across designs/views."""
+    ground = rc_ground_cap_by_net(rc, design_key)
+    driver = rc_net_driver(rc, design_key)
+    y = data.y
+
+    # --- ground cap -> y[:, GROUND_CAP_Y] ---
+    if net_idx is not None:
+        for net, lab in ground.items():
+            idx = net_idx.get(net)
+            if idx is not None:
+                y[idx, GROUND_CAP_Y] = lab
+    elif pin_idx is not None and pin_net_map is not None:
+        for key, pidx in pin_idx.items():
+            net = pin_net_map.get(key)
+            if net is not None:
+                lab = ground.get(net)
+                if lab is not None:
+                    y[pidx, GROUND_CAP_Y] = lab
+    # else (f: no net & no pin nodes): ground cap dropped -> y5 stays NaN
+
+    def net_to_node(net):
+        if net_idx is not None:
+            return net_idx.get(net)
+        if pin_idx is None:  # no pin nodes (f) -> coupling dropped
+            return None
+        drv = driver.get(net)
+        if drv is None:
+            return None
+        di, dp = drv
+        if di == "PIN":
+            return iopin_idx.get(dp) if iopin_idx is not None else None
+        return pin_idx.get((di, dp))
+
+    def pin_to_node(key):
+        inst, pin = key
+        if inst == "PIN":
+            return iopin_idx.get(pin) if iopin_idx is not None else None
+        return pin_idx.get((inst, pin)) if pin_idx is not None else None
+
+    coupling_edges = []
+    if net_idx is not None or pin_idx is not None:
+        for n1, n2, lab in rc_coupling_rows(rc, design_key):
+            s, t = net_to_node(n1), net_to_node(n2)
+            if s is not None and t is not None and s != t:
+                coupling_edges.append((s, t, lab))
+
+    resistance_edges = []
+    if pin_idx is not None:
+        for k1, k2, lab in rc_resistance_rows(rc, design_key):
+            s, t = pin_to_node(k1), pin_to_node(k2)
+            if s is not None and t is not None and s != t:
+                resistance_edges.append((s, t, lab))
+
+    rc_ei, rc_et, rc_ey = build_parasitic_edges(coupling_edges, resistance_edges)
+    data.rc_edge_index = rc_ei
+    data.rc_edge_type = rc_et
+    data.rc_edge_y = rc_ey
+    data.rc_edge_schema = {
+        "rc_edge_type": {RC_EDGE_TYPE_COUPLING: "coupling_cap (net-pair)",
+                         RC_EDGE_TYPE_RESISTANCE: "equiv_res (pin-pair, same net)"},
+        "rc_edge_y0": "rc_edge_type",
+        "rc_edge_y1": "coupling_cap_label (log1p fF; net M-N)",
+        "rc_edge_y2": "equiv_res_label (log1p Ohm; two pins on one net)",
+        "design_key": design_key,
+    }
+    return data

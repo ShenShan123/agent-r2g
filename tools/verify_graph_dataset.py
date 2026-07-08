@@ -52,6 +52,7 @@ on RECT-bearing sky130 nets).
 from __future__ import annotations
 
 import argparse
+import glob
 import json
 import math
 import os
@@ -459,6 +460,127 @@ def irdrop_label_ok(ir):
     d_floor = float(lab[~active].abs().max()) if bool((~active).any()) else 0.0
     ok = (d_active <= 1e-3) and (d_floor <= 1e-9)
     return ok, f"active={int(active.sum())} active_maxdiff={d_active} floored_maxlabel={d_floor}"
+
+
+def _spef_deesc(name):
+    # DEF convention: strip backslash EXCEPT before bus brackets (independent copy
+    # of the spec that scripts/extract/techlib/spef.py implements).
+    return re.sub(r"\\([^\[\]])", r"\1", name) if "\\" in name else name
+
+
+def read_spef_truth(case):
+    """Independent SPEF re-derivation (SEPARATE code from techlib.spef): per-net
+    ground cap (fF) and per-cross-net-pair coupling cap (fF), names de-escaped to
+    DEF convention. Returns {"present": False} when no SPEF (RC labels absent)."""
+    cands = sorted(glob.glob(case + "/backend/RUN_*/rcx/6_final.spef")
+                   + glob.glob(case + "/backend/RUN_*/results/6_final.spef"))
+    if os.path.isfile(case + "/rcx/6_final.spef"):
+        cands.append(case + "/rcx/6_final.spef")
+    if not cands:
+        return {"present": False}
+    spef = cands[-1]
+    id2name, net_ids, inst_ids = {}, set(), set()
+    pin_to_net, port_to_net = {}, {}
+    cap_scale = 1.0
+
+    def _nm(base):
+        return id2name.get(base, _spef_deesc(base.lstrip("*")))
+
+    # pass 1: name map + connectivity
+    in_nm = cur = sec = None
+    in_nm = False
+    with open(spef, errors="ignore") as fh:
+        for raw in fh:
+            s = raw.strip()
+            if not s:
+                continue
+            if s.startswith("*C_UNIT"):
+                p = s.split()
+                if len(p) >= 3:
+                    v, u = float(p[1]), p[2].upper()
+                    cap_scale = (v * 1e3 if u.startswith("PF") else v * 1e6 if u.startswith("NF")
+                                 else v * 1e9 if u.startswith("UF") else v)
+                continue
+            if s.startswith("*NAME_MAP"):
+                in_nm = True; continue
+            if s.startswith(("*PORTS", "*DEFINE", "*POWER_NETS")):
+                in_nm = False; continue
+            if in_nm and s.startswith("*") and not s.startswith(("*D_NET", "*R_NET")):
+                pp = s.split(None, 1)
+                if len(pp) == 2:
+                    id2name[pp[0]] = _spef_deesc(pp[1].strip()); continue
+                in_nm = False
+            if s.startswith(("*D_NET", "*R_NET")):
+                in_nm = False
+                a = s.split()[1] if len(s.split()) >= 2 else ""
+                net_ids.add(a); cur = _nm(a); sec = None; continue
+            if s.startswith("*CONN"):
+                sec = "CONN"; continue
+            if s.startswith(("*CAP", "*RES")):
+                sec = "SKIP"; continue
+            if s.startswith("*END"):
+                sec = None; cur = None; continue
+            if sec == "CONN" and cur is not None:
+                t = s.split()
+                if t and t[0] == "*I" and len(t) >= 2:
+                    base, _, sub = t[1].partition(":")
+                    inst_ids.add(base)
+                    pin_to_net[(_nm(base), _spef_deesc(sub))] = cur
+                elif t and t[0] == "*P" and len(t) >= 2:
+                    port_to_net[id2name.get(t[1], _spef_deesc(t[1]))] = cur
+
+    def net_of(tok):
+        base, _, sub = tok.partition(":")
+        if base in net_ids:
+            return _nm(base)
+        if ":" in tok and base in inst_ids:
+            return pin_to_net.get((_nm(base), _spef_deesc(sub)))
+        return port_to_net.get(_spef_deesc(tok))
+
+    # pass 2: aggregate ground + coupling
+    ground, coupling = {}, {}
+    cur = None; sec = None; in_nm = False
+    with open(spef, errors="ignore") as fh:
+        for raw in fh:
+            s = raw.strip()
+            if not s:
+                continue
+            if s.startswith("*NAME_MAP"):
+                in_nm = True; continue
+            if s.startswith(("*PORTS", "*DEFINE", "*POWER_NETS")):
+                in_nm = False; continue
+            if in_nm and not s.startswith(("*D_NET", "*R_NET")):
+                continue
+            if s.startswith(("*D_NET", "*R_NET")):
+                in_nm = False
+                a = s.split()[1] if len(s.split()) >= 2 else ""
+                cur = _nm(a); ground.setdefault(cur, 0.0); sec = None; continue
+            if s.startswith("*CAP"):
+                sec = "CAP"; continue
+            if s.startswith("*RES"):
+                sec = "RES"; continue
+            if s.startswith("*CONN"):
+                sec = "CONN"; continue
+            if s.startswith("*END"):
+                sec = None; cur = None; continue
+            if cur is None or sec != "CAP":
+                continue
+            p = s.split()
+            if len(p) == 3:
+                try:
+                    ground[cur] += float(p[2]) * cap_scale
+                except ValueError:
+                    pass
+            elif len(p) == 4:
+                try:
+                    cap = float(p[3]) * cap_scale
+                except ValueError:
+                    continue
+                m = net_of(p[2])
+                if m and m != cur:
+                    k = (cur, m) if cur < m else (m, cur)
+                    coupling[k] = coupling.get(k, 0.0) + cap
+    return {"present": True, "ground": ground, "coupling": coupling}
 
 
 def extended_checks(case, design, feat, labs, views, b):
@@ -1101,6 +1223,100 @@ def verify_case(case, design=None, json_out=None):
         st = man["variants"][vname]
         check(f"manifest[{vname}] nodes/edges match tensors",
               st["nodes"] == data.x.shape[0] and st["edges"] == data.edge_index.shape[1])
+
+    # ---- RC parasitic labels (independent SPEF re-derivation) ----
+    rc = read_spef_truth(case)
+    rc_h = man.get("rc_health", {})
+    check("manifest has rc_health", bool(rc_h), rc_h)
+    for vname, data in (("b", b), ("c", c), ("d", d), ("e", e), ("f", f)):
+        ok = (hasattr(data, "rc_edge_index") and hasattr(data, "rc_edge_type")
+              and hasattr(data, "rc_edge_y") and data.rc_edge_y.shape[1] == 3
+              and data.rc_edge_index.shape[1] == data.rc_edge_type.numel()
+              == data.rc_edge_y.shape[0])
+        check(f"{vname} rc_edge_* present + consistent shapes", ok)
+        check(f"{vname} manifest rc_edges == tensor",
+              man["variants"][vname].get("rc_edges") == int(data.rc_edge_index.shape[1]))
+    net_name_set = set(net["net_name"].tolist())
+    # name -> set(nets) for pin/iopin membership (resistance intra-net + d broadcast)
+    memnet = {}
+    for n in net["net_name"]:
+        for (ii, pp) in net_pin_sets.get(n, set()):
+            memnet.setdefault(f"{ii}/{pp}", set()).add(n)
+        for io in net_io_sets.get(n, set()):
+            memnet.setdefault(io, set()).add(n)
+    if not rc.get("present"):
+        check("rc: no SPEF -> rc_health=no_rc_labels + all rc edges empty",
+              rc_h.get("status") == "no_rc_labels"
+              and all(int(man["variants"][v].get("rc_edges", 0)) == 0 for v in "bcdef"))
+    else:
+        gt, ct = rc["ground"], rc["coupling"]
+        bnames, ntb2 = b.node_name, b.x[:, 0].long()
+        # (A) ground cap on b net nodes: y5 == log1p(SPEF ground)
+        bad = chk = 0
+        for i, nm in enumerate(net["net_name"].tolist()):
+            if nm not in gt:
+                continue
+            got, exp = float(b.y[ng + i, 5]), math.log1p(gt[nm])
+            chk += 1
+            if math.isnan(got) or abs(got - exp) > 1e-4:
+                bad += 1
+            if chk >= 400:
+                break
+        check("b ground cap y5 == log1p(SPEF ground) on net nodes", bad == 0 and chk > 0,
+              f"{bad}/{chk} mismatched")
+        # (B) coupling edge count == cross-net pairs among signal nets (x2 directed)
+        exp_coup = 2 * sum(1 for (a, bb) in ct if a in net_name_set and bb in net_name_set)
+        got_coup = int((b.rc_edge_type == 0).sum())
+        check("b coupling edge count == SPEF cross-net signal pairs",
+              got_coup == exp_coup, f"got {got_coup} want {exp_coup}")
+        # (C) sampled coupling edges: cross-net net-node pair + label == log1p(SPEF)
+        ci = (b.rc_edge_type == 0).nonzero().view(-1).tolist()
+        bad = chk = 0
+        for k in ci[::max(1, len(ci) // 200)]:
+            u, v = int(b.rc_edge_index[0, k]), int(b.rc_edge_index[1, k])
+            chk += 1
+            if int(ntb2[u]) != 1 or int(ntb2[v]) != 1 or u == v:
+                bad += 1; continue
+            a, bb = bnames[u], bnames[v]
+            key = (a, bb) if a < bb else (bb, a)
+            if key in ct and abs(float(b.rc_edge_y[k, 1]) - math.log1p(ct[key])) > 1e-4:
+                bad += 1
+        check("b coupling edges cross-net + label==log1p(SPEF coupling)", bad == 0 and chk > 0,
+              f"{bad}/{chk}")
+        # (D) resistance edges intra-net (endpoints share a net) + positive label
+        ri = (b.rc_edge_type == 1).nonzero().view(-1).tolist()
+        bad = chk = 0
+        for k in ri[::max(1, len(ri) // 300)]:
+            u, v = int(b.rc_edge_index[0, k]), int(b.rc_edge_index[1, k])
+            chk += 1
+            if not (memnet.get(bnames[u], set()) & memnet.get(bnames[v], set())):
+                bad += 1
+            lab = float(b.rc_edge_y[k, 2])
+            if math.isnan(lab) or lab < 0:
+                bad += 1
+        check("b resistance edges intra-net + non-negative label", bad == 0 and chk > 0,
+              f"{bad}/{chk}")
+        # (E) rc_edge_y type/column separation (coupling->col1, resistance->col2)
+        cm, rm = (b.rc_edge_type == 0), (b.rc_edge_type == 1)
+        check("b rc_edge_y type/col separation",
+              bool(torch.isnan(b.rc_edge_y[cm, 2]).all())
+              and bool(torch.isnan(b.rc_edge_y[rm, 1]).all()))
+        # (F) d ground cap broadcast to pin nodes == owning net's ground cap
+        ntd2, dnames = d.x[:, 0].long(), d.node_name
+        pin_pos = (ntd2 == 3).nonzero().view(-1).tolist()
+        bad = chk = 0
+        for idx in pin_pos[::max(1, len(pin_pos) // 300)]:
+            nets = memnet.get(dnames[idx], set())
+            if len(nets) != 1:
+                continue
+            n = next(iter(nets))
+            if n not in gt:
+                continue
+            chk += 1
+            if abs(float(d.y[idx, 5]) - math.log1p(gt[n])) > 1e-4:
+                bad += 1
+        check("d ground cap y5 broadcast to pins == net ground cap", bad == 0 and chk > 0,
+              f"{bad}/{chk}")
 
     # ---- global_feat vs metadata ----
     md = pd.read_csv(feat + "/metadata.csv")

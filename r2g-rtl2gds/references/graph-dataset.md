@@ -19,7 +19,7 @@ Outputs in `<project-dir>/dataset/`:
 | --- | --- |
 | `b_graph.pt` .. `f_graph.pt` | five graph topologies (below) |
 | `netlist_graph.pt` | synthesis-netlist bipartite cell/net graph (pre-layout) |
-| `graph_manifest.json` | per-variant node/edge counts + label-NaN fractions + per-label-file `label_health` (mirrored to `reports/graph_dataset.json`) |
+| `graph_manifest.json` | per-variant node/edge counts + label-NaN fractions + per-label-file `label_health` + RC coverage (`rc_health` + per-variant `rc_edges`/`rc_coupling_edges`/`rc_resistance_edges`) (mirrored to `reports/graph_dataset.json`) |
 
 **Check `status` + `label_health` before training on a manifest.** `status:
 "ok_with_label_gaps"` means ≥1 label file couldn't join (missing/raw/mismatched
@@ -61,13 +61,40 @@ Shared tensor schema (all variants):
   num_sinks, connects_macro_flag, num_layer, hpwl_um`; iopin = `pin_x_um,
   pin_y_um, nearest_tap_distance_um, pin_direction_id`; pin = `pin_type_id,
   sum_pin_cap_fF`.
-- `y[N,5]`: `y0` node_type, `y1` congestion (gate), `y2` IR drop (gate),
+- `y[N,6]`: `y0` node_type, `y1` congestion (gate), `y2` IR drop (gate),
   `y3` timing (pin; the owning cell's log1p path delay), `y4` wirelength (net;
-  log1p um). NaN where a label doesn't apply or didn't join.
+  log1p um), `y5` RC ground cap (net; log1p fF — on the **net node** in b/c,
+  **broadcast to the net's pin nodes** in d/e, dropped in f). NaN where a label
+  doesn't apply or didn't join.
 - Variants with folded entities carry that entity's features/labels on
-  `edge_attr[E,8]` / `edge_y[E,5]`, with `edge_type` distinguishing families.
+  `edge_attr[E,8]` / `edge_y[E,6]`, with `edge_type` distinguishing families.
   Edge columns are INTERLEAVED `[fwd0, rev0, fwd1, rev1, ...]` so the
-  pairwise-repeated attr rows align (see audit note 5).
+  pairwise-repeated attr rows align (see audit note 5). (`edge_y[:,5]` is always
+  NaN — ground cap is a node label, never folded onto an edge.)
+
+### RC parasitic edges (labels, separate from the physical topology)
+
+Coupling capacitance and equivalent resistance are **edge labels over a parasitic
+graph that is distinct from the physical-topology `edge_index`** — every `Data`
+object carries its own `rc_edge_index[2,E_rc]` + `rc_edge_type[E_rc]` (0=coupling,
+1=resistance) + `rc_edge_y[E_rc,3]` (`[type, coupling_cap_label, equiv_res_label]`,
+off-type column NaN; labels are log1p). Attachment (`graph_lib.attach_rc_labels`,
+per the endpoint-resolution rule — a net endpoint resolves to a net node if present,
+else the net's driver pin, else dropped):
+
+| view | ground cap `y5` | coupling (net-pair) | resistance (pin-pair, same net) |
+| --- | --- | --- | --- |
+| b | net node | net↔net | pin↔pin |
+| c | net node | net↔net | — (no pin nodes) |
+| d | pin nodes (broadcast) | driver-pin↔driver-pin | pin↔pin |
+| e | pin nodes (broadcast) | driver-pin↔driver-pin | pin↔pin |
+| f | — (dropped) | — | — |
+
+`rc_edge_*` is present-but-empty (not absent) wherever RC doesn't apply, so the schema
+is uniform across every view and design. See label-extraction.md "RC parasitic labels".
+The manifest adds `rc_health` (per-design coverage) and per-variant
+`rc_edges`/`rc_coupling_edges`/`rc_resistance_edges`. RC is populated only when a SPEF
+exists (RCX ran); absent → RC slots empty, `rc_health.status = "no_rc_labels"`.
 - `node_name[N]` joins any node back to the DEF-escaped names in the CSVs;
   `global_feat[15]` is metadata.csv; `x_schema`/`y_schema`/`edge_schema` are
   attached to every Data object.
@@ -101,7 +128,13 @@ counts, b/c edge counts by row accounting, **d/e/f edge counts by the clique
 formula** Σ C(k,2), c/f edge_attr == the folded entity's features, EXACT
 expected-NaN counts + sampled values for every y slot, node_name order,
 global_feat, netlist-graph counts vs an independent regex, manifest
-consistency, and physical-range sanity.
+consistency, and physical-range sanity. It also **independently re-parses the SPEF**
+(`read_spef_truth`, separate from `techlib.spef`) to verify the **RC parasitic
+labels**: ground-cap `y5` on net nodes == `log1p(SPEF ground)` (and its broadcast onto
+d/e pin nodes), the coupling edge count == the SPEF's cross-net signal-net-pair count
+with sampled labels == `log1p(SPEF coupling)`, resistance edges are intra-net with
+non-negative labels, and the `rc_edge_y` type/column separation holds; a design with no
+SPEF is asserted to have `rc_health="no_rc_labels"` + empty `rc_edge_*` everywhere.
 
 The **congestion** recompute (2026-07-07) reproduces the 2-vector method exactly:
 an independent radius-4 separable REFLECT Gaussian (`dense_gaussian_r4`) over the

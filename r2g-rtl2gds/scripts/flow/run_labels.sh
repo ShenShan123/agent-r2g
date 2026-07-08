@@ -48,13 +48,13 @@ fi
 PLATFORM="${PLATFORM:-asap7}"
 
 # --- Locate the collected 6_final.{odb,def} --------------------------------
-ODB=""; DEF=""
+ODB=""; DEF=""; RUN_DIR=""  # RUN_DIR: the backend run the ODB/DEF came from (SPEF is paired from it)
 BACKEND_DIR="$PROJECT_DIR/backend"
 if [[ -d "$BACKEND_DIR" ]]; then
   for run in $(ls -d "$BACKEND_DIR"/RUN_* 2>/dev/null | sort -r); do
     for sub in final results; do
-      [[ -z "$ODB" && -f "$run/$sub/6_final.odb" ]] && ODB="$run/$sub/6_final.odb"
-      [[ -z "$DEF" && -f "$run/$sub/6_final.def" ]] && DEF="$run/$sub/6_final.def"
+      [[ -z "$ODB" && -f "$run/$sub/6_final.odb" ]] && { ODB="$run/$sub/6_final.odb"; RUN_DIR="$run"; }
+      [[ -z "$DEF" && -f "$run/$sub/6_final.def" ]] && { DEF="$run/$sub/6_final.def"; RUN_DIR="$run"; }
     done
     [[ -n "$ODB" || -n "$DEF" ]] && break
   done
@@ -78,6 +78,28 @@ fi
 echo "Design: $DESIGN_NAME  Platform: $PLATFORM"
 echo "ODB: ${ODB:-<none>}"
 echo "DEF: ${DEF:-<none>}"
+
+# --- Locate the SPEF (optional — RC labels degrade gracefully if absent) ---
+# Same discovery order as run_features.sh: prefer the SAME run the ODB/DEF came
+# from so a fresh backend is never paired with a stale SPEF; then any backend
+# run; then the standalone run_rcx.sh output. ORFS 'make finish' already emits
+# 6_final.spef whenever the platform defines RCX_RULES (nangate45/sky130hd do).
+SPEF="${R2G_SPEF:-}"
+if [[ -z "$SPEF" && -n "$RUN_DIR" ]]; then
+  for sub in rcx results; do
+    [[ -z "$SPEF" && -f "$RUN_DIR/$sub/6_final.spef" ]] && SPEF="$RUN_DIR/$sub/6_final.spef"
+  done
+fi
+if [[ -z "$SPEF" && -d "$BACKEND_DIR" ]]; then
+  for run in $(ls -d "$BACKEND_DIR"/RUN_* 2>/dev/null | sort -r); do
+    for sub in rcx results; do
+      [[ -z "$SPEF" && -f "$run/$sub/6_final.spef" ]] && SPEF="$run/$sub/6_final.spef"
+    done
+    [[ -n "$SPEF" ]] && break
+  done
+fi
+[[ -z "$SPEF" && -f "$PROJECT_DIR/rcx/6_final.spef" ]] && SPEF="$PROJECT_DIR/rcx/6_final.spef"
+echo "SPEF: ${SPEF:-<none>}"
 
 # --- Resolve platform liberty/lef/voltage ----------------------------------
 RESOLVED="$(bash "$(dirname "${BASH_SOURCE[0]}")/resolve_platform_paths.sh" "$CONFIG_MK" "$PLATFORM" 2>/dev/null || true)"
@@ -158,6 +180,12 @@ if [[ -n "$ODB" ]]; then
     SUPPLY_VOLTAGE="$SUPPLY_VOLTAGE" DESIGN_NAME="$DESIGN_NAME" \
     run_soft irdrop "$OPENROAD" -no_splash -exit "$LABELS_SRC/extract_irdrop.tcl"
 fi
+
+# --- RC parasitic labels (SPEF) --------------------------------------------
+# ground cap (net-node), coupling cap (net-pair edge), equivalent resistance
+# (pin-pair edge). Fail-soft: extract_rc.py writes header-only CSVs when no SPEF
+# is present, so the graph stage simply leaves the RC labels/edges empty.
+run_soft rc python3 "$LABELS_SRC/extract_rc.py" "${SPEF:-}" "$LABELS_DIR" "$DESIGN_NAME"
 
 # --- Stats roll-up ---------------------------------------------------------
 python3 "$LABELS_SRC/compute_label_stats.py" "$LABELS_DIR" "$REPORTS_DIR/labels_stats.json" "$DESIGN_NAME" "$PLATFORM"
