@@ -14,10 +14,17 @@ topologies trade granularity for size (N = nodes on cordic nangate45):
 
 Node features x[10]: x0=node_type (0 gate/1 net/2 iopin/3 pin), x1=graph_id,
 x2..x9 = per-type schema (graph_lib.GATE_SCHEMA etc., zero-padded). Node labels
-y[5]: y0=node_type, y1=congestion, y2=irdrop, y3=timing, y4=wirelength (NaN
-where a label doesn't apply / didn't join). Variants with folded entities carry
+y[6]: y0=node_type, y1=congestion, y2=irdrop, y3=timing, y4=wirelength, y5=RC
+ground cap (net node in b/c, broadcast to pin nodes in d/e, dropped in f) — NaN
+where a label doesn't apply / didn't join. Variants with folded entities carry
 that entity's features/labels on edge_attr/edge_y (edge columns interleaved
 fwd/rev — see graph_lib.build_directed_edges).
+
+RC parasitic edge labels ride a SEPARATE parasitic edge set (rc_edge_index /
+rc_edge_type / rc_edge_y[E,3]=[type, coupling_cap_label, equiv_res_label]),
+distinct from the physical-topology edge_index: coupling cap on net<->net edges
+(driver-pin<->driver-pin where nets are folded), equivalent resistance on
+same-net pin<->pin edges. See graph_lib.attach_rc_labels + label-extraction.md.
 
 Usage:
   build_graphs.py --features <dir> --labels <dir> --design <name> \
@@ -42,10 +49,11 @@ import graph_lib as gl  # noqa: E402
 from graph_lib import (  # noqa: E402
     GATE_SCHEMA, IOPIN_SCHEMA, METADATA_SCHEMA, NET_SCHEMA, PIN_SCHEMA,
     LABEL_SPECS, NODE_TYPE_GATE, NODE_TYPE_IO_PIN, NODE_TYPE_NET, NODE_TYPE_PIN,
-    Y_SCHEMA_BASE, build_directed_edges, build_feature_views,
+    Y_SCHEMA_BASE, Y_WIDTH, RC_EDGE_TYPE_COUPLING, RC_EDGE_TYPE_RESISTANCE,
+    attach_rc_labels, build_directed_edges, build_feature_views,
     build_gate_label_values, build_net_label_values, build_pin_label_values,
-    clique_pairs, load_global_feat, load_label_cache, node_names_for,
-    pad_or_truncate_1d, pad_schema_cols, to_float32_matrix,
+    clique_pairs, load_global_feat, load_label_cache, load_rc_label_cache,
+    node_names_for, pad_or_truncate_1d, pad_schema_cols, to_float32_matrix,
 )
 
 GATE_COLS = pad_schema_cols(GATE_SCHEMA)
@@ -83,7 +91,7 @@ def _x10(blocks, graph_id_int):
 
 def _y5_base(x10):
     torch = _torch()
-    y = torch.full((x10.shape[0], 5), float("nan"), dtype=torch.float32)
+    y = torch.full((x10.shape[0], Y_WIDTH), float("nan"), dtype=torch.float32)
     y[:, 0] = x10[:, 0]
     return y
 
@@ -138,7 +146,7 @@ def _edge_block(edge_df, feat_df, key_cols, cols, edge_type_id, label_builder, l
     if n == 0:
         return (torch.zeros((0, 8), dtype=torch.float32),
                 torch.zeros((0,), dtype=torch.long),
-                torch.zeros((0, 5), dtype=torch.float32))
+                torch.zeros((0, Y_WIDTH), dtype=torch.float32))
     if feat_df is not None:
         merged = edge_df.merge(feat_df[key_cols + cols], on=key_cols, how="left")
         if len(merged) != n:
@@ -150,7 +158,7 @@ def _edge_block(edge_df, feat_df, key_cols, cols, edge_type_id, label_builder, l
     else:
         attr = torch.zeros((n, 8), dtype=torch.float32)
     etype = torch.full((n,), edge_type_id, dtype=torch.long)
-    y = torch.full((n, 5), float("nan"), dtype=torch.float32)
+    y = torch.full((n, Y_WIDTH), float("nan"), dtype=torch.float32)
     y[:, 0] = float(edge_type_id)
     if label_builder is not None:
         for order, vals in label_builder(edge_df[key_cols], label_dfs, design_key).items():
@@ -162,7 +170,7 @@ def _edge_block(edge_df, feat_df, key_cols, cols, edge_type_id, label_builder, l
 # Variant builders. Each returns a torch_geometric Data.                      #
 # --------------------------------------------------------------------------- #
 
-def build_b(views7, label_dfs, graph_key, design_key, graph_id_int, feature_root):
+def build_b(views7, label_dfs, graph_key, design_key, graph_id_int, feature_root, rc=None):
     """gate/net/iopin/pin nodes; gate-pin, pin-net, iopin-net edges (no attrs)."""
     torch, Data = _torch(), _data()
     gate_df, net_df, iopin_df, pin_df, edges_gp, edges_pn, edges_in = views7
@@ -212,12 +220,14 @@ def build_b(views7, label_dfs, graph_key, design_key, graph_id_int, feature_root
 
     data = Data(x=x10, edge_index=edge_index)
     data.y = y5
+    # RC: ground cap on net nodes; coupling net<->net; resistance pin<->pin.
+    attach_rc_labels(data, rc or {}, design_key, net_idx=net_idx, pin_idx=pin_idx, iopin_idx=iopin_idx)
     return _finish(data, (gate_df, net_df, iopin_df, pin_df), graph_key, design_key, feature_root,
                    {"x0": "node_type", "x1": "graph_id", "gate_x2_9": GATE_COLS,
                     "net_x2_9": NET_COLS, "iopin_x2_9": IOPIN_COLS, "pin_x2_9": PIN_COLS})
 
 
-def build_c(views7, label_dfs, graph_key, design_key, graph_id_int, feature_root):
+def build_c(views7, label_dfs, graph_key, design_key, graph_id_int, feature_root, rc=None):
     """gate/net/iopin nodes; pins -> gate-net edges carrying pin features."""
     torch, Data = _torch(), _data()
     gate_df, net_df, iopin_df, pin_df, edges_gp, edges_pn, edges_in = views7
@@ -270,6 +280,8 @@ def build_c(views7, label_dfs, graph_key, design_key, graph_id_int, feature_root
     data = Data(x=x10, edge_index=edge_index)
     data.y = y5
     data.edge_attr, data.edge_type, data.edge_y = edge_attr, edge_type, edge_y
+    # RC: ground cap on net nodes; coupling net<->net; resistance dropped (no pin nodes).
+    attach_rc_labels(data, rc or {}, design_key, net_idx=net_idx, iopin_idx=iopin_idx)
     return _finish(data, (gate_df, net_df, iopin_df, pin_df.head(0)), graph_key, design_key, feature_root,
                    {"x0": "node_type", "x1": "graph_id", "gate_x2_9": GATE_COLS,
                     "net_x2_9": NET_COLS, "iopin_x2_9": IOPIN_COLS},
@@ -278,7 +290,7 @@ def build_c(views7, label_dfs, graph_key, design_key, graph_id_int, feature_root
                     "edge_y0": "edge_type", "edge_y1_4": "label_order_0_3"})
 
 
-def build_d(views7, label_dfs, graph_key, design_key, graph_id_int, feature_root):
+def build_d(views7, label_dfs, graph_key, design_key, graph_id_int, feature_root, rc=None):
     """gate/iopin/pin nodes; gate-pin edges + per-net pin cliques carrying net features."""
     torch, Data = _torch(), _data()
     gate_df, net_df, iopin_df, pin_df, edges_gp, edges_pn, edges_in = views7
@@ -313,7 +325,7 @@ def build_d(views7, label_dfs, graph_key, design_key, graph_id_int, feature_root
 
     gp_attr = torch.zeros((len(gp_src), 8), dtype=torch.float32)
     gp_type = torch.zeros((len(gp_src),), dtype=torch.long)
-    gp_y = torch.full((len(gp_src), 5), float("nan"), dtype=torch.float32)
+    gp_y = torch.full((len(gp_src), Y_WIDTH), float("nan"), dtype=torch.float32)
     if gp_src:
         gp_y[:, 0] = 0.0
     net_attr, net_type, net_y = _edge_block(
@@ -329,6 +341,11 @@ def build_d(views7, label_dfs, graph_key, design_key, graph_id_int, feature_root
     data = Data(x=x10, edge_index=edge_index)
     data.y = y5
     data.edge_attr, data.edge_type, data.edge_y = edge_attr, edge_type, edge_y
+    # RC: no net nodes -> ground cap broadcast to pin nodes; coupling on driver pins;
+    # resistance pin<->pin.
+    pin_net_map = {(i, p): n for i, p, n in
+                   edges_pn[["inst_name", "pin_name", "net_name"]].drop_duplicates().itertuples(index=False, name=None)}
+    attach_rc_labels(data, rc or {}, design_key, pin_idx=pin_idx, iopin_idx=iopin_idx, pin_net_map=pin_net_map)
     return _finish(data, (gate_df, net_df.head(0), iopin_df, pin_df), graph_key, design_key, feature_root,
                    {"x0": "node_type", "x1": "graph_id", "gate_x2_9": GATE_COLS,
                     "iopin_x2_9": IOPIN_COLS, "pin_x2_9": PIN_COLS},
@@ -338,7 +355,7 @@ def build_d(views7, label_dfs, graph_key, design_key, graph_id_int, feature_root
                     "edge_y0": "edge_type", "edge_y1_4": "label_order_0_3"})
 
 
-def build_e(views7, label_dfs, graph_key, design_key, graph_id_int, feature_root):
+def build_e(views7, label_dfs, graph_key, design_key, graph_id_int, feature_root, rc=None):
     """iopin/pin nodes; gates -> pin cliques (gate features), nets -> pin cliques."""
     torch, Data = _torch(), _data()
     gate_df, net_df, iopin_df, pin_df, edges_gp, edges_pn, edges_in = views7
@@ -389,6 +406,11 @@ def build_e(views7, label_dfs, graph_key, design_key, graph_id_int, feature_root
     data = Data(x=x10, edge_index=edge_index)
     data.y = y5
     data.edge_attr, data.edge_type, data.edge_y = edge_attr, edge_type, edge_y
+    # RC: no net nodes -> ground cap broadcast to pin nodes; coupling on driver pins;
+    # resistance pin<->pin.
+    pin_net_map = {(i, p): n for i, p, n in
+                   edges_pn[["inst_name", "pin_name", "net_name"]].drop_duplicates().itertuples(index=False, name=None)}
+    attach_rc_labels(data, rc or {}, design_key, pin_idx=pin_idx, iopin_idx=iopin_idx, pin_net_map=pin_net_map)
     return _finish(data, (gate_df.head(0), net_df.head(0), iopin_df, pin_df), graph_key, design_key, feature_root,
                    {"x0": "node_type", "x1": "graph_id", "iopin_x2_9": IOPIN_COLS,
                     "pin_x2_9": PIN_COLS},
@@ -397,7 +419,7 @@ def build_e(views7, label_dfs, graph_key, design_key, graph_id_int, feature_root
                     "edge_y0": "edge_type", "edge_y1_4": "label_order_0_3"})
 
 
-def build_f(views7, label_dfs, graph_key, design_key, graph_id_int, feature_root):
+def build_f(views7, label_dfs, graph_key, design_key, graph_id_int, feature_root, rc=None):
     """gate/iopin nodes; nets -> gate/iopin cliques carrying net features."""
     torch, Data = _torch(), _data()
     gate_df, net_df, iopin_df, pin_df, edges_gp, edges_pn, edges_in = views7
@@ -429,6 +451,8 @@ def build_f(views7, label_dfs, graph_key, design_key, graph_id_int, feature_root
     data = Data(x=x10, edge_index=edge_index)
     data.y = y5
     data.edge_attr, data.edge_type, data.edge_y = edge_attr, edge_type, edge_y
+    # RC: neither net nor pin nodes survive -> all RC labels dropped (rc_edge_* empty).
+    attach_rc_labels(data, rc or {}, design_key, iopin_idx=iopin_idx)
     return _finish(data, (gate_df, net_df.head(0), iopin_df, pin_df.head(0)), graph_key, design_key, feature_root,
                    {"x0": "node_type", "x1": "graph_id", "gate_x2_9": GATE_COLS,
                     "iopin_x2_9": IOPIN_COLS},
@@ -451,10 +475,15 @@ def _variant_stats(variant, data):
         "nodes": int(data.x.shape[0]),
         "edges": int(data.edge_index.shape[1]),
         "nodes_by_type": {str(int(t)): int((nt == t).sum()) for t in nt.unique()},
-        "y_nan_frac": {f"y{s}": round(_nan_frac(data.y[:, s]), 4) for s in range(1, 5)},
+        "y_nan_frac": {f"y{s}": round(_nan_frac(data.y[:, s]), 4) for s in range(1, Y_WIDTH)},
     }
     if hasattr(data, "edge_y"):
-        stats["edge_y_nan_frac"] = {f"y{s}": round(_nan_frac(data.edge_y[:, s]), 4) for s in range(1, 5)}
+        stats["edge_y_nan_frac"] = {f"y{s}": round(_nan_frac(data.edge_y[:, s]), 4) for s in range(1, Y_WIDTH)}
+    if hasattr(data, "rc_edge_index"):
+        rt = data.rc_edge_type
+        stats["rc_edges"] = int(data.rc_edge_index.shape[1])
+        stats["rc_coupling_edges"] = int((rt == RC_EDGE_TYPE_COUPLING).sum()) if rt.numel() else 0
+        stats["rc_resistance_edges"] = int((rt == RC_EDGE_TYPE_RESISTANCE).sum()) if rt.numel() else 0
     return stats
 
 
@@ -478,6 +507,9 @@ def main():
 
     views7 = build_feature_views(args.features, args.design)
     label_dfs = load_label_cache(args.labels)
+    # RC parasitic labels (Y side) — fail-soft: absent/header-only CSVs (no SPEF)
+    # leave the RC y-slot / parasitic edges empty.
+    rc = load_rc_label_cache(args.labels)
     # Loud guard: any label file the builders can't join (missing Design/key/
     # label columns — e.g. an interrupted extractor left a raw tool dump — or
     # a design_key mismatch) means its y slot is silently all-NaN. Warn AND
@@ -488,6 +520,18 @@ def main():
             print(f"WARNING: {fname} {h['status']}: {h['reason']} — "
                   f"its labels will be all-NaN", file=sys.stderr)
 
+    # RC label coverage (a design with no SPEF -> all zero -> status no_rc_labels).
+    rc_health = {
+        "ground_cap_nets": len(gl.rc_ground_cap_by_net(rc, args.design)),
+        "coupling_pairs": len(gl.rc_coupling_rows(rc, args.design)),
+        "equiv_res_pairs": len(gl.rc_resistance_rows(rc, args.design)),
+        "net_drivers": len(gl.rc_net_driver(rc, args.design)),
+    }
+    rc_health["status"] = "ok" if rc_health["ground_cap_nets"] > 0 else "no_rc_labels"
+    if rc_health["status"] != "ok":
+        print("NOTE: no RC labels for this design (no SPEF / RCX not run) — "
+              "ground-cap y5 and parasitic edges will be empty", file=sys.stderr)
+
     os.makedirs(args.out_dir, exist_ok=True)
     manifest = {
         "design": args.design,
@@ -497,12 +541,13 @@ def main():
         "x_schema_per_type": {"gate": GATE_COLS, "net": NET_COLS, "iopin": IOPIN_COLS, "pin": PIN_COLS},
         "y_schema": Y_SCHEMA_BASE,
         "label_health": health,
+        "rc_health": rc_health,
         "variants": {},
         "status": ("ok" if all(h["status"] == "ok" for h in health.values())
                    else "ok_with_label_gaps"),
     }
     for v in variants:
-        data = BUILDERS[v](views7, label_dfs, args.design, args.design, args.graph_id, args.features)
+        data = BUILDERS[v](views7, label_dfs, args.design, args.design, args.graph_id, args.features, rc=rc)
         out_pt = os.path.join(args.out_dir, f"{v}_graph.pt")
         torch.save(data, out_pt)
         manifest["variants"][v] = dict(_variant_stats(v, data), path=os.path.abspath(out_pt))

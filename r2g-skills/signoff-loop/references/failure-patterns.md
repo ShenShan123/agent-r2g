@@ -3246,6 +3246,35 @@ asserts the NEW semantics — `label_raw` is **exactly 0** for a cell whose own 
 demand (raw, un-smoothed), while `cell_congestion` is **small-but-nonzero** from the radius-4 spread —
 turning a rotted assertion into a guardrail that actively documents the 2-vector method.
 
+### 21. RC parasitic labels: SPEF↔DEF name-escaping join miss (silent drop of ~8% nets / ~21% pins) (2026-07-07)
+
+The new RC-label stage (`extract_rc.py` + `techlib/spef.py` → `graph_lib.attach_rc_labels`) adds
+ground cap (net-node `y5`), coupling cap (net-pair edge), and equivalent resistance (pin-pair edge)
+from the post-route SPEF. During real-design integration on **aes_core (sky130hd)** the RC→feature-CSV
+join was only **91.9% (nets) / 78.8% (pins)** — a *silent* loss (the flow was green, CSVs materialized,
+`build_graphs` joined by name and just left the non-matching nets/pins without RC).
+
+- **Root cause (same class as #1, different tool pair):** `write_spef` escapes `.`, `$`, `:` etc. with
+  a backslash (`keymem\.key_mem\[12\]\[54\]\$_DFFE_PN0P_`), while `write_def` / `techlib.def_parse`
+  escape **only** the bus brackets `[` `]` (`keymem.key_mem\[12\]\[54\]$_DFFE_PN0P_`). Every
+  hierarchical net (has a `.`) and every double-bus register (`$`) therefore failed the by-name join —
+  exactly the timing-critical/high-fanout nodes.
+- **Fix:** `techlib.spef._deesc` de-escapes SPEF names to the DEF convention (strip backslash **except**
+  before `[`/`]`) at parse time, so every emitted RC name matches `nodes_net`/`nodes_pin`. Measured
+  after fix: **100.00%** join on all of ground_cap / coupling / equiv_res / net_driver (aes_core, 30,333
+  nets, 768,115 pin endpoints). Pinned by `tests/test_spef.py::test_deesc_matches_def_convention` +
+  `test_names_are_deescaped_end_to_end`.
+- **Also caught by a test (the "no silent caps" honesty rail):** `equiv_res_pairs` was first written as a
+  generator, so its `return {"skipped": n}` fanout-guard sentinel was swallowed by `StopIteration` — a
+  capped net would drop silently with no WARN. Rewritten as a plain function returning a list-or-dict;
+  `tests/test_spef.py::test_max_fanout_guard` locks it.
+
+Verification recipe (reusable, and the reason both bugs were caught pre-merge): after building RC CSVs
+from a real `6_final.spef`, assert the fraction of `Net`/`(Inst,Pin)` keys that join the design's
+`nodes_net.csv`/`nodes_pin.csv` is ~100% — a join < 100% means an escaping/format skew, not "some nets
+just have no parasitics." RC is a **label** (Y): it rides `y5` + a **separate** parasitic edge set
+(`rc_edge_*`), never `x` — see label-extraction.md "RC parasitic labels" + graph-dataset.md.
+
 **Two siblings to watch:**
 - `label == sqrt(cell_congestion)` holds **only when a cell's bbox is a single GCell** (the fixture
   supplies no cell LEF, so every cell falls back to its origin GCell). For a **multi-GCell macro**

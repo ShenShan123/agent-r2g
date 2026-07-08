@@ -13,11 +13,17 @@ import statistics
 import sys
 
 # label name -> (csv filename, label column, raw-metric column)
+# RC parasitic labels (ground_cap/coupling_cap/equiv_res) are SPEF-derived: they
+# summarize like any other label, and cleanly read "skipped" (header-only CSV)
+# when no SPEF is present (RCX not run / platform without RCX rules).
 SPECS = {
     "congestion": {"file": "cell_congestion.csv", "label": "label", "metric": "cell_congestion"},
     "wirelength": {"file": "wirelength.csv", "label": "label", "metric": "WireLength_um"},
     "timing": {"file": "timing_features.csv", "label": "label", "metric": "Path_Delay_ns"},
     "irdrop": {"file": "ir_drop.csv", "label": "label", "metric": "IR_Drop_mV"},
+    "ground_cap": {"file": "net_ground_cap.csv", "label": "label", "metric": "ground_cap_fF"},
+    "coupling_cap": {"file": "coupling_cap.csv", "label": "label", "metric": "coupling_cap_fF"},
+    "equiv_res": {"file": "equiv_res.csv", "label": "label", "metric": "equiv_res_ohm"},
 }
 
 

@@ -67,7 +67,11 @@ Per-cell / per-net regression targets into `<project-dir>/labels/`, plus a per-d
   orientation-aware bbox mapping → 2-vector label),
 - **wirelength** (per-net; routed-segment length, log1p µm),
 - **timing** (per-cell path delay, via OpenROAD),
-- **IR drop** (per-gate, via OpenROAD).
+- **IR drop** (per-gate, via OpenROAD),
+- **RC parasitics** (from `6_final.spef`, via `extract_rc.py`): ground cap
+  (`net_ground_cap.csv`, per-net node label), coupling cap (`coupling_cap.csv`, net-pair edge
+  label), equivalent resistance (`equiv_res.csv`, same-net pin-pair edge label), + `net_driver.csv`
+  (places net↔net coupling edges on driver pins). No SPEF (RCX not run) → header-only RC CSVs.
 
 Fail-soft: a missing input or per-label tool error is recorded in the stats file, not fatal.
 Platform-agnostic — liberty/LEF/supply-voltage come from the ORFS platform config. Batch
@@ -114,11 +118,13 @@ reason is in `label_health`.
 | **e** | iopin, pin | gates AND nets → pin-clique edges |
 | **f** | gate, iopin | nets → gate-clique edges |
 
-Shared tensor schema: `x[N,10]` (node_type, graph_id, 8 per-type feature slots), `y[N,5]`
-(node_type, congestion, IR drop, timing, wirelength; NaN where a label doesn't apply). Folded
-entities carry their features/labels on `edge_attr[E,8]` / `edge_y[E,5]`, interleaved
-`[fwd0,rev0,fwd1,rev1,...]`. Full schema, per-variant node/edge counts, and the RC-parasitic
-label views: `references/graph-dataset.md`.
+Shared tensor schema: `x[N,10]` (node_type, graph_id, 8 per-type feature slots), `y[N,6]`
+(node_type, congestion, IR drop, timing, wirelength, **RC ground cap**; NaN where a label doesn't
+apply). Folded entities carry their features/labels on `edge_attr[E,8]` / `edge_y[E,5]`,
+interleaved `[fwd0,rev0,fwd1,rev1,...]`. RC **coupling-cap + resistance** labels ride a *separate
+parasitic edge set* (`rc_edge_index` / `rc_edge_type` / `rc_edge_y[E,3]`), distinct from the
+physical-topology edges (present-but-empty where RC doesn't apply, so the schema is uniform). Full
+schema + per-variant node/edge counts: `references/graph-dataset.md`.
 
 ## The tech-lib / LEF / DEF parser (`scripts/extract/techlib/`)
 
