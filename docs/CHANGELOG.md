@@ -1,8 +1,9 @@
 # Changelog
 
-Curated, reverse-chronological history of the `agent-with-OpenROAD` / `r2g-rtl2gds`
-project. This file consolidates the campaign reports, signoff findings, and
-design plans/specs that previously lived as standalone files under `docs/`.
+Curated, reverse-chronological history of the `agent-with-OpenROAD` project (the skill was
+renamed `r2g-rtl2gds` → `r2g-skills` on 2026-07-07; entries before then use the old name).
+This file consolidates the campaign reports, signoff findings, and design plans/specs that
+previously lived as standalone files under `docs/`.
 
 > **Source-merge note (2026-06-01):** This file consolidates 27 dated documents
 > from `docs/` — campaign logs, wave findings, batch reports, the
@@ -16,6 +17,56 @@ Status legend used throughout: **clean** (no violations), **stuck** (KLayout
 polygon-op deadloop; GDS still valid), **clean_algorithmic** (LVS comparator
 graph-isomorphism false-fail), **clean_beol** (BEOL-only DRC; FEOL/ANTENNA
 skipped as library-pre-verified).
+
+---
+
+## 2026-07-07 — Skill split into `r2g-skills` (`signoff-loop` + `def-graph`) + RC parasitic labels merged
+*(branch `feat/skill-split-r2g-skills`; commits `48e1e55` split, `f8582bd` prune, `ed519e7` condense,
+`46e9283` merge of `feat/rc-annotation` `5f1ca53`; plan
+`docs/superpowers/plans/r2g-skills-split-2026-07-07.md`)*
+
+Split the single `r2g-rtl2gds` skill into a two-skill collection **`r2g-skills`** and folded the
+RC-parasitic-label feature into the new structure. The two skills install independently
+(`.claude/skills/signoff-loop`, `.claude/skills/def-graph`; plugin manifest `name: r2g-skills`).
+
+- **The split (`48e1e55`).** `signoff-loop/` owns the RTL→GDS flow + full signoff + the
+  self-improvement loop (`knowledge/`, `engineer_loop`, the signoff extractors + `report_io.py`);
+  `def-graph/` owns dataset construction (the five graph views b–f, `techlib/` LEF/DEF parser,
+  feature/label extraction, `run_{labels,features,graphs}.sh`). The Python boundary was already
+  clean both ways; the only real couplings were shell-level (`_env.sh`, shared byte-identical) and
+  one misfiled module — `presynth.py` (a signoff KNN feature producer) moved to the signoff side,
+  dissolving the sole `presynth_features.json` producer/consumer contract. Fixed every
+  `__file__`-relative path that reached OUTSIDE the now-one-level-deeper skill (`_env.sh` ORFS
+  autodetect `../..`→`../../..`; 7 tests `parents[2]`→`[3]`; verify-helper dirname ×3→×4). Preserved
+  git history via `git mv` (277 renames of 319 files). Behavior-preserving: whole suite
+  **1071 passed / 15 skipped** before → **790 (signoff) + 281 (def-graph) = 1071 / 15** after. The
+  committed `knowledge.sqlite` binary is UNCHANGED (its historical provenance strings still read
+  `r2g-rtl2gds` — immutable per the honesty invariants).
+- **RC parasitic labels (`46e9283`, merging `5f1ca53`).** SPEF R/C annotated onto graph views b–f
+  as **labels (Y), not features**. The node label tensor grows `y[N,5]`→`y[N,6]` (`y5` = ground cap
+  on the net node; broadcast to pins in d/e, dropped in f); coupling-cap + equivalent-resistance
+  ride a **separate parasitic edge set** (`rc_edge_index`/`rc_edge_type`/`rc_edge_y[E,3]`), distinct
+  from the physical topology (present-but-empty where RC doesn't apply, so the schema is uniform).
+  New `scripts/extract/labels/extract_rc.py` (→ `net_ground_cap`/`coupling_cap`/`equiv_res`/
+  `net_driver` CSVs; fail-soft: no SPEF → header-only) + shared `techlib/spef.py` parser. Git
+  rename-detection relocated RC's modifications onto the split paths; the 4 new files were
+  hand-placed into `def-graph/`. def-graph suite **281 → 308** (+27: `test_rc_labels`, `test_spef`);
+  total **1098 passed / 15 skipped**.
+- **Verification (both label dimensions, per graph view).** Congestion: iir + DMA_fsm **86/86**
+  across all five views (the three independent congestion recomputes + per-view `y1` checks). RC:
+  iir **103/103** (ground-cap `y5` per view, coupling + resistance `rc_edge` labels vs an
+  independent SPEF re-parse) after a forced label rebuild.
+- **Housekeeping.** Deleted 4 stale one-off `tools/` scripts superseded in this version
+  (`reconcile_catalog_exhausted_notes`, `reconcile_unseen_crash_reasons`, `reenqueue_ppl0024`,
+  `retry_failures.sh`; `f8582bd`). Condensed the `/r2g-debug` command doc **672 → 340 lines**
+  (`ed519e7`).
+- **Operator actions.** Deploy is now **two symlinks** — `bash r2g-skills/install.sh --project .
+  --link --force`. Run the pytest suites **per-skill** (both dirs are named `tests/`, so a single
+  `pytest r2g-skills/` process collides on `tests.conftest`). Existing datasets need a **forced
+  label rebuild** to gain RC (`rm reports/labels_stats.json`, then `run_graphs.sh`) — the
+  DEF-mtime freshness gate doesn't know the extractor gained RC; the 866 SPEF-bearing designs are
+  affected. Pass the real `DESIGN_NAME` (not the directory name) to
+  `verify_graph_dataset.py --design`, or it silently returns `0/0` false-fails.
 
 ---
 

@@ -334,7 +334,7 @@ Key scripts involved:
 | PPA extract | `scripts/extract/extract_ppa.py` | `reports/ppa.json` |
 | Timing gate | `scripts/reports/check_timing.py` | pass / minor-fix / escalate |
 | Signoff fix | `scripts/flow/fix_signoff.sh` | `reports/fix_log.jsonl` |
-| Dataset labels (Y) | `scripts/flow/run_labels.sh` | `labels/*.csv` + `reports/labels_stats.json` |
+| Dataset labels (Y) | `scripts/flow/run_labels.sh` | `labels/*.csv` (congestion · wirelength · timing · irdrop · RC parasitics from SPEF) + `reports/labels_stats.json` |
 | Dataset features (X) | `scripts/flow/run_features.sh` | `features/*.csv` + `reports/features_stats.json` |
 | PyG graph datasets | `scripts/flow/run_graphs.sh` | `dataset/{b..f}_graph.pt`, `netlist_graph.pt`, `graph_manifest.json` |
 
@@ -492,7 +492,7 @@ agent-r2g/
 │       │   ├── flow/                  #   run_labels/run_features/run_graphs + resolve_platform_paths + _env.sh
 │       │   └── extract/
 │       │       ├── techlib/           #     Per-platform tech/LEF/liberty/DEF parser
-│       │       ├── labels/            #     Y: congestion · wirelength · timing · irdrop
+│       │       ├── labels/            #     Y: congestion · wirelength · timing · irdrop · RC parasitics
 │       │       ├── features/          #     X: nodes_* · edges_* · metadata
 │       │       └── graph/             #     PyG b–f variants + netlist graph (run_graphs.sh)
 │       ├── references/                #   graph-dataset · feature-extraction · label-extraction
@@ -609,7 +609,7 @@ config.mk — see `r2g-skills/signoff-loop/SKILL.md` ("Netgen LVS") and
 
 ## Validated scale
 
-The skill has been validated on **682 RTL designs** spanning ICCAD benchmarks, RISC-V cores, BOOM/Chipyard, VTR, zipcpu, verilog-ethernet, wb2axip, and more. The test suite covers **1,058 tests** (pytest, as of 2026-07-06), including an end-to-end synthetic corner-case suite that drives the real feature/label/graph extractors and asserts all five PyG graph views (b–f) against hand-derived ground truth.
+The skills have been validated on **682 RTL designs** spanning ICCAD benchmarks, RISC-V cores, BOOM/Chipyard, VTR, zipcpu, verilog-ethernet, wb2axip, and more. The test suite covers **1,098 tests** (pytest, as of 2026-07-07; run per-skill — `signoff-loop` 790, `def-graph` 308), including an end-to-end synthetic corner-case suite that drives the real feature/label/graph extractors and asserts all five PyG graph views (b–f) against hand-derived ground truth, plus per-view congestion and RC-parasitic label verification against independent DEF/LEF/SPEF re-parses.
 
 **ORFS backend (place & route → GDS):** 476 / 495 designs from the original `rtl_designs/` batch pass (96.2%); 19 remaining have understood root causes (megadesign synthesis budgets, missing netlists, zero-logic stubs).
 

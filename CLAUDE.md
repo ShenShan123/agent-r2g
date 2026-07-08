@@ -6,7 +6,9 @@ collection — **two sub-skills** (2026-07-07 split; see `docs/superpowers/plans
 - **`signoff-loop`** — drives the flow RTL→GDS with full signoff *and* the self-improvement loop
   (the two memory DBs + `engineer_loop`) that eliminates DRC/LVS violations and closes timing at Fmax.
 - **`def-graph`** — converts the clean, signed-off physical design (DEF/LEF/SPEF) into PyG graph
-  datasets: five graph views (b–f), the tech-lib/LEF parser, and feature/label extraction.
+  datasets: five graph views (b–f), the tech-lib/LEF parser, and feature/label extraction
+  (labels: congestion, wirelength, timing, IR drop, and SPEF-derived RC parasitics — the last a
+  `y[N,6]` node label + a separate `rc_edge_*` parasitic edge set, merged 2026-07-07).
 
 **Two things make `signoff-loop` what it is** (everything else is plumbing):
 1. **Two memory databases** (`knowledge.sqlite` = what *resulted*, `journal.sqlite` = what was
