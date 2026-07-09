@@ -3465,3 +3465,35 @@ Re-validated: nangate45 `cordic` override build **156/156 checks passed**; sky13
 add an override that lets a new input shape reach a pipeline, the *verifier* for that pipeline
 inherits the same override obligation — fixing the producer half-enables the workflow until the
 checker honors the same knobs.
+
+### 25. Verifier read the clock period from `updated_clks.sdc` (Fmax intermediate), not `6_final.sdc` — 100% spurious timing-label FAIL (2026-07-08)
+
+Surfaced by an r2g-debug tick extending Step-5 coverage to a large **bus-heavy** design
+(`wb2axip_axivfifo`, 103K cells). The verifier's `_sdc_clock_period` reads the clock via
+`_find_backend_file(case, "results/6_final.sdc", "results/updated_clks.sdc")`, and
+`_find_backend_file` is **newest-run-major** (iterate `RUN_*` newest-first; within a run try each
+candidate in order, return the first hit). axivfifo had a newer *incomplete* probe run holding
+**only** `updated_clks.sdc` (an Fmax-search intermediate, `period=6.2416`) and no `6_final.sdc`, so
+the newer run's lower-priority candidate beat the older run's authoritative `6_final.sdc`
+(`period=10.0`). The timing LABELS anchor to the run that actually has `6_final` (`run_labels`
+picks the newest run with a `6_final.odb/def`), so they used 10.0 correctly — but the verifier
+recomputed `Path_Delay=max(0, 6.2416−slack)` against them and reported **76986/76986 in-path
+labels "bad"** (a pure false-positive; the labels were right).
+
+**In-contract exposure:** not axivfifo-specific — every clean design carries an `updated_clks.sdc`
+too (iir/aes_core/bm_sfifo all do); they pass only because their *newest* run also has
+`6_final.sdc`. A clean design whose newest run lacks `6_final.sdc` (a re-run that stopped after
+writing `updated_clks.sdc`) would false-fail timing identically.
+
+**Fix** (`_sdc_clock_period`): prefer `6_final.sdc` across ALL runs before ever considering
+`updated_clks.sdc` — `_find_backend_file(case, "results/6_final.sdc") or
+_find_backend_file(case, "results/updated_clks.sdc")`. Targeted (the other `_find_backend_file`
+caller — the ODB — is unaffected: `final/6_final.odb` vs `results/6_final.odb` are the same file).
+Re-validated: `_sdc_clock_period("…/wb2axip_axivfifo")` 6.2416 → **10.0**; TDD
+`test_sdc_period_prefers_6final_over_newer_updated_clks` (two-run fixture, proven RED without the
+fix); full def-graph suite green. **NB** — axivfifo is an *escalated* (`drc=stuck`,
+`signoff_stuck_scan`) design, out of the def-graph clean-design contract; its remaining
+`signoff.drc clean` FAIL is the provenance gate working correctly (do not build training datasets
+on non-signed-off designs — that dataset was removed). **Lesson:** a "find the artifact" helper
+whose relnames are *priority-ordered* must honor that priority ACROSS the whole search space, not
+let proximity (newest run) override rank.

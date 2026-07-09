@@ -396,6 +396,24 @@ def test_sdc_clock_period_and_spef_resistances(tmp_path):
     assert rv and sum(rv) == pytest.approx(900.0)   # 500 + 400, R_UNIT 1 OHM
 
 
+def test_sdc_period_prefers_6final_over_newer_updated_clks(tmp_path):
+    """A newer INCOMPLETE run carrying only updated_clks.sdc (an Fmax-search
+    intermediate with a tighter period) must NOT override an older run's
+    authoritative 6_final.sdc -- otherwise the verifier reads the wrong clock
+    period and false-fails EVERY in-path timing label (2026-07-08 wb2axip_axivfifo:
+    6_final.sdc=10.0 vs updated_clks.sdc=6.2416 -> 76986/76986 bad). #25."""
+    case = str(tmp_path)
+    old = os.path.join(case, "backend", "RUN_2026-07-06_07-00-00", "results")
+    new = os.path.join(case, "backend", "RUN_2026-07-06_23-00-00", "results")
+    os.makedirs(old)
+    os.makedirs(new)
+    with open(os.path.join(old, "6_final.sdc"), "w") as f:      # authoritative, older run
+        f.write("create_clock -name core_clock -period 10.0000 [get_ports clk]\n")
+    with open(os.path.join(new, "updated_clks.sdc"), "w") as f:  # Fmax intermediate, NEWER run
+        f.write("create_clock -name core_clock -period 6.2416 [get_ports clk]\n")
+    assert vgd._sdc_clock_period(case) == pytest.approx(10.0)
+
+
 # =========================================================================== #
 # GROUP D — R2G_DEF / R2G_SPEF override + no-backend tolerance (2026-07-08)     #
 # The reference-DEF verification workflow (Step 5c) builds a dataset from       #

@@ -1612,7 +1612,19 @@ def _find_backend_file(case, *relnames):
 
 
 def _sdc_clock_period(case):
-    sdc = _find_backend_file(case, "results/6_final.sdc", "results/updated_clks.sdc")
+    # Prefer 6_final.sdc across ALL runs before falling back to updated_clks.sdc.
+    # _find_backend_file is newest-run-major, so a newer INCOMPLETE run that holds
+    # only updated_clks.sdc (an Fmax-search intermediate carrying a different, tighter
+    # period) would otherwise win over an older run's authoritative 6_final.sdc --
+    # reading the wrong clock period and false-failing EVERY in-path timing label.
+    # The timing LABELS anchor to the run that actually has 6_final (run_labels picks
+    # the newest run with a 6_final.odb/def), so the period source must too. Surfaced
+    # 2026-07-08 on wb2axip_axivfifo: 6_final.sdc=10.0 but a newer probe run's
+    # updated_clks.sdc=6.2416 -> 76986/76986 in-path labels reported "bad". Clean
+    # designs are exposed too (iir/aes_core/bm_sfifo all carry an updated_clks.sdc;
+    # they pass only because their newest run also has 6_final.sdc). failure-patterns #25.
+    sdc = (_find_backend_file(case, "results/6_final.sdc")
+           or _find_backend_file(case, "results/updated_clks.sdc"))
     if not sdc:
         return None
     periods = []
