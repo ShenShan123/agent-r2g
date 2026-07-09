@@ -92,9 +92,11 @@ the toolchain. `--dry-run` prints a per-tier plan and installs nothing; without 
 def-graph) are the honesty layer — a bootstrapped env is auto-found next session. Design + rationale:
 `docs/superpowers/plans/r2g-skills-bootstrap-2026-07-08.md`.
 
-**This machine:** signoff tools (iverilog/vvp, magic, netgen) live in `~/miniconda3/envs/eda`; the
-sky130A PDK is staged at `/proj/workarea/user5/sky130_pdk/share/pdk/sky130A`; all pinned in
-`references/env.local.sh` and green in `check_env.sh` (enables real sky130 Magic DRC + Netgen LVS).
+**This machine:** signoff tools (iverilog/vvp, magic, netgen) live in
+`/proj/workarea/user5/miniconda3/envs/eda` (relocated 2026-07-09 from a now-deleted `~/miniconda3` to
+free a full `$HOME`; the conda root is on `/proj` too); the sky130A PDK is staged at
+`/proj/workarea/user5/sky130_pdk/share/pdk/sky130A`; all pinned in `references/env.local.sh` and green
+in `check_env.sh` (enables real sky130 Magic DRC + Netgen LVS).
 The graph-stage torch venv is at `/proj/workarea/user5/pyenvs/rtl2graph` (torch 2.12.1+cpu, PyG 2.8.0,
 pandas, pytest) — point `R2G_GRAPH_PYTHON` at its `bin/python`. Install recipe in `README.md`.
 **Never install large packages into `$HOME` (full) — use `/proj`.** Platforms in this checkout:
