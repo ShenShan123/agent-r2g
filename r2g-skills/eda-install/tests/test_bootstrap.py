@@ -5,7 +5,7 @@ Covers the first slice landed on branch feat/r2g-bootstrap:
   - bootstrap.sh    computes the correct per-tier plan from a saved detect dump
                     (synthetic --plan-from fixtures → no real toolchain / network)
   - write_env_local.sh generates a valid pin file (header + R2G_GRAPH_PYTHON)
-  - the two _env.sh copies stay byte-identical (CLAUDE.md md5 ad4406d0… invariant)
+  - the two _env.sh copies stay byte-identical (CLAUDE.md md5 a5ac873e… invariant)
 
 Design doc: docs/superpowers/plans/r2g-skills-bootstrap-2026-07-08.md.
 """
@@ -24,7 +24,7 @@ SKILLS_ROOT = EDA_ROOT.parent                           # …/r2g-skills
 DETECT = EDA_ROOT / "scripts" / "setup" / "detect_env.sh"
 BOOTSTRAP = EDA_ROOT / "bootstrap.sh"
 WRITE_ENV = EDA_ROOT / "scripts" / "setup" / "write_env_local.sh"
-# The shared resolver ships byte-identical in ALL THREE skills (CLAUDE.md md5 ad4406d0… invariant).
+# The shared resolver ships byte-identical in ALL THREE skills (CLAUDE.md md5 a5ac873e… invariant).
 ENV_COPIES = [
     EDA_ROOT / "scripts" / "flow" / "_env.sh",
     SKILLS_ROOT / "signoff-loop" / "scripts" / "flow" / "_env.sh",
@@ -181,3 +181,26 @@ def test_env_sh_copies_identical():
         "scripts/flow/_env.sh has diverged across skills: "
         + ", ".join(f"{p.parents[2].name}={h[:8]}" for p, h in digests.items())
     )
+
+
+# --- conda-staged PDK autodetect ----------------------------------------------
+
+def test_env_sh_detects_conda_staged_pdk(tmp_path):
+    # open_pdks.sky130a stages sky130A under <conda>/envs/<env>/share/pdk (the pdk
+    # tier's install location); _env.sh must autodetect it. Uses the eda-install copy
+    # (no references/env.local.sh to preset PDK_ROOT) + a minimal env so nothing else
+    # can set PDK_ROOT — so this can only pass if the conda-PDK block actually ran.
+    base = tmp_path / "miniconda3" / "envs" / "eda" / "share" / "pdk"
+    (base / "sky130A").mkdir(parents=True)
+    envsh = ENV_COPIES[0]  # …/eda-install/scripts/flow/_env.sh
+    minimal = {
+        "PATH": "/usr/bin:/bin",
+        "HOME": str(tmp_path / "nohome"),            # keep $HOME/miniconda3 from matching a real one
+        "CONDA_PREFIX": str(tmp_path / "miniconda3"),
+        "R2G_CONDA_ENV": "eda",
+    }
+    script = (f'source "{envsh}" >/dev/null 2>&1; '
+              f'echo "PDK_ROOT=${{PDK_ROOT:-}}"; echo "SKY=${{SKY130A_DIR:-}}"')
+    out = subprocess.run(["bash", "-c", script], capture_output=True, text=True, env=minimal).stdout
+    assert f"PDK_ROOT={base}" in out
+    assert f"SKY={base}/sky130A" in out

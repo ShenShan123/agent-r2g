@@ -83,7 +83,7 @@ GLIBC too old for the conda binaries) **escalates with a clear HINT — never a 
 
 ## Invariants (honesty layer)
 
-- **`scripts/flow/_env.sh` is byte-identical across all three skills** (md5 `ad4406d0…`) — the same
+- **`scripts/flow/_env.sh` is byte-identical across all three skills** (md5 `a5ac873e…`) — the same
   resolver the flow scripts use; edit every copy together.
 - **Detection is read-only and total** — it emits every key (empty == absent) and never exits non-zero
   for a missing tool.

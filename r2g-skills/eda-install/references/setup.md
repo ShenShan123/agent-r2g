@@ -10,7 +10,7 @@ eda-install/
   bootstrap.sh              # orchestrator: detect → plan → install → pin → verify
   scripts/
     flow/
-      _env.sh               # byte-identical shared resolver (md5 ad4406d0…)
+      _env.sh               # byte-identical shared resolver (md5 a5ac873e…)
       check_env.sh          # comprehensive verifier (ORFS + tools + graph + platforms)
     setup/
       detect_env.sh         # KEY=VALUE machine + toolchain snapshot

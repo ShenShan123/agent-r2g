@@ -176,11 +176,25 @@ if [[ -z "${PDK_ROOT:-}" ]]; then
   done
 fi
 
+# conda-staged sky130A (open_pdks.sky130a → <conda>/envs/<env>/share/pdk, e.g. from
+# eda-install's pdk tier). Only adopt a candidate that actually contains sky130A, so a
+# conda PDK is discovered without ever shadowing an explicit/well-known PDK_ROOT that
+# already has it.
+if [[ -z "${PDK_ROOT:-}" || ! -d "${PDK_ROOT}/sky130A" ]]; then
+  _r2g_env="${R2G_CONDA_ENV:-eda}"
+  for _base in "${CONDA_PREFIX:-}" "$HOME/miniconda3" "$HOME/miniforge3" "/proj/$USER/miniconda3"; do
+    [[ -z "$_base" ]] && continue
+    for _cand in "$_base/envs/$_r2g_env/share/pdk" "$_base/share/pdk"; do
+      if [[ -d "$_cand/sky130A" ]]; then export PDK_ROOT="$_cand"; break 2; fi
+    done
+  done
+fi
+
 if [[ -n "${PDK_ROOT:-}" && -d "$PDK_ROOT/sky130A" ]]; then
   export SKY130A_DIR="$PDK_ROOT/sky130A"
 fi
 
-unset _r2g_orfs_openroad _r2g_orfs_yosys _cand _hit _p _detected
+unset _r2g_orfs_openroad _r2g_orfs_yosys _cand _hit _p _detected _base _r2g_env
 # Restore caller's options
 case "$_r2g_saved_opts" in
   *e*) set -e ;;
