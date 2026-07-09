@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import math
 import os
+from pathlib import Path
 
 CONFIG_TOL = 0.15            # ±15% numeric tolerance for "same action"
 RULE_DETAIL_TOP_N = 20       # cap verbose per-violation detail (D13)
@@ -117,8 +118,18 @@ def manage(db_path, *, out_path=None, autolearn=True) -> dict:
     """Autonomous post-ingest step: re-derive Tier-2/Tier-3 (learn) then enforce the
     size policy. Returns {rows, archived, db_mb}."""
     import knowledge_db
+    # Learner outputs must be keyed to THE SAME db they were derived from. An
+    # ingest into a non-default db (a test tmpdir, an rtl-acquire scratch corpus,
+    # an A/B sandbox) previously full-rewrote the SHIPPED heuristics.json from
+    # that other db's tiny corpus — a silent lie (2026-07-09, exposed by the
+    # rtl-acquire flow_scope ingest test; failure-patterns.md "Learning-Loop
+    # Closure Failures"). Sandbox db → sibling heuristics.json next to it.
+    db_is_default = Path(db_path).resolve() == knowledge_db.DEFAULT_DB_PATH.resolve()
     if out_path is None:
-        out_path = knowledge_db.DEFAULT_KNOWLEDGE_DIR / "heuristics.json"
+        if db_is_default:
+            out_path = knowledge_db.DEFAULT_KNOWLEDGE_DIR / "heuristics.json"
+        else:
+            out_path = Path(db_path).resolve().parent / "heuristics.json"
     if autolearn:
         import learn_heuristics
         learn_heuristics.learn(db_path, out_path)   # builds trajectories+recipes FIRST
@@ -138,8 +149,10 @@ def manage(db_path, *, out_path=None, autolearn=True) -> dict:
         if os.environ.get("R2G_MINE_AUTORUN", "1") != "0":
             try:
                 import mine_rules
-                mine_rules.mine(db_path, knowledge_db.DEFAULT_KNOWLEDGE_DIR
-                                / "failure_candidates.json")
+                _mine_out = (knowledge_db.DEFAULT_KNOWLEDGE_DIR / "failure_candidates.json"
+                             if db_is_default
+                             else Path(db_path).resolve().parent / "failure_candidates.json")
+                mine_rules.mine(db_path, _mine_out)
             except Exception as e:                  # mining must never break ingest
                 import sys
                 print(f"[fix_log_manager] rule mining skipped: {e}", file=sys.stderr)

@@ -2906,6 +2906,22 @@ slow arm.)
 - **Skill-level alarm:** any v2 trial whose `metrics_json.repeats` differs between arms, or
   differs from `R2G_AB_REPEATS`, is a fragmentation lead.
 
+**Pattern 16 — post-ingest autolearn on a SANDBOX db clobbered the SHIPPED heuristics.json
+(2026-07-09, exposed by rtl-acquire's flow_scope ingest test).** `ingest_run.py` ends with an
+env-gated autolearn (`R2G_FIX_AUTOLEARN=1` default) that calls `fix_log_manager.manage(args.db)`
+— but `manage()` defaulted its learner output to `DEFAULT_KNOWLEDGE_DIR/heuristics.json`
+REGARDLESS of which db was ingested. Any ingest into a non-default db (a pytest tmpdir, an
+rtl-acquire scratch corpus via `R2G_KNOWLEDGE_DB`, an A/B sandbox) therefore full-rewrote the
+committed heuristics.json from that other db's tiny corpus — tell-tale: `source_run_count` drops
+to ~1 and `families` collapses to almost nothing while the committed knowledge.sqlite still has
+thousands of runs. Same class for `mine_rules` → `failure_candidates.json` (gitignored, so lower
+stakes, but it silently replaced the operator's live review queue). Fix: `manage()` keys BOTH
+outputs to the db they were derived from — the default db keeps the shipped paths; any other db
+writes `heuristics.json`/`failure_candidates.json` NEXT TO itself. Guard:
+`tests/test_fix_log_manager_sandbox_outputs.py` (shipped bytes must be identical after a
+sandbox-db manage()). If you find a gutted heuristics.json, restore with
+`git checkout -- knowledge/heuristics.json` and re-run `learn_heuristics.py` off the committed db.
+
 ## Dataset-Extraction Silent-Value Defects (features/labels; found by the 2026-07-05 RTL2Graph audit)
 
 A new failure class: the flow completes green, the CSVs materialize, and the VALUES are
