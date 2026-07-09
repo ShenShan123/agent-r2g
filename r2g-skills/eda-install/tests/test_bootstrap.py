@@ -1,0 +1,183 @@
+"""Tests for the toolchain bootstrap (detect → plan → pin → verify).
+
+Covers the first slice landed on branch feat/r2g-bootstrap:
+  - detect_env.sh   emits a complete KEY=VALUE contract
+  - bootstrap.sh    computes the correct per-tier plan from a saved detect dump
+                    (synthetic --plan-from fixtures → no real toolchain / network)
+  - write_env_local.sh generates a valid pin file (header + R2G_GRAPH_PYTHON)
+  - the two _env.sh copies stay byte-identical (CLAUDE.md md5 ad4406d0… invariant)
+
+Design doc: docs/superpowers/plans/r2g-skills-bootstrap-2026-07-08.md.
+"""
+from __future__ import annotations
+
+import hashlib
+import re
+import subprocess
+from pathlib import Path
+
+import pytest
+
+EDA_ROOT = Path(__file__).resolve().parents[1]          # …/r2g-skills/eda-install
+SKILLS_ROOT = EDA_ROOT.parent                           # …/r2g-skills
+
+DETECT = EDA_ROOT / "scripts" / "setup" / "detect_env.sh"
+BOOTSTRAP = EDA_ROOT / "bootstrap.sh"
+WRITE_ENV = EDA_ROOT / "scripts" / "setup" / "write_env_local.sh"
+# The shared resolver ships byte-identical in ALL THREE skills (CLAUDE.md md5 ad4406d0… invariant).
+ENV_COPIES = [
+    EDA_ROOT / "scripts" / "flow" / "_env.sh",
+    SKILLS_ROOT / "signoff-loop" / "scripts" / "flow" / "_env.sh",
+    SKILLS_ROOT / "def-graph" / "scripts" / "flow" / "_env.sh",
+]
+
+DETECT_KEYS = {
+    "OS_FAMILY", "PKG_MGR", "HAVE_SUDO", "HAVE_CONDA", "PYTHON3",
+    "BIG_VOLUME", "BIG_VOLUME_FREE_GB", "MIN_FREE_GB",
+    "ORFS_ROOT", "FLOW_DIR", "OPENROAD_EXE", "YOSYS_EXE", "IVERILOG_EXE",
+    "VVP_EXE", "VERILATOR_EXE", "KLAYOUT_CMD", "MAGIC_EXE", "NETGEN_EXE",
+    "STA_EXE", "PDK_ROOT", "SKY130A_DIR", "GRAPH_PYTHON",
+}
+
+# --- synthetic machines (KEY=VALUE detect dumps) ------------------------------
+
+def _dump(d: dict) -> str:
+    return "".join(f"{k}={v}\n" for k, v in d.items())
+
+
+_PROVISIONED_NOSUDO = {
+    "OS_FAMILY": "rhel", "PKG_MGR": "none", "HAVE_SUDO": "0",
+    "HAVE_CONDA": "/home/me/miniconda3/bin/conda",
+    "BIG_VOLUME": "/proj/me", "BIG_VOLUME_FREE_GB": "100", "MIN_FREE_GB": "15",
+    "ORFS_ROOT": "/proj/me/ORFS", "FLOW_DIR": "/proj/me/ORFS/flow",
+    "OPENROAD_EXE": "/proj/me/ORFS/tools/install/OpenROAD/bin/openroad",
+    "YOSYS_EXE": "/proj/me/ORFS/tools/install/yosys/bin/yosys",
+    "IVERILOG_EXE": "/home/me/miniconda3/envs/eda/bin/iverilog",
+    "VVP_EXE": "/home/me/miniconda3/envs/eda/bin/vvp",
+    "MAGIC_EXE": "/x/magic", "NETGEN_EXE": "/x/netgen", "KLAYOUT_CMD": "/usr/bin/klayout",
+    "PDK_ROOT": "/proj/me/pdk", "SKY130A_DIR": "/proj/me/pdk/sky130A",
+    "GRAPH_PYTHON": "/proj/me/venv/bin/python",
+}
+
+_BARE_NOSUDO = {
+    "OS_FAMILY": "rhel", "PKG_MGR": "none", "HAVE_SUDO": "0",
+    "HAVE_CONDA": "/c/bin/conda",
+    "BIG_VOLUME": "/proj/me", "BIG_VOLUME_FREE_GB": "100", "MIN_FREE_GB": "15",
+    "ORFS_ROOT": "", "FLOW_DIR": "", "OPENROAD_EXE": "", "YOSYS_EXE": "",
+    "IVERILOG_EXE": "", "VVP_EXE": "", "VERILATOR_EXE": "", "KLAYOUT_CMD": "",
+    "MAGIC_EXE": "", "NETGEN_EXE": "", "STA_EXE": "", "PDK_ROOT": "",
+    "SKY130A_DIR": "", "GRAPH_PYTHON": "",
+}
+
+_BARE_SUDO = dict(_BARE_NOSUDO, HAVE_SUDO="1", PKG_MGR="apt", HAVE_CONDA="")
+
+
+# --- helpers ------------------------------------------------------------------
+
+_ROW = re.compile(r"^(?P<tier>[a-z][a-z0-9-]*)\s+(?P<status>OK|MISS|OPT|\?)\s+(?P<need>req|opt)\s+(?P<action>.*)$")
+
+
+def _plan(tmp_path: Path, dump: dict, *extra: str) -> tuple[str, dict]:
+    f = tmp_path / "detect.txt"
+    f.write_text(_dump(dump))
+    out = subprocess.run(
+        ["bash", str(BOOTSTRAP), "--plan-from", str(f), *extra],
+        capture_output=True, text=True, check=True,
+    ).stdout
+    rows = {}
+    for line in out.splitlines():
+        m = _ROW.match(line.strip())
+        if m:
+            rows[m["tier"]] = (m["status"], m["need"], m["action"])
+    return out, rows
+
+
+# --- detect_env.sh ------------------------------------------------------------
+
+def test_detect_emits_complete_contract():
+    out = subprocess.run(["bash", str(DETECT)], capture_output=True, text=True, check=True).stdout
+    got = {}
+    for line in out.splitlines():
+        assert "=" in line, f"non KEY=VALUE stdout line: {line!r}"
+        k, _, v = line.partition("=")
+        got[k] = v
+    assert DETECT_KEYS <= set(got), f"missing keys: {DETECT_KEYS - set(got)}"
+    assert got["HAVE_SUDO"] in ("0", "1")
+    assert got["MIN_FREE_GB"].isdigit()
+
+
+# --- bootstrap.sh planner -----------------------------------------------------
+
+def test_plan_provisioned_all_ok(tmp_path):
+    out, rows = _plan(tmp_path, _PROVISIONED_NOSUDO)
+    for tier in ("core", "frontend", "sky130", "klayout", "pdk", "graph"):
+        assert rows[tier][0] == "OK", f"{tier} not OK: {rows[tier]}"
+    assert "sudo=NO" in out
+    assert "no-sudo" in out
+
+
+def test_plan_bare_nosudo_uses_conda_no_build(tmp_path):
+    _out, rows = _plan(tmp_path, _BARE_NOSUDO)
+    # required tiers are MISSing, optional tiers are installable (OPT)
+    assert rows["core"][0] == "MISS"
+    assert rows["frontend"][0] == "MISS"
+    assert rows["sky130"][0] == "OPT"
+    assert rows["pdk"][0] == "OPT"
+    assert rows["graph"][0] == "OPT"
+    # no-sudo → conda binaries, ORFS cloned but NOT built
+    assert "conda" in rows["core"][2]
+    assert "no build" in rows["core"][2]
+    assert "build_openroad" not in rows["core"][2]
+
+
+def test_plan_bare_sudo_offers_source_build(tmp_path):
+    out, rows = _plan(tmp_path, _BARE_SUDO)
+    assert rows["core"][0] == "MISS"
+    assert "build_openroad" in rows["core"][2]
+    assert "sudo=yes" in out
+
+
+def test_plan_graph_flips_ok_when_present(tmp_path):
+    _o1, r_absent = _plan(tmp_path, _BARE_NOSUDO)
+    assert r_absent["graph"][0] == "OPT"
+    _o2, r_present = _plan(tmp_path, dict(_BARE_NOSUDO, GRAPH_PYTHON="/v/bin/python"))
+    assert r_present["graph"][0] == "OK"
+
+
+def test_plan_tiers_subset(tmp_path):
+    _out, rows = _plan(tmp_path, _PROVISIONED_NOSUDO, "--tiers", "core,graph")
+    assert set(rows) == {"core", "graph"}
+
+
+def test_dry_run_installs_nothing(tmp_path):
+    f = tmp_path / "detect.txt"
+    f.write_text(_dump(_BARE_NOSUDO))
+    r = subprocess.run(["bash", str(BOOTSTRAP), "--plan-from", str(f)],
+                       capture_output=True, text=True, check=True)
+    assert "nothing installed" in r.stdout
+
+
+# --- write_env_local.sh -------------------------------------------------------
+
+def test_write_env_local_dry_run(tmp_path):
+    r = subprocess.run(
+        ["bash", str(WRITE_ENV), "--graph-python", "/sentinel/py", "--dry-run"],
+        capture_output=True, text=True, check=True,
+    )
+    body = r.stdout
+    assert "GENERATED by scripts/setup/write_env_local.sh" in body
+    assert 'export R2G_GRAPH_PYTHON="/sentinel/py"' in body
+    # openroad/yosys under $ORFS_ROOT/tools/install must NOT be pinned (autodetect finds them)
+    for line in body.splitlines():
+        if line.startswith("export OPENROAD_EXE="):
+            assert "/tools/install/" not in line
+
+
+# --- byte-identical _env.sh invariant (CLAUDE.md) -----------------------------
+
+def test_env_sh_copies_identical():
+    digests = {p: hashlib.md5(p.read_bytes()).hexdigest() for p in ENV_COPIES}
+    assert len(set(digests.values())) == 1, (
+        "scripts/flow/_env.sh has diverged across skills: "
+        + ", ".join(f"{p.parents[2].name}={h[:8]}" for p, h in digests.items())
+    )

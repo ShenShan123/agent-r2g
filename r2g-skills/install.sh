@@ -12,8 +12,9 @@
 set -euo pipefail
 
 PLUGIN_NAME="r2g-skills"
-SKILLS=(signoff-loop def-graph)
+SKILLS=(signoff-loop def-graph eda-install)
 SRC_DEFAULT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+SKILLS_CSV="$(IFS=,; echo "${SKILLS[*]}")"
 
 print_help() {
   cat <<EOF
@@ -24,12 +25,12 @@ Usage:
   $(basename "$0") --uninstall [--user | --project DIR]
 
 Options:
-  --user           Install to \$HOME/.claude/skills/{${SKILLS[0]},${SKILLS[1]}}.
-  --project DIR    Install to DIR/.claude/skills/{${SKILLS[0]},${SKILLS[1]}}.
+  --user           Install to \$HOME/.claude/skills/{${SKILLS_CSV}}.
+  --project DIR    Install to DIR/.claude/skills/{${SKILLS_CSV}}.
   --link           Symlink instead of copy (recommended while developing the skills).
   --force          Overwrite an existing install at the destination.
   --src DIR        Source r2g-skills directory (default: this script's directory).
-  --uninstall      Remove a previous install of both sub-skills.
+  --uninstall      Remove a previous install of all sub-skills.
   -h, --help       Show this help.
 
 With no scope flag, the script prompts:  user (~/.claude/skills) vs project (./.claude/skills).
@@ -130,8 +131,11 @@ Install complete (${SKILLS[*]}).
 
 Next steps:
   1. Restart Claude Code (or run /reload) so the skills are picked up.
-  2. Verify EDA tool discovery (signoff-loop):
-       bash "$dest_root/signoff-loop/scripts/flow/check_env.sh"
-  3. In a Claude Code session, ask e.g. "take this RTL through to GDS on nangate45"
-     (signoff-loop) or "build the graph dataset for this design" (def-graph).
+  2. Detect + provision the EDA toolchain (eda-install):
+       bash "$src_dir/eda-install/bootstrap.sh" --dry-run   # plan only; drop --dry-run to install + pin
+     or just verify what is already discoverable:
+       bash "$dest_root/eda-install/scripts/flow/check_env.sh"
+  3. In a Claude Code session, ask e.g. "set up the EDA tools" (eda-install),
+     "take this RTL through to GDS on nangate45" (signoff-loop), or
+     "build the graph dataset for this design" (def-graph).
 EOF

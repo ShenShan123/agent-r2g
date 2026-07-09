@@ -20,6 +20,33 @@ skipped as library-pre-verified).
 
 ---
 
+## 2026-07-08 — New `eda-install` skill: one-command toolchain bootstrap (detect → install → pin → verify)
+*(branch `feat/r2g-bootstrap`; new `r2g-skills/eda-install/` sub-skill; design in
+`docs/superpowers/plans/r2g-skills-bootstrap-2026-07-08.md`)*
+
+Made `r2g-skills` easy to stand up on a fresh machine by adding a **third sub-skill, `eda-install`**,
+that detects the environment and provisions the open-source EDA toolchain the other two skills run —
+turning what was copy-paste README prose (Paths A/B/C + the Miniconda/torch recipes) into one command:
+`bash r2g-skills/bootstrap.sh` (a shim to `eda-install/bootstrap.sh`). In a session, *"set up the EDA
+tools"* triggers it.
+
+- **`bootstrap.sh` — detect → plan → install → pin → verify.** `--dry-run` prints a per-tier plan
+  (core/frontend/sky130/klayout/pdk/graph) and installs nothing; `--plan-from FILE` makes the planner
+  unit-testable. Flags: `--yes`/`--prefix`/`--tiers`/`--graph-python`/`--deploy`.
+- **No-sudo is the default channel.** Detection runs `sudo -n true`; without root every tier routes
+  through pre-built conda `litex-hub` binaries + a venv on a big volume (never a full `$HOME`), ORFS
+  cloned-not-built. Matches the reference machine (no root, `$HOME` full, tools in conda on `/proj`).
+- **`detect_env.sh`** emits a 22-key `KEY=VALUE` machine+toolchain snapshot; **`write_env_local.sh`**
+  auto-generates `references/env.local.sh` into signoff-loop AND def-graph (pins only what autodetect
+  misses; adds `R2G_GRAPH_PYTHON`) — closing the "graph env silently unset" gap.
+- **Verify layer extended:** `check_env.sh` now reports the graph/torch stage; a self-contained
+  def-graph-side `check_env.sh` was added; `eda-install` ships a comprehensive verifier.
+- **Packaging:** `install.sh` + `plugin.json` deploy/register all three skills; `_env.sh` md5-identity
+  invariant (`ad4406d0…`) now spans three copies (test-guarded).
+- **Verification:** new `eda-install/tests/test_bootstrap.py` 9/9; signoff-loop **799/1**, def-graph
+  **337/14**, no regressions; `--dry-run` reads all tiers **OK** on this machine. (Per-tier install
+  scripts are the next slice; `bootstrap.sh` already dispatches to them when present.)
+
 ## 2026-07-08 — Comprehensive graph-dataset verification (topology · feature-stats · sign-off reports)
 *(session 2026-07-08; `tools/verify_graph_dataset.py` +750 LOC, new
 `r2g-skills/def-graph/tests/test_verify_comprehensive.py`; addendum in

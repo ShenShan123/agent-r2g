@@ -2,7 +2,7 @@
 
 A Claude Code skill that drives an open-source RTL-to-GDS flow — from natural-language spec (or existing RTL) through synthesis, place-and-route, and full signoff (DRC, LVS, RCX) — using Yosys, OpenROAD-flow-scripts, KLayout, and OpenRCX.
 
-Install the `r2g-skills` skills (`signoff-loop` for RTL→GDS + signoff, `def-graph` for graph datasets), then ask Claude: *"synthesize this UART at 100 MHz on nangate45"* — it handles everything from RTL generation to GDSII.
+Install the `r2g-skills` skills (`eda-install` to set up the toolchain, `signoff-loop` for RTL→GDS + signoff, `def-graph` for graph datasets), then ask Claude: *"set up the EDA tools"* followed by *"synthesize this UART at 100 MHz on nangate45"* — it handles everything from provisioning to GDSII.
 
 ---
 
@@ -28,7 +28,7 @@ Install the `r2g-skills` skills (`signoff-loop` for RTL→GDS + signoff, `def-gr
 ```bash
 git clone https://github.com/ShenShan123/agent-r2g.git
 cd agent-r2g
-bash r2g-skills/install.sh --user   # installs signoff-loop + def-graph into ~/.claude/skills/
+bash r2g-skills/install.sh --user   # installs eda-install + signoff-loop + def-graph into ~/.claude/skills/
 ```
 
 Restart Claude Code (or run `/reload`) after install.
@@ -55,6 +55,19 @@ cd r2g-skills
 ## Configure the OpenROAD toolchain
 
 The skill autodetects every tool on first use. No `source` or `export` is required if your tools land in standard locations. Use `check_env.sh` to see exactly what was found (see [Verify](#verify-the-setup)).
+
+**Quick start — let the `eda-install` skill detect your machine and provision the toolchain:**
+
+```bash
+bash r2g-skills/bootstrap.sh --dry-run     # detect tools + PDK + torch venv → per-tier plan, install nothing
+```
+
+This is a shim to the dedicated **`eda-install`** sub-skill (`r2g-skills/eda-install/bootstrap.sh`) —
+in a Claude Code session you can just say *"set up the EDA tools"*. It reports what's present vs
+missing and, without root, automatically selects a **no-sudo path** (pre-built conda `litex-hub`
+binaries + a torch venv on a big volume — never a full `$HOME`). Drop `--dry-run` to install the
+missing tiers and auto-generate `references/env.local.sh`; add `--prefix /big/volume` to steer where
+the PDK and venv land. The manual paths below remain available if you prefer to install by hand.
 
 Choose the path that matches your situation.
 
@@ -465,7 +478,12 @@ python3 scripts/loop/engineer_loop.py ab-enqueue \
 ```
 agent-r2g/
 ├── r2g-skills/                        # ★ The skill collection — install into ~/.claude/skills/
-│   ├── install.sh                     #   Installs BOTH sub-skills (symlink/copy)
+│   ├── install.sh                     #   Installs all three sub-skills (symlink/copy)
+│   ├── bootstrap.sh                   #   Shim → eda-install/bootstrap.sh (one-command setup)
+│   ├── eda-install/                   # SKILL 0 — detect + install + verify the EDA toolchain
+│   │   ├── SKILL.md                   #     detect → plan → install → pin env.local.sh → verify
+│   │   ├── bootstrap.sh               #     Orchestrator (--dry-run plans; --yes installs; no-sudo default)
+│   │   └── scripts/{setup,flow}/      #     detect_env.sh · write_env_local.sh · _env.sh · check_env.sh
 │   ├── signoff-loop/                  # SKILL 1 — RTL→GDS flow + signoff + self-improvement loop
 │   │   ├── SKILL.md                   #   Claude Code entry point (metadata + workflow)
 │   │   ├── scripts/
@@ -506,7 +524,7 @@ agent-r2g/
 └── CLAUDE.md                          #   Project instructions for this repo
 ```
 
-Everything under `r2g-skills/` is what gets installed (as two skills, `signoff-loop` + `def-graph`). Everything outside it (`tools/`, `rtl_designs*/`, `design_cases/`) is workspace used to validate the skills at scale.
+Everything under `r2g-skills/` is what gets installed (as three skills, `eda-install` + `signoff-loop` + `def-graph`). Everything outside it (`tools/`, `rtl_designs*/`, `design_cases/`) is workspace used to validate the skills at scale.
 
 ---
 

@@ -82,7 +82,7 @@ fi
 
 echo
 echo "[how to override]"
-echo "  bash ../../../bootstrap.sh --dry-run   # auto-detect + plan the toolchain (then drop --dry-run)"
+echo "  bash ../../bootstrap.sh --dry-run   # auto-detect + plan the toolchain (then drop --dry-run)"
 echo "  ORFS_ROOT=/your/path OPENROAD_EXE=/your/openroad bash check_env.sh"
 echo "  export R2G_ENV_FILE=~/my-r2g-env.sh   # shell snippet with exports"
 echo "  or write to  $(dirname "${BASH_SOURCE[0]}")/../../references/env.local.sh"

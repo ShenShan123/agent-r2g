@@ -2,8 +2,13 @@
 
 AI-driven open-source EDA flow: natural-language spec → GDSII via OpenROAD-flow-scripts
 (ORFS), with full signoff (DRC, LVS, RCX), then a **training-ready graph dataset** for GNN
-predictors. Implemented as the `r2g-skills` Claude Code skill collection — **two sub-skills**
-(2026-07-07 split; see `docs/superpowers/plans/r2g-skills-split-2026-07-07.md`):
+predictors. Implemented as the `r2g-skills` Claude Code skill collection — **three sub-skills**
+(`signoff-loop` + `def-graph` from the 2026-07-07 split, see
+`docs/superpowers/plans/r2g-skills-split-2026-07-07.md`; `eda-install` added 2026-07-08, see
+`docs/superpowers/plans/r2g-skills-bootstrap-2026-07-08.md`):
+- **`eda-install`** — detects the machine and installs + verifies the toolchain the other two run
+  (ORFS + openroad/yosys, iverilog, klayout, magic/netgen, sky130A PDK, torch venv). One command,
+  `bootstrap.sh` (detect → plan → install → pin `env.local.sh` → verify); no-sudo conda path by default.
 - **`signoff-loop`** — drives the flow RTL→GDS with full signoff *and* the self-improvement loop
   (the two memory DBs + `engineer_loop`) that eliminates DRC/LVS violations and closes timing at Fmax.
 - **`def-graph`** — converts the clean, signed-off physical design (the ORFS `6_final.odb`/`.def`/
@@ -29,8 +34,14 @@ editing existing `scripts/` over adding new ones; use the documented steps, not 
 ## Project Layout
 
 ```
-r2g-skills/                     # The skill collection — installs TWO Claude Code skills
-  install.sh                      # Installs both sub-skills (symlinks each into .claude/skills/)
+r2g-skills/                     # The skill collection — installs THREE Claude Code skills
+  install.sh                      # Installs all three sub-skills (symlinks each into .claude/skills/)
+  bootstrap.sh                    # Shim → eda-install/bootstrap.sh (documented one-command setup)
+  eda-install/                  # SKILL 0 — detect + install + verify the EDA toolchain (no-sudo default)
+    SKILL.md                      # detect → plan → install → pin env.local.sh → verify
+    bootstrap.sh                  # The orchestrator (--dry-run plans; --yes installs)
+    scripts/setup/                # detect_env.sh, write_env_local.sh (+ install_<tier>.sh)
+    scripts/flow/                 # _env.sh (byte-identical copy), check_env.sh (comprehensive verifier)
   signoff-loop/                 # SKILL 1 — RTL→GDS flow + signoff + the self-improvement loop
     SKILL.md                      # Workflow, hard rules, env knobs (PLACE_FAST, ROUTE_FAST, …)
     scripts/flow/                 # Stage runners: run_orfs.sh, run_drc/lvs/rcx.sh, fix_signoff.sh, _env.sh
@@ -55,8 +66,8 @@ design_cases/                   # All design runs + built datasets (gitignored);
 
 ## Skill Deployment (must be a symlink, not a copy)
 
-Claude Code loads each sub-skill from `.claude/skills/signoff-loop/` and `.claude/skills/def-graph/`
-(gitignored), **not** the canonical `r2g-skills/` tree. Deploy both with
+Claude Code loads each sub-skill from `.claude/skills/{eda-install,signoff-loop,def-graph}/`
+(gitignored), **not** the canonical `r2g-skills/` tree. Deploy all three with
 `bash r2g-skills/install.sh --project . --link` so each path is a **symlink**. A plain `cp` install
 silently goes stale — the harness then loads an old `SKILL.md` while the canonical skill evolves. If
 a session's loaded skill disagrees with `r2g-skills/<skill>/SKILL.md`, re-run with `--link --force`.
@@ -64,13 +75,22 @@ a session's loaded skill disagrees with `r2g-skills/<skill>/SKILL.md`, re-run wi
 
 ## Toolchain (autodetected by the skill)
 
-`<skill>/scripts/flow/_env.sh` autodetects ORFS + tool paths — nothing to source manually. Both
-sub-skills ship a copy that is **byte-identical** (md5 `ad4406d0…`); keep them in sync when editing
-either. Override via `$R2G_ENV_FILE`, `<skill>/references/env.local.sh`, or by exporting
+`<skill>/scripts/flow/_env.sh` autodetects ORFS + tool paths — nothing to source manually. All
+**three** sub-skills ship a copy that is **byte-identical** (md5 `ad4406d0…`); keep them in sync when
+editing any. Override via `$R2G_ENV_FILE`, `<skill>/references/env.local.sh`, or by exporting
 `ORFS_ROOT`/`OPENROAD_EXE`/`YOSYS_EXE`/`KLAYOUT_CMD`/… **Required:** python3 (3.10+), yosys, openroad,
 ORFS checkout. **Optional:** iverilog/vvp, verilator, klayout, magic, netgen-lvs, opensta, sky130A PDK;
 a torch+torch_geometric+pandas venv for the `def-graph` PyG graph-assembly stage only (`R2G_GRAPH_PYTHON`;
 `run_graphs.sh` SKIPs cleanly without it). Verify with `signoff-loop/scripts/flow/check_env.sh`.
+
+**Provisioning is its own skill — `eda-install`** (`bash r2g-skills/bootstrap.sh` is a shim to
+`eda-install/bootstrap.sh`): one command to *detect → plan → install → pin `env.local.sh` → verify*
+the toolchain. `--dry-run` prints a per-tier plan and installs nothing; without root it auto-selects a
+**no-sudo** path (pre-built conda `litex-hub` binaries + a torch venv on a big volume, never a full
+`$HOME`). Detection (`eda-install/scripts/setup/detect_env.sh`) + the pin generator
+(`eda-install/scripts/setup/write_env_local.sh`, which writes `env.local.sh` into signoff-loop AND
+def-graph) are the honesty layer — a bootstrapped env is auto-found next session. Design + rationale:
+`docs/superpowers/plans/r2g-skills-bootstrap-2026-07-08.md`.
 
 **This machine:** signoff tools (iverilog/vvp, magic, netgen) live in `~/miniconda3/envs/eda`; the
 sky130A PDK is staged at `/proj/workarea/user5/sky130_pdk/share/pdk/sky130A`; all pinned in
@@ -319,6 +339,7 @@ This skill's failure mode is a plausible-looking CSV with **wrong values**. Full
 
 | Question                                                            | File                                              |
 | ------------------------------------------------------------------- | ------------------------------------------------- |
+| How do I install/verify the EDA toolchain (detect → install → pin)? | `r2g-skills/eda-install/SKILL.md` + `references/setup.md` |
 | How does the flow run RTL→GDS?                                      | `r2g-skills/signoff-loop/SKILL.md`                |
 | Memory DBs: schema, CLI, full invariants list                       | `r2g-skills/signoff-loop/knowledge/README.md`     |
 | `engineer_loop`: autonomous campaign + escalation + provenance      | `r2g-skills/signoff-loop/references/engineer-loop.md`  |
