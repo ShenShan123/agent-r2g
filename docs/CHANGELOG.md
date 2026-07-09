@@ -20,6 +20,31 @@ skipped as library-pre-verified).
 
 ---
 
+## 2026-07-09 — eda-install: relocate conda toolchain to /proj + klayout tier audit
+*(branch `main`; commit `9a98013` relocation note; follow-on `install_klayout.sh` audit fix)*
+
+Two operational changes plus an audit of the klayout tier.
+
+- **Conda toolchain relocated `$HOME/miniconda3` → `/proj/workarea/user5/miniconda3`.** `$HOME` was
+  100% full; reinstalled Miniconda + the `eda` env (`netgen iverilog magic`) fresh onto `/proj` via
+  litex-hub, verified fully usable (real iverilog+vvp sim, magic loads the sky130A tech, netgen runs,
+  signoff-loop suite 790/1 through the relocated tools), repointed `env.local.sh` (machine-local), then
+  deleted the redundant `$HOME/miniconda3`. `check_env` green; every EDA tool now resolves under
+  `/proj/workarea/user5/` (only `python3` and system `klayout` remain in `/usr/bin`, by design). Also
+  a broader `$HOME` reclaim (~10 GB: npm/pip caches, orphaned GPU torch deps, a duplicate node, stale
+  IDE logs/old server versions).
+- **klayout tier audit + fix (`install_klayout.sh`).** Trying to install klayout into `/proj` exposed
+  two real defects: (1) it targeted the **shared `eda` env**, whose magic/netgen/iverilog deps conflict
+  with klayout's Qt/Ruby → the solve fails; (2) the **litex-hub klayout recipe is itself unsatisfiable**
+  in a modern conda base (pins `openssl 1.1` while its `ruby` dep needs openssl 3.x) and **conda-forge
+  ships no klayout** — so the tier's `die`-on-failure would hard-fail the bootstrap for an OPTIONAL tool.
+  Fixed: klayout now installs into a **dedicated `klayout` env** (`R2G_KLAYOUT_ENV`), **prefers an existing
+  system klayout** (usually newer — this host's is 0.30.7 vs litex-hub's 0.28), and **fails soft** (HINT +
+  exit 0, recommending the distro package) instead of blocking. Tests pin the dedicated-env and
+  prefer-system behavior. Minor finding recorded: `detect_env.sh`'s `HAVE_CONDA` probe is narrower than
+  `_setup_lib.ensure_conda` (misses the big-volume conda location) — planner may under-report conda while
+  installers still find it (follow-up).
+
 ## 2026-07-08 — New `eda-install` skill: one-command toolchain bootstrap (detect → install → pin → verify)
 *(branch `feat/r2g-bootstrap`; new `r2g-skills/eda-install/` sub-skill; design in
 `docs/superpowers/plans/r2g-skills-bootstrap-2026-07-08.md`)*

@@ -16,6 +16,7 @@ metadata:
     - Always run `bootstrap.sh --dry-run` first — it prints a per-tier plan and installs nothing.
     - Never installs large artifacts into a full $HOME — the PDK (~8GB) and torch venv go on a big volume.
     - The heavy ORFS source build is opt-in (--yes-gated); without root the no-sudo conda path is used instead.
+    - klayout is optional and best from a system/distro package — the conda recipe is frequently unsatisfiable (litex-hub pins openssl 1.1 vs ruby's openssl 3.x); the tier prefers an existing klayout, uses a dedicated env, and fails soft.
     - Does NOT run PnR or build datasets — it provisions the tools that signoff-loop and def-graph run.
 ---
 # eda-install Skill

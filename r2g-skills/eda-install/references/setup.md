@@ -35,7 +35,7 @@ Every key is always emitted (empty value == absent); diagnostics go to stderr.
 | `core` | required | `ORFS_ROOT` + `OPENROAD_EXE` + `YOSYS_EXE` | clone ORFS (no build) + conda `openroad yosys` |
 | `frontend` | required | `IVERILOG_EXE` + `VVP_EXE` | conda `iverilog verilator` |
 | `sky130` | optional | `MAGIC_EXE` + `NETGEN_EXE` | conda `magic netgen` |
-| `klayout` | optional | `KLAYOUT_CMD` | conda `klayout` |
+| `klayout` | optional | `KLAYOUT_CMD` (system OK) | dedicated `klayout` env; prefers system klayout, fails soft |
 | `pdk` | optional | `SKY130A_DIR` | conda `open_pdks.sky130a` → big volume |
 | `graph` | optional | `GRAPH_PYTHON` (torch venv) | `python3 -m venv` + pip torch(cpu)+pyg+pandas |
 
@@ -62,3 +62,4 @@ skew (`check_env.sh` prints tool versions).
 | `graph OPT` though a venv exists | pass `--graph-python /path/to/venv/bin/python` (or export `R2G_GRAPH_PYTHON`) |
 | conda download blocked | escalated by design — run the printed Miniconda command once the host is reachable |
 | conda openroad ≠ ORFS `HEAD` | pin the ORFS clone tag, or use a pre-built OpenROAD binary release |
+| klayout conda install fails (openssl/ruby/Qt solve) | expected — litex-hub klayout is often unsatisfiable + conda-forge has none; use the distro package (`dnf`/`apt install klayout`, usually newer). The tier fails soft; `KLAYOUT_CMD` uses whatever klayout resolves. |

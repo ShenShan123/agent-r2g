@@ -11,6 +11,7 @@ Design doc: docs/superpowers/plans/r2g-skills-bootstrap-2026-07-08.md.
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -69,9 +70,24 @@ def test_sky130_installs_magic_netgen():
     assert "magic" in out and "netgen" in out
 
 
-def test_klayout_installs_klayout():
+def test_klayout_installs_into_dedicated_env():
+    # klayout's Qt/Ruby deps conflict with magic/netgen/iverilog in a shared env,
+    # so it MUST solve into its own env — never the shared 'eda' toolchain env.
     out = _run("install_klayout.sh", "--dry-run", "--force").stdout
     assert CONDA_CH in out and "klayout" in out
+    assert "-n klayout" in out          # dedicated env
+    assert "-n eda" not in out          # NOT the shared toolchain env
+
+
+@pytest.mark.skipif(not shutil.which("klayout"),
+                    reason="no system klayout to exercise the prefer-system path")
+def test_klayout_prefers_existing_system_klayout():
+    # A klayout on PATH (system, often newer than conda's) satisfies this OPTIONAL
+    # tier: exit 0, "already satisfied", and NO install command emitted.
+    out = _run("install_klayout.sh", "--dry-run")
+    assert out.returncode == 0
+    assert "already satisfied" in out.stderr
+    assert "+ " not in out.stdout
 
 
 def test_pdk_installs_open_pdks_never_volare():
