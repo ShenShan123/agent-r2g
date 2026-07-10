@@ -420,7 +420,10 @@ The knowledge store also feeds the loose-first **Fmax search** (`scripts/reports
     <db>` mode is the synth-only honesty gate: every `flow_scope='synth_only'` fail must carry a
     `synth-frontend-%` event. **Neither `honesty.py` nor `tools/check_db_integrity.py` is
     flow_scope-aware — run `--check` alongside them** whenever synth_only rows exist. Tests:
-    `rtl-acquire/tests/test_flow_scope_ingest.py` (real ingest, no mocks).
+    `rtl-acquire/tests/test_flow_scope_ingest.py` (real ingest, no mocks). Legacy rows from
+    before the column existed are backfilled NULL/''→'full' by `ensure_schema` (idempotent,
+    2026-07-09; test_ensure_schema_backfills_null_flow_scope) so the two-value contract holds
+    corpus-wide — never write a third value.
 
 ## Sharing the store across users
 

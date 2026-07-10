@@ -150,6 +150,14 @@ def _migrate_add_columns(conn: sqlite3.Connection) -> None:
         for col, decl in cols.items():
             if col not in existing:
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {decl}")
+    # runs.flow_scope contract is 'full' | 'synth_only' (knowledge README
+    # invariant 33). The 2026-07-09 rtl-acquire migration added the column
+    # schema-only, leaving legacy rows NULL — benign while no reader filters
+    # ='full', but a latent silent-drop for any future one. Idempotent
+    # backfill: every pre-flow_scope row was a full-flow run.
+    conn.execute(
+        "UPDATE runs SET flow_scope='full' "
+        "WHERE flow_scope IS NULL OR flow_scope=''")
 
 
 # --- Learnable-success predicate (shared) ---------------------------------

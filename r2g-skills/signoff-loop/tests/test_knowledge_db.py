@@ -37,6 +37,32 @@ def test_ensure_schema_is_idempotent(tmp_knowledge_dir):
     conn.close()
 
 
+def test_ensure_schema_backfills_null_flow_scope(tmp_knowledge_dir):
+    """Legacy rows (pre-2026-07-09 schema-only migration) carry NULL flow_scope.
+
+    The runs.flow_scope contract is 'full' | 'synth_only' (knowledge README
+    invariant 33). NULL is benign only while no reader filters ='full' — a
+    latent silent-drop for any future one. ensure_schema must backfill
+    NULL/'' → 'full' (every pre-flow_scope row was a full-flow run) while
+    never touching an explicit 'synth_only'.
+    """
+    db_path = tmp_knowledge_dir / "knowledge.sqlite"
+    conn = knowledge_db.connect(db_path)
+    knowledge_db.ensure_schema(conn, schema_path=tmp_knowledge_dir / "schema.sql")
+    conn.execute(
+        "INSERT INTO runs (run_id, project_path, ingested_at, flow_scope) VALUES "
+        "('legacy1', '/p/legacy1', '2026-07-01T00:00:00+00:00', NULL), "
+        "('legacy2', '/p/legacy2', '2026-07-01T00:00:00+00:00', ''), "
+        "('synth1', '/p/synth1', '2026-07-09T00:00:00+00:00', 'synth_only')")
+    conn.commit()
+
+    knowledge_db.ensure_schema(conn, schema_path=tmp_knowledge_dir / "schema.sql")
+
+    rows = dict(conn.execute("SELECT run_id, flow_scope FROM runs").fetchall())
+    assert rows == {"legacy1": "full", "legacy2": "full", "synth1": "synth_only"}
+    conn.close()
+
+
 def test_infer_family_direct_mapping(tmp_knowledge_dir):
     families = knowledge_db.load_families(tmp_knowledge_dir / "families.json")
     assert knowledge_db.infer_family("aes128_core", families) == "aes_xcrypt"
