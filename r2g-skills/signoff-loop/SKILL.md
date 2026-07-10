@@ -295,10 +295,18 @@ queries (`trace_provenance.py`) and the full safety-invariant list.
 |----------|-------------|-------------|-----------|------------|-----|
 | nangate45 | Yes | Yes | No | No | Yes |
 | sky130hd | Yes | Yes | Yes | Yes | Yes |
-| sky130hs | Yes | Yes | Yes | Yes | Yes |
+| sky130hs | Yes¹ | Yes | Yes | Yes² | Yes |
 | asap7 | Yes | No | No | No | Yes |
 | gf180 | Yes | Yes | No | No | Yes |
 | ihp-sg13g2 | Yes | Yes | No | No | Yes |
+
+¹ sky130hs has no ORFS-shipped DRC deck; `run_drc.sh` deliberately reuses the sibling
+`sky130hd.lydrc` (pure sky130A tech-layer rules, no hd-specific content) via
+`KLAYOUT_DRC_FILE=` on the make command line (failure-patterns.md #32).
+² Requires the sky130hs.lyt lefdef repair (`tools/patch_sky130hs_lyt.py`, applied by
+eda-install's platform-rules step) — the stock file makes def2stream drop ALL DEF
+geometry, turning every Netgen LVS into a false top-pin mismatch; `run_netgen_lvs.sh`
+guards portless extractions as infra errors (failure-patterns.md #33).
 
 ### 7. Treat Artifacts as Source of Truth
 

@@ -243,6 +243,25 @@ if [[ ! -f "$EXTRACTED_SPICE" ]]; then
 fi
 echo "Extracted: $EXTRACTED_SPICE ($(wc -l < "$EXTRACTED_SPICE") lines)"
 
+# Guard (failure-patterns.md #33): a PORTLESS top-level subckt means the GDS lost
+# its DEF-derived geometry (pin labels attached to nothing) — comparing it is
+# meaningless and Netgen would report a plausible-looking "top pin mismatch" on a
+# perfectly good layout, teaching the loop a lie. Root cause seen 2026-07-09:
+# ORFS sky130hs.lyt shipped legacy lefdef reader options, so def2stream silently
+# dropped every wire/via/pin rect (remedy: tools/patch_sky130hs_lyt.py, then
+# re-run the ORFS merge). Classify as an infra ERROR, never a mismatch.
+_TOP_PORTS=$(bash "$(dirname "${BASH_SOURCE[0]}")/_spice_top_ports.sh" \
+  "$EXTRACTED_SPICE" "$DESIGN_NAME")
+if [[ "${_TOP_PORTS:-0}" -eq 0 ]]; then
+  echo "ERROR: extracted top-level subckt '$DESIGN_NAME' has ZERO ports — the GDS" >&2
+  echo "  lost its DEF geometry (labels attach to nothing). NOT a design mismatch." >&2
+  echo "  Remedy: python3 tools/patch_sky130hs_lyt.py --check (failure-patterns #33)," >&2
+  echo "  then re-run the ORFS merge (6_1_merged.gds) and re-run LVS." >&2
+  echo '{"tool": "netgen", "status": "error", "reason": "portless top-level extraction — GDS lost DEF geometry (failure-patterns #33)"}' > "$LVS_DIR/netgen_lvs_result.json"
+  exit 1
+fi
+echo "Top-level ports extracted: $_TOP_PORTS"
+
 # Normalize antenna-diode primitives in the extracted netlist (X subcircuit
 # instance -> D device, perim= -> pj=) so the diode class matches the PDK cell
 # library instead of flattening sky130_fd_sc_hd__diode_2 and failing top-level

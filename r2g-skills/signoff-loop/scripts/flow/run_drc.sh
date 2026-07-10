@@ -161,6 +161,28 @@ if [[ "$DRC_BEOL_ONLY" == "1" ]]; then
 fi
 # ──────────────────────────────────────────────────────────────────────────────
 
+# ── Sibling-tech DRC deck (failure-patterns.md #32) ──────────────────────────
+# ORFS ships no KLayout DRC deck for sky130hs (its Makefile then echoes "DRC not
+# supported on this platform" and exits 0), so extract_drc filed a phantom
+# failed/no_count_report on EVERY sky130hs design and the fixer burned catalog
+# iterations on a non-existent violation load. The sky130hd deck is pure sky130A
+# process-layer geometry (zero hd-specific content) and hd/hs share the sky130A
+# tech, so pass it explicitly — the ORFS `ifneq ($(KLAYOUT_DRC_FILE),)` branch is
+# parse-time, and a make command-line var flips it to the real KLayout run. Only
+# this DELIBERATE sibling pair; never a generic cross-platform deck borrow.
+if [[ -z "$EXTRA_MAKE_ARGS" && "$PLATFORM" == "sky130hs" ]]; then
+  if ! grep -q 'KLAYOUT_DRC_FILE' "$FLOW_DIR/platforms/$PLATFORM/config.mk" 2>/dev/null; then
+    _SIBLING_DECK="$FLOW_DIR/platforms/sky130hd/drc/sky130hd.lydrc"
+    if [[ -f "$_SIBLING_DECK" ]]; then
+      echo "NOTE: no ORFS DRC deck for $PLATFORM — using the sibling sky130A tech deck: $_SIBLING_DECK (failure-patterns #32)"
+      EXTRA_MAKE_ARGS="KLAYOUT_DRC_FILE=$_SIBLING_DECK"
+    else
+      echo "WARNING: no DRC deck for $PLATFORM and sibling deck missing at $_SIBLING_DECK — ORFS will report 'DRC not supported'" >&2
+    fi
+  fi
+fi
+# ──────────────────────────────────────────────────────────────────────────────
+
 cd "$FLOW_DIR"
 
 # Prevent env collision: ORFS Makefile uses SCRIPTS_DIR internally

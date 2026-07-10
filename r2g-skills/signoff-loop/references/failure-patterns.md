@@ -3668,3 +3668,58 @@ corner fixture now stamps + asserts `manifest.platform`. **Lesson:** any artifac
 keyed to per-platform vocabularies must carry its own build-time provenance; a
 campaign that re-points shared mutable config for the NEXT round silently re-keys
 every artifact of the PRIOR round that resolves through it.
+
+### 32. sky130hs had NO KLayout DRC deck wired — ORFS "DRC not supported" (exit 0) filed as a phantom design DRC failure (2026-07-09)
+
+First sky130hs campaign wave: every design's DRC came back
+`status=failed, reason=no_count_report, exit_code=0` and the fixer burned catalog
+iterations (`recheck_unparsed` → `catalog_exhausted` escalations) on a violation load
+that never existed. Root cause: `run_drc.sh`'s main path defers to ORFS `make drc`,
+whose recipe is gated on `ifneq ($(KLAYOUT_DRC_FILE),)` — and this ORFS checkout sets
+that variable only for sky130hd (`platforms/sky130hs/` has no `drc/` dir at all), so
+the else-branch echoes "DRC not supported on this platform" into `6_drc.lyrdb` and
+exits 0. The skill's Platform Support Matrix promises sky130hs DRC=Yes (KLayout), so
+this was a missing wiring, not an honest platform truth (contrast: asap7 LVS).
+
+**Fix**: `run_drc.sh` resolves a **sibling-tech deck** for sky130hs — the
+`sky130hd.lydrc` deck is pure sky130A process-layer geometry (dnwell/nwell/metal/via
+rules from the SkyWater tech docs; zero hd-specific content), and hd/hs are the same
+sky130A tech — passed as `KLAYOUT_DRC_FILE=` on the make command line (parse-time
+conditional ⇒ the real KLayout run fires). Deliberate pair only; a missing sibling
+deck WARNs and keeps the loud no_count_report path (never a silent skip).
+**Lesson:** a support-matrix "Yes" must be backed by an executable deck resolution on
+that platform, and an exit-0 "not supported" echo from a vendor flow is a *phantom
+symptom generator* — classify infra absence apart from design failure before the
+fixer spends iterations.
+
+### 33. sky130hs def2stream DROPPED all DEF geometry — GDS with labels only ⇒ portless magic extraction ⇒ 100% false Netgen LVS "top pin mismatch" (2026-07-09)
+
+Same wave: every sky130hs design failed Netgen LVS with
+`Final result: Top level cell failed pin matching` (`mismatch_count=null`,
+`top_pin_mismatch`) while the SAME designs are LVS-clean on sky130hd. Diagnosis chain:
+extracted.spice top subckt had ZERO ports → the 6_final.gds top cell held ONLY text
+labels (met2/met3/met5 texttype 5) — no routing (69/20, 70/20), no pin rects (x/16),
+no special routing — while the 6_final.def carried full routed wires + placed pin
+geometry. The ORFS merge log was clean: `def2stream` dropped every DEF-derived shape
+SILENTLY. Root cause: `platforms/sky130hs/sky130hs.lyt` still carries the LEGACY
+KLayout lefdef reader option names with wrong datatypes (`<routing-suffix>` /
+`<routing-datatype>0`, `<pins-suffix>` / `<pins-datatype>2`) and lacks
+`<produce-special-routing>`, while sky130hd.lyt was rewritten to the modern names
+(`<routing-suffix-string>.drawing` + `<routing-datatype-string>20`,
+`<special-pins-…>16`, `<special-via_geometry-…>44`). KLayout 0.30.x ignores the legacy
+names — an upstream ORFS hd/hs platform-parity gap, present unmodified in this checkout.
+
+**Fix** (three layers, TDD): (a) `tools/patch_sky130hs_lyt.py` ports sky130hd's modern
+`<lefdef>` block into sky130hs.lyt (keeping the hs layer-map; idempotent; `--check`
+exits 2 while unpatched; backup `.orig`; re-run after any ORFS update); (b) the
+`run_netgen_lvs.sh` guard: a PORTLESS top-level extraction (`_spice_top_ports.sh` = 0)
+is written as json `status:"error"` ("GDS lost DEF geometry") and never reaches Netgen
+— the extractor then reports `error`, not `mismatch`, so the learner is never taught a
+false design symptom; (c) re-merge + re-LVS of affected designs. Validated on
+Control_logic: patched merge restored 69/20:120 + 69/16:19 + met3/4/5; Netgen →
+**CLEAN — circuits match**. Tests: `test_sky130hs_gds_geometry.py` (patch semantics,
+idempotence, --check gate, port counting incl. `+` continuations).
+**Lesson:** a signoff verdict is only as honest as the artifact chain that feeds it —
+guard each hand-off (DEF→GDS→SPICE) with a cheap structural invariant (geometry
+present, ports > 0), because a vendor config regression upstream converts every
+downstream check into a plausible, ingestible lie.

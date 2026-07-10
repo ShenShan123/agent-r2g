@@ -25,9 +25,18 @@ for _base in "${R2G_TOOLS_DIR:-}" "$_repo/tools"; do
       _found=1
     fi
   done
+  # sky130hs klayout lefdef repair (failure-patterns.md #33): this ORFS ships
+  # sky130hs.lyt with LEGACY lefdef reader options, so def2stream silently drops
+  # ALL DEF geometry from the merged GDS (portless magic extraction -> every
+  # Netgen LVS a false top-pin mismatch). Idempotent; backs up .orig.
+  if [[ -f "$_base/patch_sky130hs_lyt.py" ]]; then
+    log "sky130hs lyt lefdef patch: patch_sky130hs_lyt.py"
+    run python3 "$_base/patch_sky130hs_lyt.py" || hint "patch_sky130hs_lyt.py returned non-zero (lyt unchanged)"
+    _found=1
+  fi
   [[ "$_found" == "1" ]] && break
 done
 
 if [[ "$_found" != "1" ]]; then
-  hint "nangate45 rule installers not found (expected in the agent-r2g repo tools/ — set R2G_TOOLS_DIR); LVS/antenna decks unchanged"
+  hint "platform rule installers not found (expected in the agent-r2g repo tools/ — set R2G_TOOLS_DIR); nangate45 LVS/antenna decks + sky130hs lyt unchanged"
 fi
