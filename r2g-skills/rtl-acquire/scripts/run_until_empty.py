@@ -88,7 +88,7 @@ def main() -> None:
             write_status(previous)
 
     payload = {
-        "workflow": "nangate45-graph-expander",
+        "workflow": "rtl-acquire",
         "state": "running",
         "pid": os.getpid(),
         "phase": "loop_init",

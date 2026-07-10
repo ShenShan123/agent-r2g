@@ -29,7 +29,6 @@
 | export diagnosis-driven LLM repair queue | `scripts/repair/build_llm_repair_cases.py` | failure casebook, failure diagnosis, and LLM repair policy | yes | `llm_repair_cases.json/.jsonl/.md` |
 | build action-specific LLM patch requests | `scripts/repair/build_llm_patch_requests.py` | `llm_repair_cases.json` present | yes | `llm_patch_requests.json/.jsonl/.md` |
 | call OpenAI patch API for queued requests | `scripts/repair/call_openai_llm_patch_api.py` | `OPENAI_API_KEY`, `llm_patch_requests.jsonl` | yes | `llm_patch_results.jsonl` |
-| run local agent patch executor for queued requests | `scripts/repair/run_local_llm_patch_agent.py` | local `codex` CLI, `llm_patch_requests.jsonl` | yes | `llm_patch_results.jsonl` |
 | validate returned LLM patch results | `scripts/repair/evaluate_llm_patch_results.py` | `llm_patch_requests.json` and `llm_patch_results.jsonl` | yes | `llm_patch_result_evaluation.json/.md` |
 | mine validated LLM patches into reusable rule candidates | `scripts/repair/mine_llm_patch_rule_candidates.py` | validated `llm_patch_results` and evaluation outputs | yes | `llm_patch_rule_candidates.json/.md`, refreshed KB candidate input |
 | validate publish readiness | `scripts/validate/validate_publish_readiness.py` | refreshed indexes, quality artifacts, publish policy | yes | `publish_validation.json/.md` |

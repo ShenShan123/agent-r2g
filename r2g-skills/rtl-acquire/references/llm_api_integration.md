@@ -24,9 +24,8 @@ An OpenAI-specific executor is now available:
 
 - `scripts/repair/call_openai_llm_patch_api.py`
 
-A local agent executor is also available:
-
-- `scripts/repair/run_local_llm_patch_agent.py`
+(The legacy local Codex-CLI executor `run_local_llm_patch_agent.py` was retired 2026-07-09 with the
+rest of the Codex hooks; the API executor is the only shipped path.)
 
 ## Why This Split Exists
 
@@ -123,8 +122,8 @@ Then:
 
 ```bash
 python3 <skill-dir>/scripts/repair/call_openai_llm_patch_api.py \
-  --requests-jsonl $HOME/work/data/nangate45_graph_expansion_workspace/failures/llm_patch_requests.jsonl \
-  --results-jsonl $HOME/work/data/nangate45_graph_expansion_workspace/failures/llm_patch_results.jsonl \
+  --requests-jsonl "$R2G_ACQUIRE_WORKSPACE/failures/llm_patch_requests.jsonl" \
+  --results-jsonl "$R2G_ACQUIRE_WORKSPACE/failures/llm_patch_results.jsonl" \
   --max-requests 10
 ```
 
@@ -133,21 +132,6 @@ Then validate:
 ```bash
 python3 <skill-dir>/scripts/repair/evaluate_llm_patch_results.py
 ```
-
-## Local Agent Path
-
-The preferred path for this skill is often the local agent rather than a remote API.
-
-Example:
-
-```bash
-python3 <skill-dir>/scripts/repair/run_local_llm_patch_agent.py \
-  --requests-jsonl $HOME/work/data/nangate45_graph_expansion_workspace/failures/llm_patch_requests.jsonl \
-  --results-jsonl $HOME/work/data/nangate45_graph_expansion_workspace/failures/llm_patch_results.jsonl \
-  --max-requests 5
-```
-
-This uses local `codex exec`, not a network API.
 
 ## What Is Not Online Yet
 

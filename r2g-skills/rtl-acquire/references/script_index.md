@@ -43,7 +43,6 @@ Use this file when you want the exhaustive index.
 - `scripts/repair/build_llm_repair_cases.py`
 - `scripts/repair/build_llm_patch_requests.py`
 - `scripts/repair/call_openai_llm_patch_api.py`
-- `scripts/repair/run_local_llm_patch_agent.py`
 - `scripts/repair/evaluate_llm_patch_results.py`
 - `scripts/repair/mine_llm_patch_rule_candidates.py`
 
@@ -58,7 +57,6 @@ Use this file when you want the exhaustive index.
 - `scripts/publish/build_publish_candidates.py`
 - `scripts/publish/refresh_expanded_raw_manifest.py`
 - `scripts/publish/rebuild_external_index_from_dirs.py`
-- `scripts/publish/build_synth_variant_dataset_manifest.py`
 - `scripts/publish/record_dataset_snapshot.py`
 
 ## Report
@@ -70,8 +68,6 @@ Use this file when you want the exhaustive index.
 
 ## Hygiene
 
-- `scripts/hygiene/deduplicate_external_index.py`
-- `scripts/hygiene/deduplicate_external_by_canonical_source.py`
 - `scripts/hygiene/cleanup_rejected_download_repos.py`
 
 ## Shared Helpers

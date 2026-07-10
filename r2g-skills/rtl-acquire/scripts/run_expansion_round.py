@@ -360,7 +360,7 @@ def main() -> None:
             write_status(args.status_json, previous)
 
     payload = {
-        "workflow": "nangate45-graph-expander",
+        "workflow": "rtl-acquire",
         "state": "running",
         "pid": os.getpid(),
         "round_index": args.round_index,
@@ -375,7 +375,7 @@ def main() -> None:
     }
     global_before = snapshot_global_targets(tracked_global_targets())
     run_manifest = {
-        "workflow": "nangate45-graph-expander",
+        "workflow": "rtl-acquire",
         "started_at": now_iso(),
         "status_json": str(args.status_json),
         "status_log": str(args.status_log),

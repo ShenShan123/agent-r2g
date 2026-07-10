@@ -1,6 +1,6 @@
 # scripts
 
-This directory contains executable entrypoints and helper scripts for `nangate45-graph-expander`.
+This directory contains executable entrypoints and helper scripts for the `rtl-acquire` skill.
 
 ## Layout Policy
 
@@ -93,7 +93,6 @@ These are the canonical implementation files for the acquire group.
 - `build_failure_diagnosis.py`
 - `build_llm_repair_cases.py`
 - `build_llm_patch_requests.py`
-- `run_local_llm_patch_agent.py`
 - `call_openai_llm_patch_api.py`
 - `evaluate_llm_patch_results.py`
 - `mine_llm_patch_rule_candidates.py`
@@ -117,7 +116,6 @@ These are the canonical implementation files for the validate group.
 - `build_publish_candidates.py`
 - `refresh_expanded_raw_manifest.py`
 - `rebuild_external_index_from_dirs.py`
-- `build_synth_variant_dataset_manifest.py`
 - `record_dataset_snapshot.py`
 
 These decide what becomes publishable and refresh the merged dataset surfaces.
@@ -137,8 +135,6 @@ These are the canonical implementation files for the report group.
 
 ### `scripts/hygiene/`
 
-- `deduplicate_external_index.py`
-- `deduplicate_external_by_canonical_source.py`
 - `cleanup_rejected_download_repos.py`
 
 These keep the dataset and repo state clean.

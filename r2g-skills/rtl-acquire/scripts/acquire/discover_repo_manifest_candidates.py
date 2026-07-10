@@ -118,7 +118,7 @@ def json_get(url: str, *, headers: dict[str, str] | None = None) -> dict | list:
         url,
         headers={
             "Accept": "application/json",
-            "User-Agent": "nangate45-graph-expander",
+            "User-Agent": "rtl-acquire",
             **(headers or {}),
         },
     )

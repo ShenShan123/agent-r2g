@@ -1,1 +1,1 @@
-# Common helpers for nangate45-graph-expander scripts.
+# Common helpers for rtl-acquire scripts.

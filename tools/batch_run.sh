@@ -16,7 +16,12 @@ RESULTS_FILE="$BATCH_DIR/batch_results.jsonl"
 SUMMARY_FILE="$BATCH_DIR/batch_summary.txt"
 
 # Source EDA environment
-source /opt/openroad_tools_env.sh
+ORFS_ROOT="${ORFS_ROOT:-/proj/workarea/user5/OpenROAD-flow-scripts}"
+if [[ -f "$ORFS_ROOT/env.sh" ]]; then
+  source "$ORFS_ROOT/env.sh"
+elif [[ -f /opt/openroad_tools_env.sh ]]; then
+  source /opt/openroad_tools_env.sh
+fi
 
 # Clear previous results
 > "$RESULTS_FILE"
