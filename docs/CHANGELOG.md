@@ -52,6 +52,14 @@ and repo-level leftovers.
   rtl-acquire corpus supply line (`validate_publish_readiness.py`, `graph_skipped` ≠ success);
   knowledge README gained **invariant 33** documenting `runs.flow_scope`.
 - Suites after the sweep: signoff-loop 792+1s, def-graph 337+14s, eda-install 24, rtl-acquire 21.
+- **Stale-docs sweep (follow-up):** deleted 13 zero-live-reference docs — implemented plans
+  (fmax-search, symptom-indexed-memory, engineer-loop, gbrain/openspace/journal-loop-closure
+  absorptions, next-improvements), superseded ones (skill-refactor-2026-06-19 → the 07-07 split),
+  completed-round narratives (asap7-round-status, loop-closure-audit-06-26,
+  effectiveness-proof-06-29, sessions/loop-honesty-campaign, campaign_signoff_fixer — the last a
+  leftover this file already consolidated) — plus the untracked `paper_refs/` (19 MB, absorption
+  complete) and `pilot-2026-06-06/` snapshot. KEPT: every doc with a live CLAUDE.md/skill/tool
+  reference, all four `specs/` design records, and the 8 living plans.
 - **First /r2g-debug tick on the revised command found 4 real bugs** (each TDD red→green,
   failure-patterns #26–#28): (1) `write_env_local.sh` pin regeneration silently DROPPED
   `R2G_GRAPH_PYTHON` (no recall from targets, no HINT) → machine-wide `graph_skipped`
