@@ -2,7 +2,8 @@
 """Render the neighborhood of a DRC violation (or cluster) to a PNG for the
 vision-assisted DRC channel.
 
-Win 4 (paper-absorption-2026-06-16.md): when the text DRC-fix path under-determines
+Win 4 of the 2026-06-16 paper-absorption round (plan doc retired 2026-07-09;
+durable record in docs/CHANGELOG.md): when the text DRC-fix path under-determines
 a fix — i.e. `diagnose_signoff_fix` returns a low-confidence / `catalog_exhausted`
 residual — and `R2G_VISION_DRC=1`, render the violation neighborhood to an image so a
 vision-capable escalation model can look at the actual geometry. PostEDA-Bench's

@@ -3,7 +3,8 @@
 
 Finds the minimum clock period a design can close at, using placement-stage
 timing as the search signal and a learnable per-family slack-deterioration model
-(see docs/superpowers/specs/2026-06-04-fmax-search-design.md). Reports a
+(see references/orfs-playbook.md "Fmax Search"; the 2026-06-04 design spec was
+retired 2026-07-09 — implemented, durable content lives in the playbook). Reports a
 predicted-signoff Fmax proxy; --verify runs one full signoff flow at the winner.
 
 Usage:

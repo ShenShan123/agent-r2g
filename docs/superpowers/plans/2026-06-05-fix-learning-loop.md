@@ -8,7 +8,8 @@
 
 **Tech Stack:** Python 3.10+ (stdlib only: `sqlite3`, `json`, `statistics`, `argparse`), Bash, pytest. No new dependencies. All new Python lives under `r2g-rtl2gds/`; tests under `r2g-rtl2gds/tests/`.
 
-**Design spec:** `docs/superpowers/specs/2026-06-05-fix-learning-loop-design.md`
+**Design spec:** retired 2026-07-09 (was `docs/superpowers/specs/2026-06-05-fix-learning-loop-design.md`;
+implemented — the durable record is `r2g-skills/signoff-loop/references/signoff-fixing.md`).
 
 **Branch:** create `feat/fix-learning-loop` off `main` before Task 1 (we are currently on `feat/fmax-search`).
 
