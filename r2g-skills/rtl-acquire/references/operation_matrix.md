@@ -39,6 +39,8 @@
 | score design quality | `scripts/report/score_design_quality.py` | external success index and design outputs | yes | design quality CSV/MD |
 | summarize external index | `scripts/report/summarize_external_index.py` | external index present | yes | external summary MD |
 | summarize dataset scale | `scripts/report/summarize_dataset_scale.py` | merged manifest and index surfaces | yes | scale report CSV/MD |
+| promote a synth-proven candidate to a signoff-loop full-flow project | `scripts/promote/promote_candidates.py` | corpus index `status==success` (+ optional publish eligibility); signoff-loop skill present | yes (writes `design_cases/<design>/`) | full-flow project (vendored rtl/, config.mk, constraint.sdc), `reports/promote.json`, validate_config verdict |
+| force-rerun successes / retry excluded candidates | `expand_candidates.py --force` / `discover_download_candidates.py --retry-excluded` | corpus index / exclude CSV present | yes | regenerated corpus entries; re-emitted candidates |
 
 ## Common Command Templates
 

@@ -67,6 +67,29 @@ It complements the shorter contract in `SKILL.md` with more operational detail.
 - prefer explicit bundles for non-trivial repos
 - do not rely on accidental file order in large repos
 
+### Paths (`source_path`, `rtl_files`, `include_dirs`) — resolution contract (2026-07-10)
+
+Discovery always emits absolute paths. Hand-authored CSVs may use `~`, `$VAR`
+(e.g. `$HOME` as in the Good Example below), or relative paths — the expand
+stage normalizes each entry CWD-independently:
+
+1. `~` and `$VAR` are expanded;
+2. an absolute path is used as-is;
+3. a relative path binds to the first base where it exists — the **candidate
+   CSV's own directory**, then the **repo root** — else deterministically to
+   the CSV's directory (so the failure message shows a stable path).
+
+Never depends on the caller's CWD (ORFS and later stages chdir freely).
+Before 2026-07-10 none of this expansion happened and a `$HOME` example row
+silently landed as `unsupported/missing_source_file`.
+
+### `notes` risk flags
+
+Discovery appends `risk_flags=<tok>+<tok>|none` to `notes`: tokenized
+RAM/hard-macro markers (`common/rtl_risk.py`) unioned over the bundle. These
+are **markers, not rejects** — the synth attempt arbitrates; the repair-side
+classifier excludes only when the tokens appear in the FAILURE evidence.
+
 ### `resource_tier`
 
 - set to `high` when the design is already known to be:

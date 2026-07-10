@@ -50,6 +50,7 @@ if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
 from skill_env import (  # noqa: E402
+    REPO_ROOT,
     default_flow_dir,
     default_out_root,
     default_workspace_root,
@@ -489,27 +490,52 @@ def build_source_files(out_root: Path, design: str, source_paths: list[Path]) ->
     return source_files
 
 
-def parse_candidate_source_paths(candidate: dict[str, str]) -> list[Path]:
+def _normalize_candidate_path(raw: str, base_dirs: list[Path]) -> Path:
+    """CWD-proof candidate path resolution (candidate_csv_schema.md "Paths").
+
+    Discovery emits absolute paths, but hand-authored CSVs legitimately use
+    $HOME/~ (the schema doc's own Good Example) or paths relative to the CSV
+    or repo — Path() expands NEITHER, so those silently landed as
+    unsupported/missing_source_file. Resolution: expand ~ and $VARs; an
+    absolute path wins; a relative path binds to the first base dir (CSV dir,
+    then repo root) where it exists, else to the CSV dir — deterministic and
+    independent of whatever CWD ORFS or a later stage happens to run under."""
+    expanded = Path(os.path.expandvars(os.path.expanduser(raw)))
+    if expanded.is_absolute():
+        return expanded
+    for base in base_dirs:
+        if (base / expanded).exists():
+            return base / expanded
+    return (base_dirs[0] / expanded) if base_dirs else expanded
+
+
+def parse_candidate_source_paths(candidate: dict[str, str],
+                                 base_dirs: list[Path] | None = None) -> list[Path]:
+    base_dirs = base_dirs or []
     rtl_files_raw = (candidate.get("rtl_files") or "").strip()
     if rtl_files_raw:
         raw_parts = re.split(r"[;|]", rtl_files_raw)
         ordered: list[Path] = []
         primary = (candidate.get("source_path") or "").strip()
         if primary:
-            ordered.append(Path(primary))
+            ordered.append(_normalize_candidate_path(primary, base_dirs))
         for part in raw_parts:
             part = part.strip()
-            if part and Path(part) not in ordered:
-                ordered.append(Path(part))
+            if part:
+                p = _normalize_candidate_path(part, base_dirs)
+                if p not in ordered:
+                    ordered.append(p)
         return ordered
-    return [Path(candidate["source_path"])]
+    return [_normalize_candidate_path(candidate["source_path"], base_dirs)]
 
 
-def parse_candidate_include_dirs(candidate: dict[str, str]) -> list[Path]:
+def parse_candidate_include_dirs(candidate: dict[str, str],
+                                 base_dirs: list[Path] | None = None) -> list[Path]:
     raw = (candidate.get("include_dirs") or "").strip()
     if not raw:
         return []
-    return [Path(p.strip()) for p in re.split(r"[;|]", raw) if p.strip()]
+    return [_normalize_candidate_path(p.strip(), base_dirs or [])
+            for p in re.split(r"[;|]", raw) if p.strip()]
 
 
 # --- converged synthesis: per-candidate project + run_orfs.sh ---------------
@@ -758,6 +784,11 @@ def main() -> int:
     parser.add_argument("--priorities", nargs="*", default=["high"])
     parser.add_argument("--candidate-names", nargs="*")
     parser.add_argument("--allow-signature-duplicates", action="store_true")
+    parser.add_argument("--force", action="store_true",
+                        help="re-run candidates even when the corpus index already "
+                             "records status==success (regeneration after an "
+                             "extractor/synth fix); failed candidates always retry "
+                             "by default and need no flag")
     args = parser.parse_args()
 
     out_root = args.out_root or default_out_root()
@@ -808,13 +839,21 @@ def main() -> int:
 
         existing_row = rows_by_design.get(design)
         if existing_row and existing_row.get("status") == "success":
-            write_design_status(out_root, design, stage="skip_existing_success",
-                                state="completed", details={"status": "success"})
-            append_design_stage(out_root, design, stage="skip_existing_success", state="completed")
-            continue
+            if args.force:
+                write_design_status(out_root, design, stage="force_rerun",
+                                    state="running", details={"prior_status": "success"})
+                append_design_stage(out_root, design, stage="force_rerun", state="start")
+            else:
+                write_design_status(out_root, design, stage="skip_existing_success",
+                                    state="completed", details={"status": "success"})
+                append_design_stage(out_root, design, stage="skip_existing_success", state="completed")
+                continue
 
-        source_paths = parse_candidate_source_paths(candidate)
-        include_dirs = parse_candidate_include_dirs(candidate)
+        # Base dirs make relative / $HOME candidate paths deterministic (CWD-proof):
+        # the CSV's own directory first, then the repo root.
+        csv_base_dirs = [args.candidate_csv.resolve().parent, REPO_ROOT]
+        source_paths = parse_candidate_source_paths(candidate, csv_base_dirs)
+        include_dirs = parse_candidate_include_dirs(candidate, csv_base_dirs)
         source_path = source_paths[0]
         notes = candidate.get("notes", "")
         if any(not path.exists() for path in source_paths):

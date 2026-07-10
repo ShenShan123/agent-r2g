@@ -86,6 +86,16 @@ Gather candidate RTL from `_downloads`, repo manifests, or prebuilt CSVs.
 - `scripts/acquire/clone_repo_manifest.py`
 Outputs: candidate CSV + updated `scan_state/downloads_scan_state.json`.
 
+RAM/hard-macro keywords are **risk markers, never hard rejects** (2026-07-10;
+the old whole-text substring reject threw picorv32 away on its formal-only
+`RISCV_FORMAL_BLACKBOX_*` macro names): tokenized + comment-stripped matching
+lives in `scripts/common/rtl_risk.py`, the flags ride the candidate `notes`
+column (`risk_flags=…`), and the synth attempt is the real arbiter — a true
+hard-macro dependency fails with evidence and the repair-side classifier
+excludes it then. `--retry-excluded` re-emits candidates parked in
+`failed_candidates_exclude.csv` (a past failure must not permanently block a
+retry after a fix).
+
 ### 2. Expand (synth-only, converged)
 `scripts/execute/expand_candidates.py` per candidate: sanitize RTL (encoding,
 helper modules, iscas89 dff) → write `synth_projects/<design>/` → synth via
@@ -95,6 +105,12 @@ signature → convert via **def-graph netlist_graph.py** → `cell_stats.json`
 (liberty-driven seq/comb split) → **ingest into knowledge.sqlite** (every
 flow, pass or fail).
 Outputs: corpus dir updates, refreshed `index.csv`, `_design_status/`.
+
+Failed candidates in the index always retry on the next run (only
+`status==success` skips); `--force` re-runs successes too (regeneration after
+a synth/extractor fix). Candidate paths are CWD-proof: `~`/`$VAR` expand, and
+relative paths bind to the candidate CSV's directory, then the repo root —
+never the caller's CWD (see `references/candidate_csv_schema.md`).
 
 ### 3. Repair
 - `scripts/repair/classify_failed_candidates.py` → retry vs exclude + class
@@ -118,6 +134,21 @@ Outputs: corpus dir updates, refreshed `index.csv`, `_design_status/`.
 
 ### 6. Snapshot
 - `scripts/publish/record_dataset_snapshot.py` → `runs/dataset_snapshot_latest.json`
+
+### 7. Promote (optional bridge to signoff-loop)
+`scripts/promote/promote_candidates.py <design …>|--all [--require-publish-eligible]
+[--platform P] [--run]` — one-click conversion of a synth-proven candidate
+(index `status==success`) into a ready-to-run **full-flow** project under
+`design_cases/`: init_project skeleton, RTL **vendored** into `<project>/rtl/`
+(self-contained — the synth workspace is cleanable scratch), config.mk from
+signoff-loop's template carrying the proven knobs (VERILOG_FILES/INCLUDE_DIRS,
+ABC_AREA, SYNTH_MEMORY_MAX_BITS, SYNTH_HDL_FRONTEND, VERILOG_TOP_PARAMS) plus
+the floorplan directive (CORE_UTILIZATION, PLACE_DENSITY_LB_ADDON ≥ 0.10) and
+WITHOUT `R2G_FLOW_SCOPE=synth_only` (a promoted project ingests full-flow),
+constraint.sdc with a detected clock port (virtual-clock fallback), then
+**validate_config.py as the readiness gate**. Verdict in
+`<project>/reports/promote.json` + provenance in `metadata.json`; `--run`
+kicks `run_orfs.sh` immediately. Hand the promoted project to signoff-loop.
 
 ### Running a full round
 ```bash

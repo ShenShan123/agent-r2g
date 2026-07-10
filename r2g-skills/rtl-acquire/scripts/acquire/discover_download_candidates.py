@@ -25,6 +25,7 @@ from skill_env import (
     seed_root_path,
     workspace_path,
 )
+from common.rtl_risk import ram_macro_risk_tokens
 
 DEFAULT_DOWNLOADS = default_downloads_root()
 DEFAULT_OUT = workspace_path("candidates/downloads_discovered_candidates.csv")
@@ -35,14 +36,13 @@ EXT_ROOT = default_out_root()
 EXCLUDE_CSV = workspace_path("failures/failed_candidates_exclude.csv")
 DISCOVERY_SCHEMA_VERSION = "2026-05-07-deps-v2"
 
-RAM_KEYWORDS = (
-    "single_port_ram",
-    "dual_port_ram",
-    "fakeram",
-    "sram",
-    "hard_mem",
-    "blackbox",
-)
+# RAM/macro keywords are RISK MARKERS now, never hard rejects — the old
+# whole-text substring reject threw away pure synthesizable RTL on incidental
+# collisions (picorv32 rejected because RISCV_FORMAL_BLACKBOX_* ifdef macro
+# names contain "blackbox"). Tokenized matching + downstream arbitration live
+# in common/rtl_risk.py; the flags ride the candidate CSV `notes` column and
+# the synth attempt is the real check (repair-side classify excludes on the
+# same tokens when they appear in the FAILURE evidence).
 
 BAD_TEMPLATE_MARKERS = ("%%",)
 TESTBENCH_MARKERS = ("$display", "$monitor", "$dumpfile", "$dumpvars")
@@ -486,8 +486,8 @@ def file_is_candidate(path: Path) -> tuple[bool, str]:
         return False, "testbench_marker"
     if any(marker in text for marker in BAD_TEMPLATE_MARKERS):
         return False, "template_placeholder"
-    if any(keyword in lower for keyword in RAM_KEYWORDS):
-        return False, "ram_or_macro_keyword"
+    # RAM/macro keywords intentionally NOT rejected here — risk-flagged at the
+    # candidate-row level instead (common/rtl_risk.py; picorv32 false positive).
     if "`include" in text and text.count("`include") > 8:
         return False, "too_many_includes"
     non_empty_lines = [line for line in text.splitlines() if line.strip()]
@@ -615,11 +615,18 @@ def main() -> None:
     parser.add_argument("--sync-upstream", action="store_true", default=True, help="If repo is clean, attempt git pull --ff-only before scanning.")
     parser.add_argument("--no-sync-upstream", action="store_false", dest="sync_upstream", help="Disable git pull sync before scanning.")
     parser.add_argument("--include-rejected", action="store_true")
+    parser.add_argument("--retry-excluded", action="store_true",
+                        help="re-emit candidates listed in failed_candidates_exclude.csv "
+                             "(a past failure written to the index/exclude list must not "
+                             "permanently block a retry after a fix)")
     parser.add_argument("--max-candidates-per-repo", type=int, default=8)
     parser.add_argument("--limit", type=int, default=0)
     args = parser.parse_args()
 
     existing, existing_paths, excluded_paths = load_existing_names_and_paths()
+    if args.retry_excluded:
+        print(f"--retry-excluded: ignoring {len(excluded_paths)} excluded path(s)")
+        excluded_paths = set()
     repo_scope = load_repo_scope(args.repo_manifest_csv)
     scan_state = load_scan_state(args.scan_state_json)
     rows: list[dict[str, str]] = []
@@ -734,6 +741,7 @@ def main() -> None:
                 "instantiated": instantiated,
                 "candidate_ok": ok,
                 "candidate_reason": reason,
+                "risk_flags": ram_macro_risk_tokens(rtl_text),
                 "non_empty_line_count": sum(1 for line in rtl_text.splitlines() if line.strip()),
                 "control_hits": sum(1 for keyword in CONTROL_KEYWORDS if keyword in f"{str(rel).lower()} {rtl_text.lower()}"),
             }
@@ -784,6 +792,12 @@ def main() -> None:
             base_priority = choose_priority(rel, rtl_text=info["rtl_text"], non_empty_line_count=info["non_empty_line_count"])
             generated_hit = any(part in GENERATED_DIR_PARTS for part in (p.lower() for p in rel.parts))
             priority = boost_priority(base_priority) if (build_markers and generated_hit) else base_priority
+            # Risk flags are the UNION over the bundle (a dependency pulling in a
+            # hard-memory stub is as risky as the top itself). Marker, not reject.
+            bundle_risk = sorted({
+                t for p in bundle_paths
+                for t in file_infos.get(p, {}).get("risk_flags", [])
+            })
             rows.append(
                 {
                     "source": "downloads",
@@ -797,7 +811,8 @@ def main() -> None:
                         f"auto-discovered from _downloads; bundle_aware candidate from {repo_name}; "
                         f"non_empty_lines={info['non_empty_line_count']}; bundle_files={len(bundle_paths)}; local_refs={len(info['local_refs'])}; "
                         f"build_markers={'+'.join(build_markers) if build_markers else 'none'}; "
-                        f"generated_rtl={'yes' if generated_hit else 'no'}"
+                        f"generated_rtl={'yes' if generated_hit else 'no'}; "
+                        f"risk_flags={'+'.join(bundle_risk) if bundle_risk else 'none'}"
                     ),
                 }
             )

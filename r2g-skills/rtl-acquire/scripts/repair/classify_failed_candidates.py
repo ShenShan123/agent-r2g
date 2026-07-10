@@ -15,6 +15,7 @@ from skill_env import (
     out_root_path,
     workspace_path,
 )
+from common.rtl_risk import ram_macro_risk_tokens
 
 INDEX = out_root_path("index.csv")
 OUT_RETRY = workspace_path("failures/failed_candidates_retry.csv")
@@ -36,7 +37,13 @@ def is_high_value_retry(source_path: str, notes: str) -> bool:
 
 def classify(source_path: str, notes: str) -> tuple[str, str]:
     text = (notes or "").lower()
-    if any(k in text for k in ("single_port_ram", "dual_port_ram", "fakeram", "sram")):
+    # Tokenized match on the FAILURE evidence (shared with discovery's risk
+    # flagging — common/rtl_risk.py): the raw-substring version of this test
+    # was the same false-positive bug that hard-rejected picorv32 upstream.
+    # Memory tokens only — "blackbox" appears in benign yosys diagnostics.
+    if ram_macro_risk_tokens(text, strip_comments=False,
+                             tokens=("single_port_ram", "dual_port_ram",
+                                     "fakeram", "sram")):
         return "exclude", "ram_or_macro_dependency"
     source = (source_path or "").lower()
     if ("invalid name for macro definition" in text or "%%" in text) and "vtr-verilog-to-routing-min/vtr_flow/benchmarks/arithmetic/adder_trees/verilog/adder_tree.v" in source:
