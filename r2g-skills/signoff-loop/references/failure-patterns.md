@@ -3554,3 +3554,31 @@ was noticed. Fixed: out_path now targets the fixture's `reports/` dir and design
 their right slots. **Lesson:** a worker API whose 2nd positional is an OUTPUT PATH is easy to
 misuse from fixtures — when a repo-root artifact appears after a test run, diff its content
 against worker output formats to identify the caller.
+
+### 28. Legacy quoted symptom ids stranded PROMOTED experience — normalization fixed writes, never the index (2026-07-09)
+
+Found by the first /r2g-debug tick's Step-4 evidence pull: the newest `density_relief` win
+carried `judged_on: "symptom:drc:'m3.2'"` (embedded quotes) while older trials read
+`symptom:drc:m3.2`. The 2026-07-04 `normalize_class` fix (symptom.py) stopped NEW writes from
+storing KLayout's verbatim quoted classes — but the 7 pre-fix symptom rows (`'m3.2'`,
+`'GATE.S.1'`, `'M1.S.6'`, `'M4.S.5'`, `'V1.S.4'`, a quoted-whitespace class, and a 100-char
+quoted LISD rule sentence; first_seen 2026-06-13..06-30) stayed in the index under their old
+ids. Consequence on sky130hd m3.2: TWO live symptom ids for one physical class — the
+**promoted** `density_relief` rows sat under the legacy quoted id while every new occurrence
+looked up the canonical id (`get_status` → `candidate`, not `promoted`), so the promoted recipe
+never fired for new runs and the A/B queue kept re-validating what was already promoted
+(trials split 20 vs 7).
+
+**Fix** (`knowledge_db.ensure_schema` → `_migrate_legacy_symptom_ids`, self-healing on any
+operator's store): re-key each symptom whose class changes under `normalize_class` to its
+canonical id — straight `UPDATE` for the six plain symptom_id tables (fix_events(+archive),
+fix_trajectories, run_violations, escalations, ab_trials); collision-resolved merge for
+`recipe_status` (judged/terminal states `promoted>demoted>parked>candidate>shadow` win; loser
+row deleted); symptoms rows merged keeping the earliest `first_seen`. The remap is then applied
+to the sibling `journal.sqlite` `actions.symptom_id` (best-effort) so check_db_integrity's
+L1/L2 cross-book joins stay green. Idempotent; TDD RED→GREEN
+`test_ensure_schema_merges_legacy_quoted_symptom_ids`. Committed store migrated: 0 quoted
+classes remain, both promoted rows on canonical `m3.2`, 27 trials pooled; honesty 5/5,
+integrity L1/L2/L3 ok. **Lesson:** normalizing a WRITE path without migrating the existing
+index splits the memory at the normalization boundary — the promoted half goes dark precisely
+because lookups moved to the new key. A key-derivation fix must ship with an index re-key.

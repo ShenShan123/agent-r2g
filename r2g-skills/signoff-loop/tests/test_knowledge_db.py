@@ -63,6 +63,70 @@ def test_ensure_schema_backfills_null_flow_scope(tmp_knowledge_dir):
     conn.close()
 
 
+def test_ensure_schema_merges_legacy_quoted_symptom_ids(tmp_knowledge_dir):
+    """Pre-2026-07-04 symptoms stored KLayout classes verbatim ("'m3.2'"), minting
+    ids that fragment the index against post-normalization rows ('m3.2'). The
+    promoted density_relief recipe was stranded under the legacy quoted id while
+    new occurrences keyed the canonical id (failure-patterns #28). ensure_schema
+    must re-key legacy rows to the canonical id, re-point every dependent, and on
+    a recipe_status collision keep the judged/terminal state.
+    """
+    import symptom as sym
+
+    db_path = tmp_knowledge_dir / "knowledge.sqlite"
+    conn = knowledge_db.connect(db_path)
+    knowledge_db.ensure_schema(conn, schema_path=tmp_knowledge_dir / "schema.sql")
+
+    legacy_sig = {"check": "drc", "class": "'m3.2'", "predicates": {}}
+    canon_sig = {"check": "drc", "class": "m3.2", "predicates": {}}
+    legacy_id, canon_id = sym.symptom_id(legacy_sig), sym.symptom_id(canon_sig)
+
+    conn.execute("INSERT INTO symptoms (symptom_id, check_type, class, predicates_json, "
+                 "symptom_schema_version, first_seen) VALUES (?, 'drc', ?, '{}', 1, "
+                 "'2026-06-13T00:00:00Z')", (legacy_id, "'m3.2'"))
+    conn.execute("INSERT INTO symptoms (symptom_id, check_type, class, predicates_json, "
+                 "symptom_schema_version, first_seen) VALUES (?, 'drc', 'm3.2', '{}', 1, "
+                 "'2026-07-04T00:00:00Z')", (canon_id,))
+    conn.execute("INSERT INTO ab_trials (symptom_id, design_class, platform, strategy, "
+                 "verdict, ts) VALUES (?, 'm/3', 'sky130hd', 'density_relief', 'win', "
+                 "'2026-07-01T00:00:00Z')", (legacy_id,))
+    # collision: promoted under legacy must displace the canonical candidate
+    conn.execute("INSERT INTO recipe_status (symptom_id, design_class, platform, strategy, "
+                 "status, updated_at) VALUES (?, 'm/3', 'sky130hd', 'density_relief', "
+                 "'promoted', '2026-07-01T00:00:00Z')", (legacy_id,))
+    conn.execute("INSERT INTO recipe_status (symptom_id, design_class, platform, strategy, "
+                 "status, updated_at) VALUES (?, 'm/3', 'sky130hd', 'density_relief', "
+                 "'candidate', '2026-07-05T00:00:00Z')", (canon_id,))
+    # no-collision: a legacy-only row is simply re-keyed
+    conn.execute("INSERT INTO recipe_status (symptom_id, design_class, platform, strategy, "
+                 "status, updated_at) VALUES (?, 's/1', 'sky130hd', 'density_relief', "
+                 "'candidate', '2026-07-01T00:00:00Z')", (legacy_id,))
+    conn.commit()
+
+    knowledge_db.ensure_schema(conn, schema_path=tmp_knowledge_dir / "schema.sql")
+
+    # legacy symptom row merged away; canonical keeps the earliest first_seen
+    syms = dict(conn.execute("SELECT symptom_id, first_seen FROM symptoms").fetchall())
+    assert legacy_id not in syms
+    assert syms[canon_id] == "2026-06-13T00:00:00Z"
+    # dependents re-pointed
+    assert conn.execute("SELECT COUNT(*) FROM ab_trials WHERE symptom_id=?",
+                        (legacy_id,)).fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM ab_trials WHERE symptom_id=?",
+                        (canon_id,)).fetchone()[0] == 1
+    # collision resolved: promoted (judged) wins over candidate (queue)
+    rows = conn.execute("SELECT status FROM recipe_status WHERE symptom_id=? AND "
+                        "design_class='m/3'", (canon_id,)).fetchall()
+    assert rows == [("promoted",)]
+    # no-collision row re-keyed intact
+    rows = conn.execute("SELECT status FROM recipe_status WHERE symptom_id=? AND "
+                        "design_class='s/1'", (canon_id,)).fetchall()
+    assert rows == [("candidate",)]
+    assert conn.execute("SELECT COUNT(*) FROM recipe_status WHERE symptom_id=?",
+                        (legacy_id,)).fetchone()[0] == 0
+    conn.close()
+
+
 def test_infer_family_direct_mapping(tmp_knowledge_dir):
     families = knowledge_db.load_families(tmp_knowledge_dir / "families.json")
     assert knowledge_db.infer_family("aes128_core", families) == "aes_xcrypt"

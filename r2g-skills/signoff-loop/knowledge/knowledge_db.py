@@ -60,9 +60,12 @@ def ensure_schema(conn: sqlite3.Connection,
     ddl = Path(schema_path).read_text(encoding="utf-8")
     conn.executescript(ddl)
     _migrate_add_columns(conn)
+    remapped = _migrate_legacy_symptom_ids(conn)
     for stmt in _POST_MIGRATION_INDEXES:
         conn.execute(stmt)
     conn.commit()
+    if remapped:
+        _repoint_journal_symptom_ids(conn, remapped)
 
 
 # Idempotent ALTER TABLE ADD COLUMN migrations, keyed by table name. schema.sql
@@ -158,6 +161,108 @@ def _migrate_add_columns(conn: sqlite3.Connection) -> None:
     conn.execute(
         "UPDATE runs SET flow_scope='full' "
         "WHERE flow_scope IS NULL OR flow_scope=''")
+
+
+# Every knowledge-side table carrying a symptom_id column (symptoms itself is
+# handled separately — it is the PK being re-keyed). recipe_status is also
+# separate: its (symptom_id, design_class, platform, strategy) uniqueness needs
+# collision resolution, not a blind UPDATE.
+_SYMPTOM_ID_TABLES = ("fix_events", "fix_events_archive", "fix_trajectories",
+                      "run_violations", "escalations", "ab_trials")
+
+# Lifecycle precedence on a recipe_status collision after re-keying: judged /
+# terminal states (promoted, demoted) outrank heal ('parked') and queue states.
+_RECIPE_STATUS_RANK = {"promoted": 5, "demoted": 4, "parked": 3,
+                       "candidate": 2, "shadow": 1}
+
+
+def _migrate_legacy_symptom_ids(conn: sqlite3.Connection) -> dict[str, str]:
+    """Re-key symptoms whose class predates symptom.normalize_class (2026-07-04).
+
+    KLayout classes stored verbatim ("'m3.2'", quoted rule prose) minted ids that
+    fragment the index against post-normalization rows: the promoted recipe sat
+    stranded under the legacy quoted id while every new occurrence looked up the
+    canonical id (failure-patterns.md "Dataset-Extraction" #28, 2026-07-09).
+    Idempotent: rows whose class is already canonical are untouched. Returns the
+    {legacy_id: canonical_id} map so the caller can re-point the journal.
+    """
+    import json as _json
+    import symptom as _symptom   # pure module (no DB/IO) — no import cycle
+
+    remapped: dict[str, str] = {}
+    rows = conn.execute("SELECT symptom_id, check_type, class, predicates_json "
+                        "FROM symptoms").fetchall()
+    for sid, check, cls, preds_json in rows:
+        ncls = _symptom.normalize_class(cls)
+        if ncls == cls:
+            continue
+        try:
+            preds = _json.loads(preds_json or "{}")
+        except (ValueError, TypeError):
+            preds = {}
+        nid = _symptom.symptom_id(
+            {"check": check, "class": ncls, "predicates": preds})
+        if nid == sid:
+            continue
+        for table in _SYMPTOM_ID_TABLES:
+            conn.execute(f"UPDATE {table} SET symptom_id=? WHERE symptom_id=?",
+                         (nid, sid))
+        for rowid, dc, plat, strat, status in conn.execute(
+                "SELECT rowid, design_class, platform, strategy, status "
+                "FROM recipe_status WHERE symptom_id=?", (sid,)).fetchall():
+            twin = conn.execute(
+                "SELECT rowid, status FROM recipe_status WHERE symptom_id=? AND "
+                "design_class=? AND platform=? AND strategy=?",
+                (nid, dc, plat, strat)).fetchone()
+            if twin is None:
+                conn.execute("UPDATE recipe_status SET symptom_id=? WHERE rowid=?",
+                             (nid, rowid))
+            elif (_RECIPE_STATUS_RANK.get(status, 0)
+                    > _RECIPE_STATUS_RANK.get(twin[1], 0)):
+                conn.execute("DELETE FROM recipe_status WHERE rowid=?", (twin[0],))
+                conn.execute("UPDATE recipe_status SET symptom_id=? WHERE rowid=?",
+                             (nid, rowid))
+            else:
+                conn.execute("DELETE FROM recipe_status WHERE rowid=?", (rowid,))
+        twin = conn.execute("SELECT first_seen FROM symptoms WHERE symptom_id=?",
+                            (nid,)).fetchone()
+        if twin is None:
+            conn.execute("UPDATE symptoms SET symptom_id=?, class=? "
+                         "WHERE symptom_id=?", (nid, ncls, sid))
+        else:
+            conn.execute(
+                "UPDATE symptoms SET first_seen=MIN(first_seen, "
+                "(SELECT first_seen FROM symptoms WHERE symptom_id=?)) "
+                "WHERE symptom_id=?", (sid, nid))
+            conn.execute("DELETE FROM symptoms WHERE symptom_id=?", (sid,))
+        remapped[sid] = nid
+    return remapped
+
+
+def _repoint_journal_symptom_ids(conn: sqlite3.Connection,
+                                 remapped: dict[str, str]) -> None:
+    """Keep the journal's symptom linkage in step with a knowledge-side re-key.
+
+    check_db_integrity's L1/L2 correspondence joins the two books on symptom_id;
+    a knowledge-only re-key would orphan the journal's ab_launch/promote actions.
+    Best-effort by contract: only patches a journal.sqlite sibling of THIS
+    knowledge db (the standard layout), silently skips when absent.
+    """
+    row = conn.execute("PRAGMA database_list").fetchone()
+    db_file = row[2] if row else ""
+    if not db_file:
+        return
+    journal = Path(db_file).parent / "journal.sqlite"
+    if not journal.exists():
+        return
+    jconn = sqlite3.connect(str(journal))
+    try:
+        for sid, nid in remapped.items():
+            jconn.execute("UPDATE actions SET symptom_id=? WHERE symptom_id=?",
+                          (nid, sid))
+        jconn.commit()
+    finally:
+        jconn.close()
 
 
 # --- Learnable-success predicate (shared) ---------------------------------
