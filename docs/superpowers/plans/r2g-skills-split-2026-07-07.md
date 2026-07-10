@@ -99,3 +99,12 @@ A single `pytest r2g-skills/` process CANNOT collect both at once: both suites l
 named `tests/`, so pytest maps both `conftest.py` to the module `tests.conftest` and aborts with
 `ImportPathMismatchError` / "Plugin already registered" (a pytest limitation for two identically
 named test packages, in every import-mode — not a regression). Run them as two invocations.
+
+> **Contract-enforcement amendment (2026-07-10):** the split's "def-graph reads only the
+> *signed-off* physical design" contract is now ENFORCED, not assumed: a shared
+> `def-graph/scripts/flow/signoff_gate.py` (failure-patterns #34) gates all three dataset
+> stages on reports/{drc,lvs,route}.json + the DEF-run's stage_log.jsonl — fail-closed on
+> missing reports, `run_graphs.sh` enforce / labels+features warn, verdict stamped into the
+> manifest as `signoff_health`, verifier Group-C fail-closed. On the signoff-loop side, fix
+> reflows are now stage-scoped by default (run_orfs `make clean_<FROM_STAGE>` + resume, #35)
+> and antenna repair has a non-convergence terminal verdict + persistent marker (#36).

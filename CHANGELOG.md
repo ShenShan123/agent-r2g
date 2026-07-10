@@ -1,0 +1,63 @@
+# Changelog
+
+Notable changes to the `r2g-skills` collection. Earlier history lives in the
+git log (the commit messages are the long-term record — see CLAUDE.md "When
+You Fix a Bug").
+
+## 2026-07-10 — robustness sweep across all four sub-skills
+
+Six operator-reported robustness gaps, each closed with code + tests + a
+failure-pattern entry (`signoff-loop/references/failure-patterns.md` #34–#36):
+
+### rtl-acquire
+- **Keyword screening is risk-marking, not rejection.** The RAM/hard-macro
+  denylist no longer hard-rejects candidates on a raw whole-text substring hit
+  (picorv32 was thrown away because the formal-only `RISCV_FORMAL_BLACKBOX_*`
+  macro names contain "blackbox"). Tokenized, comment-stripped matching lives
+  in `scripts/common/rtl_risk.py`; flags ride the candidate CSV `notes`
+  (`risk_flags=…`); the synth attempt arbitrates, and the repair-side
+  classifier excludes only on failure evidence (memory tokens only).
+- **CWD-proof candidate paths.** `~`/`$VAR` expand; relative paths bind to the
+  candidate CSV's directory, then the repo root — never the caller's CWD
+  (`references/candidate_csv_schema.md` "Paths").
+- **Retry mechanics.** Failed candidates always retried by default (unchanged);
+  new `expand_candidates.py --force` re-runs recorded successes, and
+  `discover_download_candidates.py --retry-excluded` re-emits candidates parked
+  in `failed_candidates_exclude.csv`.
+- **One-click promote** (`scripts/promote/promote_candidates.py`): synth-proven
+  candidate (index `status==success`, optional publish gate) → ready-to-run
+  signoff-loop full-flow project under `design_cases/` — vendored RTL, template
+  config.mk carrying the proven synth knobs + floorplan directive (drops
+  `R2G_FLOW_SCOPE=synth_only`), clock-port-detected SDC (virtual-clock
+  fallback), `validate_config.py` as the readiness gate, optional `--run`.
+
+### signoff-loop
+- **Stage-scoped reflow instead of full rebuilds** (#35). `run_orfs.sh` now
+  runs `make clean_<FROM_STAGE>` before a resume so a config edit is
+  guaranteed to apply (ORFS's Makefile has no dependency on config.mk — a
+  plain resume silently NO-OPed the edit) while earlier stages' artifacts are
+  reused; `R2G_RESUME_NO_CLEAN=1` keeps the pure crash-resume. `fix_signoff.sh`
+  resumes from each strategy's `rerun_from` by default (`--resume` is a no-op
+  alias; `R2G_FIX_FULL_REFLOW=1` restores the old full rebuild).
+- **Antenna repair non-convergence auto-exit** (#36). Two non-improving
+  antenna strategies end the check with the terminal verdict
+  `antenna_nonconverged` (ingested as `no_change` — negative evidence) and
+  persist `reports/antenna_nonconverged.json`; later fix sessions auto-exclude
+  the proven-futile strategies instead of re-burning the same diode+reroute
+  reflows (the SHA-1/SHA-256 loop). `R2G_FIX_RETRY_NONCONVERGED=1` retries
+  deliberately; the marker self-clears on CLEAN.
+
+### def-graph
+- **Automatic signoff gate before dataset generation** (#34). A `6_final.def`
+  alone no longer builds a dataset: the shared `scripts/flow/signoff_gate.py`
+  checks DRC ∈ {clean, clean_beol}, LVS ∈ {clean, skipped}, ORFS completion
+  (`stage_log.jsonl`), and route/antenna residuals — fail-closed on missing
+  reports. `run_graphs.sh` enforces; `run_labels.sh`/`run_features.sh` warn;
+  `R2G_SIGNOFF_GATE=enforce|warn|off` overrides. The verdict is stamped into
+  `graph_manifest.json` as `signoff_health`, and
+  `tools/verify_graph_dataset.py`'s Group-C gate is now fail-closed (a dataset
+  with neither signoff reports nor a recorded gate verdict FAILS instead of
+  passing vacuously).
+
+Tests: signoff-loop 806 passed / 1 skipped; def-graph 372 passed / 14 skipped
+(torch venv); rtl-acquire 51 passed.

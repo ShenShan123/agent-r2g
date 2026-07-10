@@ -13,7 +13,9 @@ predictors. Implemented as the `r2g-skills` Claude Code skill collection — **f
 - **`rtl-acquire`** — the RTL corpus supplier, UPSTREAM of the others: discovers/screens/acquires RTL
   at corpus scale (local trees, repo manifests, keyword search) and expands it **synth-only** into
   pre-layout `netlist_graph.pt` graphs with dedup, quality scoring, and publish gating. Owns
-  acquire + corpus publish; BORROWS env (`_env.sh`), synth (`run_orfs.sh`, `ORFS_STAGES=synth`),
+  acquire + corpus publish + the one-click **promote** of a synth-proven candidate into a
+  signoff-loop full-flow project (`scripts/promote/promote_candidates.py`, 2026-07-10); BORROWS
+  env (`_env.sh`), synth (`run_orfs.sh`, `ORFS_STAGES=synth`),
   the graph format (def-graph `netlist_graph.py`), and failure learning (`knowledge.sqlite`,
   runs stamped `flow_scope='synth_only'`; frontend classes land as `synth-frontend-*` events).
 - **`signoff-loop`** — drives the flow RTL→GDS with full signoff *and* the self-improvement loop
@@ -42,7 +44,7 @@ editing existing `scripts/` over adding new ones; use the documented steps, not 
 
 ```
 r2g-skills/                     # The skill collection — installs THREE Claude Code skills
-  install.sh                      # Installs all three sub-skills (symlinks each into .claude/skills/)
+  install.sh                      # Installs all four sub-skills (symlinks each into .claude/skills/)
   bootstrap.sh                    # Shim → eda-install/bootstrap.sh (documented one-command setup)
   eda-install/                  # SKILL 0 — detect + install + verify the EDA toolchain (no-sudo default)
     SKILL.md                      # detect → plan → install → pin env.local.sh → verify
@@ -303,6 +305,11 @@ scaling — so a worker-local patch fixes one consumer and silently leaves the o
 
 ### Honesty / verification invariants (violate one and the dataset silently lies)
 
+- **A `6_final.def` alone is NOT sign-off — the signoff gate blocks unsigned builds** (2026-07-10,
+  failure-patterns #34). Every stage runs the shared `signoff_gate.py` (drc/lvs/route reports +
+  the DEF-run's `stage_log.jsonl`, fail-closed on MISSING reports); `run_graphs.sh` enforces,
+  labels/features warn, `R2G_SIGNOFF_GATE` overrides; the verdict rides the manifest as
+  `signoff_health` and the verifier fails unrecorded/dirty provenance.
 - **Fail-soft is by design, NOT a pass.** Each stage's workers are independent — a missing input degrades
   ONE column and records a per-item status; it never aborts the others. ALWAYS check
   `reports/{labels,features}_stats.json` + the manifest's `status`/`label_health`/`rc_health` before
@@ -358,6 +365,7 @@ This skill's failure mode is a plausible-looking CSV with **wrong values**. Full
 | How do I install/verify the EDA toolchain (detect → install → pin)? | `r2g-skills/eda-install/SKILL.md` + `references/setup.md` |
 | How does the flow run RTL→GDS?                                      | `r2g-skills/signoff-loop/SKILL.md`                |
 | How do I grow the RTL corpus / expand netlist graphs at scale?      | `r2g-skills/rtl-acquire/SKILL.md`                 |
+| Promote a synth-proven corpus candidate to a full-flow project      | `r2g-skills/rtl-acquire/scripts/promote/promote_candidates.py` (+ SKILL.md stage 7) |
 | rtl-acquire task → script lookup, candidate CSV schema, failure KB  | `r2g-skills/rtl-acquire/references/{operation_matrix,candidate_csv_schema,failure_knowledge_base}.md` |
 | Memory DBs: schema, CLI, full invariants list                       | `r2g-skills/signoff-loop/knowledge/README.md`     |
 | `engineer_loop`: autonomous campaign + escalation + provenance      | `r2g-skills/signoff-loop/references/engineer-loop.md`  |

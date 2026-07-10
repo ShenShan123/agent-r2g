@@ -3723,3 +3723,80 @@ idempotence, --check gate, port counting incl. `+` continuations).
 guard each hand-off (DEF→GDS→SPICE) with a cheap structural invariant (geometry
 present, ports > 0), because a vendor config regression upstream converts every
 downstream check into a plausible, ingestible lie.
+
+### 34. Dataset stages built on ANY `6_final.def` — DRC-dirty / LVS-mismatched / route-residual designs sailed into training data (2026-07-10)
+
+The only precondition all three def-graph stages enforced was "does a
+`6_final.def` exist". DRC/LVS run in a SEPARATE post-finish step, route/antenna
+residuals survive a "completed" flow, and `orfs_status` lives in ppa.json that
+no flow step emits by default — so a design that completed ORFS but was never
+signed off (or failed signoff) produced a plausible dataset whose manifest read
+`status:"ok"`. The verifier's Group-C DRC/LVS gate was fail-OPEN: it fired only
+`if os.path.isfile(reports/{drc,lvs}.json)` — a design that never ran signoff
+passed VACUOUSLY. Batch builders selected designs purely by finding a 6_final;
+the "filter by drc/lvs=clean" rule was an operator convention living in memory.
+
+**Fix** (def-graph `scripts/flow/signoff_gate.py`, one shared copy — same rule
+as `_provenance.sh`): before building, read `reports/{drc,lvs,route}.json` +
+the DEF-run's `stage_log.jsonl`/`run-meta.json`. Required (fail-closed —
+MISSING = blocked): drc ∈ {clean, clean_beol}, lvs ∈ {clean, skipped}, ORFS
+complete, route residuals 0 when provable. Advisory (recorded, never blocks):
+timing (negative slack is a legitimate training label). `run_graphs.sh`
+enforces by default; `run_labels.sh`/`run_features.sh` default to warn;
+`R2G_SIGNOFF_GATE=enforce|warn|off` overrides; an explicit `R2G_DEF` override
+downgrades to warn (deliberate, recorded). The verdict is always written to
+`reports/signoff_gate.json` and embedded in `graph_manifest.json` as
+`signoff_health`; the verifier now FAILS a dataset whose provenance is
+unrecorded (no reports AND no gate verdict) or whose gate verdict is dirty.
+Tests: `def-graph/tests/test_signoff_gate.py` (26 cases incl. the vacuous-pass
+regression). **Lesson:** an artifact's *existence* is not its *validity* —
+every consumer of a multi-step pipeline must gate on the recorded verdict of
+the steps between, and a missing verdict is a "no", never a "yes".
+
+### 35. Every fix iteration rebuilt synth→finish — `config.mk` is NOT a make prerequisite, so a plain resume silently NO-OPed the edit (2026-07-10)
+
+`run_orfs.sh` with no `FROM_STAGE` always ran `clean_all` (full rebuild), and
+`engineer_loop._run_fix` never passed `--resume` — so every fix iteration paid
+a complete synth→finish rebuild even when diagnose declared `rerun_from:
+"route"`. The trap that made the full rebuild "necessary": ORFS's Makefile
+lists NO stage dependency on `DESIGN_CONFIG`/config.mk, so resuming
+`FROM_STAGE=route` over intact artifacts made `make route` a NO-OP and the
+just-applied config edit silently never took effect — plain `--resume` was
+only sound for crash-resume, never for applying an edit.
+
+**Fix**: `run_orfs.sh` now runs `make clean_<FROM_STAGE>` before a resume
+(after the stage-name validity guard), forcing exactly the resumed stage — and,
+via the odb dependency chain, everything downstream — to rebuild while every
+earlier stage's artifacts are REUSED. `R2G_RESUME_NO_CLEAN=1` restores the
+pure crash-resume (unchanged config, e.g. the finish-stage GDS resume).
+`fix_signoff.sh` now resumes from the strategy's `rerun_from` BY DEFAULT
+(`--resume` is a no-op alias); `R2G_FIX_FULL_REFLOW=1` restores the full
+rebuild for edits that affect a stage earlier than the declared rerun_from.
+Tests: `test_antenna_nonconverged.py` (FROM_STAGE default + kill switch +
+invalidation-after-guard). **Lesson:** artifact reuse is only safe when
+invalidation is EXPLICIT — a build system that doesn't know about your config
+file will happily "reuse" its way into never applying your fix.
+
+### 36. Antenna repair looped diodes+reroute with no improvement exit — the same 1–2 residuals burned full reflows forever (SHA-1/SHA-256, 2026-07-10)
+
+ORFS's inner DRT loop (`detail_route.tcl`) re-inserts diodes and re-runs FULL
+detailed route up to `MAX_REPAIR_ANTENNAS_ITER_DRT` times gated only on
+`[check_antennas]` — no improvement check. OpenROAD's antenna model can
+disagree with the signoff deck (jumpers satisfy PAR; the KLayout deck sums
+whole-net metal and credits only diodes), so the same 1–2 violations can
+survive every round. Each outer antenna strategy then cost a full reflow, and
+NOTHING persisted the futility — every later fix session (each engineer_loop
+visit) re-burned the same diode+reroute rounds on the same residual.
+
+**Fix** (`fix_signoff.sh`): after 2 non-improving antenna iterations (strategy
+id `antenna*` or dominant class matching *antenna*) the iteration verdict
+becomes the terminal **`antenna_nonconverged`** (ingested as `no_change` —
+negative evidence, not inconclusive), the loop STOPS, and
+`reports/antenna_nonconverged.json` persists {residual_count, strategies_tried,
+hint}. Later sessions auto-exclude the proven-futile strategies (loud NOTE);
+`R2G_FIX_RETRY_NONCONVERGED=1` retries deliberately (e.g. after a toolchain
+update); the marker self-clears the moment the check reaches CLEAN. Tests:
+`test_antenna_nonconverged.py`. **Lesson:** a bounded loop is not a converging
+loop — any repair cycle needs (a) an improvement-based exit, (b) a persistent
+record that it didn't converge, or an autonomous driver will re-discover the
+same dead end at full price forever.

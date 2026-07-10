@@ -2,7 +2,7 @@
 
 A Claude Code skill that drives an open-source RTL-to-GDS flow — from natural-language spec (or existing RTL) through synthesis, place-and-route, and full signoff (DRC, LVS, RCX) — using Yosys, OpenROAD-flow-scripts, KLayout, and OpenRCX.
 
-Install the `r2g-skills` skills (`eda-install` to set up the toolchain, `signoff-loop` for RTL→GDS + signoff, `def-graph` for graph datasets), then ask Claude: *"set up the EDA tools"* followed by *"synthesize this UART at 100 MHz on nangate45"* — it handles everything from provisioning to GDSII.
+Install the `r2g-skills` skills (`eda-install` to set up the toolchain, `rtl-acquire` to grow an RTL corpus at scale, `signoff-loop` for RTL→GDS + signoff, `def-graph` for graph datasets), then ask Claude: *"set up the EDA tools"* followed by *"synthesize this UART at 100 MHz on nangate45"* — it handles everything from provisioning to GDSII. Recent changes: see [CHANGELOG.md](CHANGELOG.md).
 
 ---
 
@@ -28,7 +28,7 @@ Install the `r2g-skills` skills (`eda-install` to set up the toolchain, `signoff
 ```bash
 git clone https://github.com/ShenShan123/agent-r2g.git
 cd agent-r2g
-bash r2g-skills/install.sh --user   # installs eda-install + signoff-loop + def-graph into ~/.claude/skills/
+bash r2g-skills/install.sh --user   # installs eda-install + rtl-acquire + signoff-loop + def-graph into ~/.claude/skills/
 ```
 
 Restart Claude Code (or run `/reload`) after install.
@@ -40,7 +40,7 @@ bash r2g-skills/install.sh --user            # global — available in every Cla
 bash r2g-skills/install.sh --project .       # local  — scoped to the current project directory
 bash r2g-skills/install.sh --link --user     # symlink — edits are picked up without reinstalling
 bash r2g-skills/install.sh --force --user    # overwrite an existing install
-bash r2g-skills/install.sh --uninstall       # remove both sub-skills
+bash r2g-skills/install.sh --uninstall       # remove all sub-skills
 ```
 
 **Installing from the skill collection directory alone** (no full repo clone needed):
@@ -307,7 +307,7 @@ With tools verified, open any Claude Code session and ask something like:
 > *"Run DRC and LVS on my design"*
 > *"Generate a simple arbiter and produce a GDS"*
 
-Claude matches these requests to the `signoff-loop` skill and drives every stage — spec normalization, RTL generation, lint, simulation, synthesis, place-and-route, timing gate, and signoff. Optional ML dataset extraction (label/feature CSVs and training-ready PyG graphs) from the signed-off result is handled by the companion `def-graph` skill.
+Claude matches these requests to the `signoff-loop` skill and drives every stage — spec normalization, RTL generation, lint, simulation, synthesis, place-and-route, timing gate, and signoff. Optional ML dataset extraction (label/feature CSVs and training-ready PyG graphs) from the signed-off result is handled by the companion `def-graph` skill — which refuses to build a dataset on a design that is not signed off (the automatic signoff gate; `R2G_SIGNOFF_GATE=warn` overrides with the reasons recorded in the manifest). Corpus-scale RTL acquisition and synth-only netlist graphs are the `rtl-acquire` skill; its `scripts/promote/promote_candidates.py` promotes a synth-proven candidate into a ready-to-run signoff-loop full-flow project in one command.
 
 The skill works from **existing RTL** (drop your file into `rtl/design.v`) or from a **natural-language spec** (Claude writes the RTL for you).
 

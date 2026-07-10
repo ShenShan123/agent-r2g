@@ -225,3 +225,17 @@ Reality-check corrections to this plan discovered during implementation:
 > naming). Stale `nangate45-graph-expander` self-identifiers (run manifests' `workflow` field,
 > discovery User-Agent, README/`common/__init__` headers) renamed to `rtl-acquire`. Suite still
 > 21 passed.
+
+> **Robustness amendment (2026-07-10, operator-reported):** four contract changes supersede
+> details above. (1) **Screening**: the acquire denylist (`RAM_KEYWORDS` whole-text substring
+> hard reject) is RETIRED — replaced by tokenized, comment-stripped **risk markers**
+> (`scripts/common/rtl_risk.py`) carried in candidate `notes` as `risk_flags=…`; the synth
+> attempt arbitrates and `classify_failed_candidates` excludes only on failure evidence
+> (memory tokens only). Landmark false positive: picorv32 rejected on its formal-only
+> `RISCV_FORMAL_BLACKBOX_*` macro names. (2) **Paths**: candidate `source_path`/`rtl_files`/
+> `include_dirs` are normalized CWD-independently (~/$VAR expansion; relative → CSV dir, then
+> repo root — see `candidate_csv_schema.md` "Paths"). (3) **Retry**: `expand --force` re-runs
+> recorded successes; `discover --retry-excluded` re-emits exclude-parked candidates.
+> (4) **Promote** (new stage 7): `scripts/promote/promote_candidates.py` bridges a synth-proven
+> candidate into a signoff-loop full-flow project (vendored RTL, carried synth knobs, floorplan
+> directive added, `R2G_FLOW_SCOPE=synth_only` dropped, validate_config gate). Suite 51 passed.
