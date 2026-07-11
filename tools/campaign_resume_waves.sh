@@ -42,8 +42,15 @@ LEDGER=${LEDGER:-design_cases/_batch/${PLATFORM}_campaign.jsonl}
 # the "never two same DESIGN_NAME+FLOW_VARIANT" hard rule). flock is per-ledger,
 # matching batch_run.sh/batch_flow.sh; the pgrep net also catches a pre-lock
 # legacy driver that holds no flock. SKIP_INSTANCE_GUARD=1 overrides (debug only).
+# The pgrep pattern is END-ANCHORED (`\.sh$`) so it matches only a process EXEC'd on
+# the script (cmdline ends in the script name), NEVER a launching shell whose -c
+# command merely MENTIONS the path (the /r2g-debug Step 2 block runs `setsid bash
+# tools/campaign_resume_waves.sh` — an un-anchored -f false-matched that launcher and
+# refused to start; failure-patterns #37). $PPID (the launcher) is excluded too, for
+# the residual case of a launcher whose cmdline happens to end at the script name; a
+# real rival driver is never a child's parent, so this can't mask a true double-launch.
 if [[ "${SKIP_INSTANCE_GUARD:-0}" != "1" ]]; then
-  if pgrep -f "campaign_resume_waves\.sh" | grep -qvw "$$"; then
+  if pgrep -f "campaign_resume_waves\.sh$" | grep -vw "$$" | grep -qvw "${PPID:-0}"; then
     echo "ERROR: another campaign_resume_waves.sh is already running (pgrep) — refusing to double-launch." >&2
     exit 1
   fi
@@ -54,6 +61,11 @@ if [[ "${SKIP_INSTANCE_GUARD:-0}" != "1" ]]; then
     exit 1
   fi
 fi
+# Guard self-test hook (failure-patterns #37): reaching here means the single-instance
+# guard above did NOT fire (a fired guard already `exit 1`'d with its error). With
+# R2G_GUARD_SELFTEST=1 we report and exit BEFORE doing any wave work, so the guard is
+# unit-testable in isolation (test_campaign_driver_guard.py) without running a flow.
+if [[ "${R2G_GUARD_SELFTEST:-0}" == "1" ]]; then echo "guard-passed"; exit 0; fi
 EL=r2g-skills/signoff-loop/scripts/loop/engineer_loop.py
 KDB=r2g-skills/signoff-loop/knowledge/knowledge.sqlite
 INTEG=tools/check_db_integrity.py

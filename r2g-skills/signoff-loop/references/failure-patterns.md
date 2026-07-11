@@ -3800,3 +3800,41 @@ update); the marker self-clears the moment the check reaches CLEAN. Tests:
 loop — any repair cycle needs (a) an improvement-based exit, (b) a persistent
 record that it didn't converge, or an autonomous driver will re-discover the
 same dead end at full price forever.
+
+### 37. Wave driver's single-instance guard false-matched its OWN launching shell — refused every `sleep`-and-confirm relaunch (2026-07-11)
+
+Found by the sky130hs /r2g-debug tick after a host reboot killed the wave-3 driver:
+relaunching `campaign_resume_waves.sh` the documented way exited *immediately* with
+`ERROR: another campaign_resume_waves.sh is already running (pgrep)` — while `pgrep`
+showed no driver alive. The driver's own single-instance guard (2026-07-04 audit H1,
+failure-patterns #31's cousin) used an **un-anchored** `pgrep -f "campaign_resume_waves\.sh"`,
+which matches on the full command line of *any* process — including the operator's
+launching shell, whose `-c` command literally contains the driver path (the
+/r2g-debug Step 2 block runs `setsid bash tools/campaign_resume_waves.sh`). When that
+launching shell OUTLIVES the guard check — precisely the natural `... & sleep N; pgrep`
+confirm-it-came-up pattern — `pgrep` returns the launcher's PID, `grep -vw "$$"` sees a
+PID that isn't the driver's own, and the guard concludes a rival is running and exits 1.
+Fire-and-exit launches (no trailing `sleep`) slipped through only because the launcher
+died before the guard ran — a latent race, not a working guard. The DB honesty gates
+cannot see this: they were all green while the round sat dead-in-the-water since the
+reboot, because "the driver never started" is invisible to a store that only records
+runs that happened.
+
+**Fix** (`tools/campaign_resume_waves.sh`, TDD RED→GREEN): END-ANCHOR the pattern —
+`pgrep -f "campaign_resume_waves\.sh$"` matches only a process EXEC'd on the script
+(cmdline ends in the script name), never a launching shell whose `-c` string merely
+mentions the path (trailing redirects/commands push the launcher's cmdline past `.sh`).
+`$PPID` (the launcher) is additionally excluded for the residual case of a launcher
+whose cmdline ends exactly at the script name; a real rival driver is never a child's
+parent, so this can never mask a true double-launch, and the robust per-ledger `flock`
+remains the primary guard underneath. This is the SAME end-anchoring the operator-side
+guard and the /r2g-debug Step 0 note already prescribe ("pgrep is END-ANCHORED —
+un-anchored -f false-matches your own shell"); the driver's internal guard simply hadn't
+adopted it. A `R2G_GUARD_SELFTEST=1` hook runs the guard in isolation (report + exit
+before any wave work) so it is unit-testable. Tests: `test_campaign_driver_guard.py`
+(`test_guard_ignores_self_mentioning_launcher_shell` reproduces the false-positive;
+`test_guard_still_detects_a_real_second_driver` proves end-anchoring keeps catching a
+genuine rival). **Lesson:** a `pgrep -f` liveness guard must match on the process's
+*exec identity* (anchored path), not on any command line that happens to *name* it — or
+the very launch command that mentions the tool becomes indistinguishable from a second
+copy of it, and the guard blocks the thing it was meant to protect.
