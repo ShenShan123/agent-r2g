@@ -3970,3 +3970,48 @@ the grave. Resolve tool-relative resources from the running script's own locatio
 runner **self-heal a moved-but-still-present resource** rather than trusting a stored absolute
 path. And when a crash class is a catch-all (`unseen_crash`), a *cluster* of it on one strategy
 is a lead, not noise: the true cause was one grep of the arm's `flow.log` away.
+
+### 40. `setsid timeout` defeated timeout's process-group kill — a TERM-ignoring tool (klayout DRC) outlived its 2h timeout and hung the whole campaign for 6+ hours (2026-07-12)
+
+Found by the sky130hs /r2g-debug tick: the campaign made **zero progress for 6+ hours** — one
+143K-cell design (`fpga_fft_verilog_butterfly_top_module_16_point`) sat in `fixing` while 508
+designs waited, `run` age 6h50m, load ~1. The fixer had already recorded `stop_residual` on its 64
+DRC violations, yet a KLayout DRC process was still **Running at 2h13m elapsed — past the 2h
+`ORFS_TIMEOUT`** — with `PPID=1` (orphaned) but `PGID=`the timeout's PID, while the `timeout`
+wrapper itself was **gone**. The orphaned DRC held the stage's stdout pipe open, so the `tee`
+reader never saw EOF and `run_orfs.sh` (and behind it the whole driver) blocked forever. All DB
+honesty gates stayed green — a store only records runs that *happen*, and this one never returned.
+
+Root cause — `run_orfs.sh` ran each stage as:
+
+```bash
+setsid timeout --signal=TERM --kill-after=60 "$ORFS_TIMEOUT" bash -c "$MAKE_CMD $stage" 2>&1 | tee -a flow.log
+```
+
+GNU `timeout` reaps the **whole child tree** by forking the command into a NEW process group and
+signalling `-pgid` — but **only when it is not itself a process-group leader**. The `setsid`
+prefix (added under the mistaken comment "so timeout can kill the entire process group") makes
+`timeout` a session/group leader, so its `setpgid(0,0)` fails and it falls back to signalling only
+its **direct** `bash -c` child. On a stage that actually hit `ORFS_TIMEOUT`, that meant: SIGTERM →
+`make` (klayout, an EDA tool that **ignores SIGTERM**, keeps running); SIGKILL (`--kill-after`) →
+`make` again (never the tool). `make` dies, klayout orphans (still in the timeout's group, but the
+group was never signalled) and runs until the heat death of the campaign. The bug only bites when a
+stage genuinely exceeds `ORFS_TIMEOUT` — i.e. only on giant designs — which is why it lay latent
+until a 143K-cell FFT.
+
+**Fix** (`run_orfs.sh`, TDD): **drop the `setsid`**. Plain `timeout` (not a group leader) forks the
+command into a new group and group-kills it, so the `--kill-after` SIGKILL reaches the whole tree —
+a SIGTERM-ignoring tool included (SIGKILL cannot be ignored). This also *improves* exit-status
+fidelity (no more `| tee` PIPESTATUS ambiguity is introduced; the pattern is otherwise unchanged).
+Immediate remediation: killed the orphaned DRC process group (`kill -KILL -<pgid>`) — the design
+then escalated `catalog_exhausted` in seconds and the wave advanced to ab-drain. Tests:
+`test_run_orfs_timeout_reaping.py` — a static guard that `setsid timeout` never returns as a
+command, plus a behavioral test that plain `timeout` reaps the whole stage tree (no orphaned
+grandchildren survive).
+
+**Lesson:** a stage timeout is a lie if it doesn't reap the tool it bounds. `timeout`'s tree-kill
+is silently disabled the moment `timeout` becomes a process-group leader — so **never wrap
+`timeout` in `setsid`** (or any group-leader-making construct). And the honesty DBs are blind to a
+*hang*: "the flow never returned" leaves no row, so a frozen ledger + a live tool process past its
+timeout is a first-class alarm, invisible to `honesty.py`. When a campaign flat-lines, look for a
+process older than `ORFS_TIMEOUT` with `PPID=1` before assuming "legit slow."

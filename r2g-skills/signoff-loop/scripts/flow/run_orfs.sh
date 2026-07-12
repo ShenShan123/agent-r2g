@@ -322,8 +322,18 @@ run_stage() {
 
   local STAGE_STATUS=0
   set +e +o pipefail
-  # Use setsid so timeout can kill the entire process group (prevents zombie processes)
-  setsid timeout --signal=TERM --kill-after=60 "$ORFS_TIMEOUT" \
+  # Reap the ENTIRE stage tree on timeout (failure-patterns.md #40). GNU `timeout` forks the
+  # command into a NEW process group and signals that whole group (SIGTERM, then SIGKILL after
+  # --kill-after) — BUT ONLY when timeout is not itself a process-group leader. The old
+  # `setsid timeout ...` made timeout a session/group leader, so `setpgid(0,0)` failed and
+  # timeout fell back to signaling only its direct `bash -c` child. On a stage that actually
+  # hit ORFS_TIMEOUT (e.g. a 143K-cell design's ~2h KLayout DRC), the deep tool grandchild
+  # (klayout/openroad) was orphaned (reparented to init) and KEPT RUNNING — holding the stdout
+  # pipe open so `tee` never saw EOF, hanging run_orfs.sh and freezing the whole campaign for
+  # hours behind one design. Dropping `setsid` lets timeout become the new group's leader and
+  # group-kill the whole tree. (Empirically: `setsid timeout` leaves orphans; plain `timeout`
+  # reaps them — test_run_orfs_timeout_reaping.py.)
+  timeout --signal=TERM --kill-after=60 "$ORFS_TIMEOUT" \
     bash -c "$MAKE_CMD $stage" 2>&1 | tee -a "$BACKEND_DIR/flow.log"
   STAGE_STATUS=${PIPESTATUS[0]}
   set -e -o pipefail
