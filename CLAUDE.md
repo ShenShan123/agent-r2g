@@ -127,8 +127,12 @@ bundled (`tools/install_nangate45_lvs.sh`).
 - **For >100K-cell designs, never run multiple LVS jobs concurrently** (3-5GB RAM each → 2-3× wall time).
 - **Parallel ORFS:** when running flows concurrently, cap per-flow threads with `NUM_CORES` so
   `flows × NUM_CORES ≈ cores` — the default grabs `nproc` (96) per flow, so N flows oversubscribe N×
-  and thrash. `run_orfs.sh` wraps each stage in `setsid timeout`, so killing a driver orphans the
-  make/openroad tree — `kill -9 -<pgid>` the process group, not just the python.
+  and thrash. `run_orfs.sh` wraps each stage in `timeout` (plain, NOT `setsid` — `setsid` made
+  timeout a group leader and silently disabled its tree-kill, orphaning a stage that hit
+  `ORFS_TIMEOUT`; failure-patterns #40, 2026-07-12). `timeout` now group-reaps the whole stage tree
+  on expiry; a manually-killed driver can still leave the stage's own group running — `kill -9
+  -<pgid>` the process group, not just the python. A tool process older than `ORFS_TIMEOUT` with
+  `PPID=1` beside a frozen ledger is a hang alarm the honesty DBs cannot see (a hang writes no run).
 - **Escalate to the user before attempting CDC, multi-clock, DFT, or signoff-quality closure.**
   Single-clock flows incl. macro designs (`fakeram45`) are supported; the rest is out of scope.
 - **Don't skip a failed stage** — diagnose first via `references/failure-patterns.md`. The strict
