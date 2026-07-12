@@ -20,6 +20,24 @@ skipped as library-pre-verified).
 
 ---
 
+## 2026-07-11 — Campaign driver single-instance guard fix (#37)
+*(branch `fix/campaign-driver-guard-anchor`)*
+
+Found by the sky130hs `/r2g-debug` tick after a host reboot killed the wave-3 driver:
+the documented relaunch aborted immediately with "another campaign_resume_waves.sh is
+already running (pgrep)" while no driver was actually alive. The driver's single-instance
+guard used an **un-anchored** `pgrep -f "campaign_resume_waves\.sh"`, which matched the
+operator's own launching shell (whose `setsid bash tools/campaign_resume_waves.sh …`
+command line names the script) in the natural `… & sleep N; pgrep` confirm pattern. The
+round sat **invisible-dead** — every DB honesty gate stayed green because a driver that
+never starts records no runs. Fixed by END-ANCHORING the pattern
+(`campaign_resume_waves\.sh$`) so it matches only a process exec'd on the script, plus a
+`$PPID` exclude; the per-ledger `flock` remains the primary guard. Adds a
+`R2G_GUARD_SELFTEST=1` isolation hook and `test_campaign_driver_guard.py` (RED→GREEN).
+Detail: `signoff-loop/references/failure-patterns.md` #37. After the fix the sky130hs
+round resumed and continues to promote recipes (`density_relief`; per-platform
+`promoted` 1→4, honesty gates 5/5, dataset verify green).
+
 ## 2026-07-09 — House-cleaning sweep + /r2g-debug full-coverage revision
 *(branch `chore/housecleaning-2026-07-09`)*
 

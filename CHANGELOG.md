@@ -4,6 +4,28 @@ Notable changes to the `r2g-skills` collection. Earlier history lives in the
 git log (the commit messages are the long-term record — see CLAUDE.md "When
 You Fix a Bug").
 
+## 2026-07-11 — campaign driver single-instance guard end-anchors pgrep (#37)
+
+### signoff-loop
+- **The wave driver's single-instance guard no longer false-matches its own
+  launching shell** (`tools/campaign_resume_waves.sh`; failure-patterns #37).
+  The guard rejected a double-launch with an **un-anchored**
+  `pgrep -f "campaign_resume_waves\.sh"`, which also matched the operator's
+  launching shell — its `setsid bash tools/campaign_resume_waves.sh …` command
+  line literally names the script. In the natural `… & sleep N; pgrep`
+  confirm-it-came-up pattern the launcher outlives the check, so the guard saw a
+  "rival" and refused to start, leaving a round dead-in-the-water after a reboot
+  **while every DB honesty gate stayed green** (a driver that never starts is
+  invisible to a store that only records runs that happened). Fix: END-ANCHOR the
+  pattern (`campaign_resume_waves\.sh$`) so it matches only a process *exec'd* on
+  the script, plus a `$PPID` exclude for the residual exact-match case; the robust
+  per-ledger `flock` remains the primary guard underneath. A `R2G_GUARD_SELFTEST=1`
+  hook runs the guard in isolation (report + exit before any wave work) so it is
+  unit-testable. Tests: `signoff-loop/tests/test_campaign_driver_guard.py`
+  reproduces the false-positive and proves a genuine second driver is still caught.
+  **Lesson:** a `pgrep -f` liveness guard must match on the process's *exec
+  identity* (anchored path), not on any command line that happens to *name* it.
+
 ## 2026-07-10 — robustness sweep across all four sub-skills
 
 Six operator-reported robustness gaps, each closed with code + tests + a
