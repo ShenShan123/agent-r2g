@@ -4,6 +4,30 @@ Notable changes to the `r2g-skills` collection. Earlier history lives in the
 git log (the commit messages are the long-term record — see CLAUDE.md "When
 You Fix a Bug").
 
+## 2026-07-13 — Codex debug-findings audit: `build_diagnosis` `kind:none` gap + git-pollution hygiene (#42)
+
+Audited 5 instance-testing findings + 6 architectural learnings from an external reviewer
+(grading in `docs/superpowers/plans/2026-07-13-codex-debug.md`). Only **1 of 5** Part-I
+findings was a real (cosmetic) gap; the other 4 were phantom causes or already-shipped
+features (#36/#38). Suites green: signoff-loop **833 passed / 2 skipped**, honesty **5/5**.
+
+### signoff-loop
+- **`build_diagnosis` reported `kind:none` for a backend stage abort/timeout** (`build_diagnosis.py`;
+  #42). A stage SIGKILLed at `ORFS_TIMEOUT` (#40) leaves no `make` error line, so every text-log rule
+  missed it and `main()` fell through to `kind:none` — even though `build_run_summary()` already knew
+  `signoff.orfs_status='fail'`. `main()` now consults the ORFS stage ledger first: `_orfs_fallback_kind`
+  emits `orfs_stage_failed` / `orfs_stage_incomplete` (naming the fail stage) with `issues:[]`
+  (presentation-only ⇒ **no** duplicate `failure_event`; the learner already derived the `orfs-fail-<stage>`
+  event independently from `stage_log`). Also echoes `antenna_nonconverged.json` into `run_summary`.
+  The 4 other proposed rules were rejected as firing on non-existent conditions (see the plan doc).
+
+### repo hygiene
+- **`.gitignore`** now covers `tools/_*_resume_logs/` (~370 MB of campaign wave logs, same class as
+  `design_cases/` — genuine untracked pollution). Added **`.gitattributes`** marking the tracked, churning
+  `knowledge.sqlite` blob `binary` (cleaner diffs; cross-operator sharing stays on `knowledge_sync.py`).
+  The reviewer's "gitignore the store" was rejected — it breaks the tracked shipped-store invariant (D14),
+  a migration already tried and reverted 2026-06-23.
+
 ## 2026-07-12 — Codex robustness-suggestion audit: 5 latent bugs + per-metric/observability hardening (#38)
 
 Audited 7 Codex robustness suggestions against the actual code (grading in

@@ -118,3 +118,66 @@ def test_main_emits_run_summary(tmp_path):
     assert "run_summary" in diag
     assert diag["run_summary"]["total_elapsed_s"] == 140
     assert diag["run_summary"]["fix_iterations"] == 2
+
+
+# ---- the orfs_status fallback kind (codex-debug 2026-07-13 #4) -----------------
+# A backend stage abort/timeout leaves no text `make` error line, so every
+# text-log rule misses it and the old code emitted kind:none. The ORFS stage
+# ledger (ppa.json orfs_status/orfs_fail_stage) now names the failed stage.
+
+def test_orfs_fallback_fail_names_stage():
+    fb = bd._orfs_fallback_kind({"signoff": {"orfs_status": "fail",
+                                             "orfs_fail_stage": "finish"}})
+    assert fb["kind"] == "orfs_stage_failed"
+    assert "finish" in fb["summary"]
+
+
+def test_orfs_fallback_partial_incomplete():
+    fb = bd._orfs_fallback_kind({"signoff": {"orfs_status": "partial",
+                                             "orfs_fail_stage": "route"}})
+    assert fb["kind"] == "orfs_stage_incomplete"
+    assert "route" in fb["summary"]
+
+
+def test_orfs_fallback_none_when_clean_or_absent():
+    assert bd._orfs_fallback_kind({"signoff": {"orfs_status": "clean"}}) is None
+    assert bd._orfs_fallback_kind({}) is None
+    assert bd._orfs_fallback_kind(None) is None
+
+
+def test_main_orfs_fail_not_kind_none(tmp_path):
+    """A backend abort/timeout with no text signature must yield a stage-named
+    kind (not kind:none) AND inject no issue (so ingest fabricates no event)."""
+    proj = _project(tmp_path)
+    json.dump({"orfs_status": "fail", "orfs_fail_stage": "finish"},
+              open(proj / "reports" / "ppa.json", "w"))
+    out = tmp_path / "diagnosis.json"
+    r = subprocess.run([sys.executable, _BD, str(proj), str(out)],
+                       capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, r.stderr
+    diag = json.loads(out.read_text())
+    assert diag["kind"] == "orfs_stage_failed", diag["kind"]
+    assert "finish" in diag["summary"]
+    assert diag["issues"] == []          # no fabricated failure_event source
+    assert diag["run_summary"]["signoff"]["orfs_status"] == "fail"
+
+
+def test_main_clean_run_still_kind_none(tmp_path):
+    """Regression: a run with no failure signature AND no orfs failure keeps
+    the honest kind:none — the fallback must not fire on a clean/partial-less run."""
+    proj = _project(tmp_path)          # no ppa.json → no orfs_status
+    out = tmp_path / "diagnosis.json"
+    r = subprocess.run([sys.executable, _BD, str(proj), str(out)],
+                       capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, r.stderr
+    assert json.loads(out.read_text())["kind"] == "none"
+
+
+def test_run_summary_echoes_antenna_nonconverged(tmp_path):
+    """The terminal antenna-repair verdict (fix_signoff.sh marker) rides the
+    structured summary so 'the fix loop gave up' is visible in diagnosis.json."""
+    proj = _project(tmp_path)
+    json.dump({"class": "antenna", "residual_count": 2, "fix_iters": 8},
+              open(proj / "reports" / "antenna_nonconverged.json", "w"))
+    s = bd.build_run_summary(proj)
+    assert s["antenna_nonconverged"]["residual_count"] == 2

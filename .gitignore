@@ -226,6 +226,9 @@ synth/
 backend/RUN_*/
 backend/objects/
 backend/results/
+# Campaign wave logs written by tools/campaign_resume_waves.sh (LOGDIR=tools/_<platform>_resume_logs):
+# huge per-wave EDA logs + runtime state (driver.pgid/pool.env) — same class as design_cases/, never commit.
+tools/_*_resume_logs/
 
 # User-local Claude Code config
 .claude/

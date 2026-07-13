@@ -20,6 +20,27 @@ skipped as library-pre-verified).
 
 ---
 
+## 2026-07-13 — Codex debug-findings audit: `build_diagnosis` `kind:none` gap + git-pollution hygiene (#42)
+
+Audited 5 instance-testing findings + 6 architectural learnings from an external reviewer
+(grading in `docs/superpowers/plans/2026-07-13-codex-debug.md`). Only **1 of 5** Part-I findings
+was a real (cosmetic) gap; the other 4 were phantom root causes (a non-existent `2_4` vs `2_3`
+tapcell filename mismatch; "route artifacts lost on a later hang" — ORFS writes in-place) or
+already-shipped features (antenna auto-exit #36/#38a). Full suites green: signoff-loop
+**833 passed / 2 skipped**, honesty 5/5.
+
+- **Fix:** `build_diagnosis.py` reported `kind:none` for a backend stage abort/timeout (a stage
+  SIGKILLed at `ORFS_TIMEOUT` leaves no `make` error line, #40) — even though `build_run_summary`
+  already knew `orfs_status='fail'`. `main()` now consults the ORFS stage ledger first and emits
+  `orfs_stage_failed`/`orfs_stage_incomplete` (naming the fail stage) with `issues:[]` — presentation
+  only, so ingest fabricates no duplicate `failure_event` (the learner already derives `orfs-fail-<stage>`
+  from `stage_log` independently). Also echoes `antenna_nonconverged.json` into `run_summary`. The 4 other
+  proposed diagnosis rules were rejected (fire on the non-existent #1/#2 conditions). failure-patterns #42.
+- **Hygiene:** `.gitignore` now covers `tools/_*_resume_logs/` (~370 MB of untracked campaign wave logs);
+  `.gitattributes` marks the tracked, churning `knowledge.sqlite` blob `binary`. The reviewer's "gitignore
+  the knowledge store" was rejected — it breaks the tracked shipped-store invariant (D14, migration already
+  reverted 2026-06-23); cross-operator sharing stays on the `knowledge_sync.py` NDJSON bundle.
+
 ## 2026-07-12 — Codex robustness-suggestion audit: 5 latent bugs + per-metric/observability hardening (#38)
 
 Audited 7 Codex robustness suggestions vs the actual code (grading in

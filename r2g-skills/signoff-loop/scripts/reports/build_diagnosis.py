@@ -372,7 +372,55 @@ def build_run_summary(project: Path):
             signoff['orfs_fail_stage'] = ppa.get('orfs_fail_stage')
     if signoff:
         summary['signoff'] = signoff
+    # Echo the terminal antenna-repair verdict written by fix_signoff.sh so the
+    # structured summary carries "the fix loop already gave up" (codex-debug
+    # 2026-07-13 #4). Read-only echo — the marker is already the source of truth
+    # for signoff_gate.py + the ingest fix-event, so this creates no new event.
+    ant = _load_json(rep / 'antenna_nonconverged.json')
+    if isinstance(ant, dict) and ant:
+        summary['antenna_nonconverged'] = ant
     return summary
+
+
+def _orfs_fallback_kind(run_summary):
+    """When no text-log signature matched but the ORFS stage ledger shows the
+    backend flow did not complete, return a stage-named diagnosis so
+    diagnosis.json no longer reports `kind:none` for a real backend abort or
+    timeout (codex-debug 2026-07-13 #4 — e.g. a stage killed at ORFS_TIMEOUT
+    leaves no `make: *** Error` line, so every text rule misses it).
+
+    Presentation-layer ONLY. `ingest_run.py` derives `orfs_status`/`fail_stage`
+    and the `orfs-fail-<stage>` failure_event INDEPENDENTLY from stage_log, and
+    builds failure_events solely from `diag['issues']` — which this never
+    touches — so the fallback creates and duplicates no failure_event. It also
+    subsumes the reviewer's proposed `route_completed_but_finish_missing`
+    (that is simply orfs_status='fail', orfs_fail_stage='finish').
+    Returns a diagnosis dict or None."""
+    signoff = (run_summary or {}).get('signoff') or {}
+    status = signoff.get('orfs_status')
+    stage = signoff.get('orfs_fail_stage')
+    if status == 'fail':
+        where = f" at stage '{stage}'" if stage else ''
+        return {
+            'kind': 'orfs_stage_failed',
+            'summary': f"ORFS backend flow failed{where} with no distinctive log "
+                       "signature (e.g. a stage killed at ORFS_TIMEOUT, or an "
+                       "opaque abort).",
+            'suggestion': "Inspect the failed stage's log under backend/RUN_*/ "
+                          "and reports/ppa.json; a stage that exceeded ORFS_TIMEOUT "
+                          "leaves no `make` error line (failure-patterns #40).",
+        }
+    if status == 'partial':
+        where = f" after stage '{stage}'" if stage else ''
+        return {
+            'kind': 'orfs_stage_incomplete',
+            'summary': f"ORFS backend flow is incomplete{where}: it did not reach "
+                       "the finish stage / 6_final artifacts.",
+            'suggestion': "Resume from the failed stage (FROM_STAGE=<stage>) or "
+                          "inspect backend/RUN_*/stage_log.jsonl for the last "
+                          "completed stage.",
+        }
+    return None
 
 
 def main():
@@ -412,22 +460,27 @@ def main():
 
     full_text = '\n'.join(texts)
     issues = detect_issues(full_text, project)
+    # Consolidated run summary (codex #7): stage durations + repair repetitions +
+    # signoff status, so diagnosis.json is the single structured run summary the
+    # suggestion asks for — not just a failure list to hand-stitch with the DB.
+    # Built BEFORE the kind decision so the fallback can consult orfs_status.
+    run_summary = build_run_summary(project)
     # Backward-compatible output: top-level fields from first issue, plus issues list
     if issues:
         diagnosis = issues[0].copy()
         diagnosis['issues'] = issues
     else:
-        diagnosis = {
+        # No text-log signature matched. Before declaring `kind:none`, consult
+        # the ORFS stage ledger: a backend abort/timeout with no `make` error
+        # line is a real failure the text rules cannot see (codex-debug #4).
+        diagnosis = _orfs_fallback_kind(run_summary) or {
             'kind': 'none',
             'summary': 'No known failure signature detected.',
             'suggestion': 'Inspect flow.log manually for details.',
-            'issues': []
         }
+        diagnosis['issues'] = []
 
-    # Consolidated run summary (codex #7): stage durations + repair repetitions +
-    # signoff status, so diagnosis.json is the single structured run summary the
-    # suggestion asks for — not just a failure list to hand-stitch with the DB.
-    diagnosis['run_summary'] = build_run_summary(project)
+    diagnosis['run_summary'] = run_summary
 
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(diagnosis, indent=2, ensure_ascii=False), encoding='utf-8')

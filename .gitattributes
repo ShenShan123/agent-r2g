@@ -1,0 +1,13 @@
+# The shipped, pre-trained knowledge store is the TRACKED binary knowledge.sqlite
+# (spec D14; a fresh clone must behave identically off committed knowledge, so it
+# stays tracked — the 2026-06-23 "gitignore the binary" migration was reverted).
+# Mark it binary so git never attempts a textual diff or line-ending conversion of
+# the blob (cleaner `git log -p` / `git diff`; avoids CRLF corruption on any host).
+# This does NOT auto-merge concurrent operator edits: the store is a local working
+# copy and cross-operator experience-sharing goes through the additive, honesty-
+# gated knowledge_sync.py NDJSON bundle (knowledge/store/), never a git binary merge.
+# (Not using `merge=ours`: that driver needs an unshared `git config
+# merge.ours.driver true`, so it silently no-ops on a fresh clone — codex-debug
+# 2026-07-13 #5.)  heuristics.json is left as normal text so recipe deltas stay
+# reviewable in a diff.
+r2g-skills/signoff-loop/knowledge/knowledge.sqlite binary

@@ -4051,3 +4051,58 @@ before. Tests: `test_escalations.py::test_cts_crash_is_valid_reason` (registrati
 silently collapses into `unseen_crash`, and every new honest reason is a worker-crash landmine until it
 is registered in `escalations.REASONS`. Add the branch AND the reason together, and let the systemic
 registration guard prove they agree.
+
+### 42. `build_diagnosis` reported `kind:none` for a backend stage abort/timeout with no `make` error line (codex-debug 2026-07-13 #4)
+
+Found by the 2026-07-13 codex-debug audit (raw findings + full grading:
+`docs/superpowers/plans/2026-07-13-codex-debug.md`). `build_diagnosis.detect_issues()` is entirely
+**text-log driven** (17 signature rules over `flow.log`/`synth.log`/`6_lvs.log`/…). A stage killed at
+`ORFS_TIMEOUT` — the failure-patterns #40 class — is SIGKILLed by `timeout`, so `flow.log` often has
+**no `make: *** Error` tail line** for the `make_error` rule to catch. Every text rule then misses, and
+`main()` fell straight through to the `kind:none` fallback ("No known failure signature detected") — even
+though the very same file's `build_run_summary()` had already computed `run_summary.signoff.orfs_status='fail'`
++ `orfs_fail_stage` from `ppa.json`. So `diagnosis.json`'s top-level `kind` (and the dashboard diagnosis
+panel keyed on it) rendered blank for a *real* backend abort.
+
+**Honesty note (why this was cosmetic, not a learner lie):** `ingest_run.py` derives `orfs_status`/`fail_stage`
+from `stage_log.jsonl` **independently** of `diagnosis.json`, and writes the `orfs-fail-<stage>-<errcode>`
+`failure_event` from that — it builds `failure_events` *solely* from `diag['issues']`, never the top-level
+`kind`. So the learner was never blind (honesty.py stayed green); only the human/dashboard summary was
+uninformative.
+
+**Fix** (`build_diagnosis.py`, TDD). `main()` now builds `run_summary` **before** the `kind` decision; on
+an empty `issues` list `_orfs_fallback_kind(run_summary)` consults `signoff.orfs_status` and emits a
+stage-named `kind` — `orfs_stage_failed` (status `fail`, e.g. `orfs_fail_stage='finish'` ⇒ the reviewer's
+"route completed but finish missing") or `orfs_stage_incomplete` (status `partial`) — instead of `none`.
+Crucially it leaves `issues: []` (presentation-layer only, so ingest fabricates **no** duplicate
+failure_event). Also `build_run_summary` now echoes the terminal `reports/antenna_nonconverged.json`
+verdict into the summary (read-only echo; the marker is already the source of truth for `signoff_gate.py`
++ the ingest fix-event). Tests: `test_build_diagnosis.py` (`_orfs_fallback_kind` fail/partial/clean units;
+`main()` route-pass+finish-timeout ⇒ `orfs_stage_failed` w/ `issues:[]`; regression: clean run stays
+`kind:none`; antenna echo). Suite 833 passed / 2 skipped, honesty 5/5.
+
+**Phantom findings from the same audit — DO NOT re-chase** (full evidence in the plan doc):
+- **"`finish` re-runs tapcell/place via a `2_4` vs `2_3` tapcell filename mismatch"** — WRONG. In this ORFS
+  checkout `scripts/tapcell.tcl` writes `2_3_floorplan_tapcell.odb` and `Makefile` consumes the same name;
+  `2_4_floorplan_tapcell` does not exist (`2_4` is the *pdn* step). `run_orfs.sh` runs **explicit per-stage
+  make targets** in a loop, and `clean_finish` removes only `6_*`, so `finish` cannot rebuild upstream. No
+  `finish_rerun_previous_stages` / `orfs_target_output_mismatch` diagnosis rule was added — it would fire on
+  a non-existent condition.
+- **"Route artifacts lost if a later stage hangs (copy only after all stages finish)"** — WRONG. ORFS writes
+  `5_route.*`/`6_final.*` **in-place** into `results/…` as each stage completes; the end-of-flow
+  `backend/RUN_*/` copy is a redundant archive reached even on failure/timeout, and every downstream consumer
+  (`run_rcx.sh`/`run_drc.sh`/`run_lvs.sh`/`_restage_for_signoff.sh`/def-graph) reads the in-place dir. No
+  per-stage snapshot was added.
+- **"Antenna repair retries forever"** — ALREADY HANDLED (#36 + #38a): the consecutive-no-improvement detector
+  (`antenna_noimp>=2 ⇒ antenna_nonconverged`) halts cleanly and the marker rides gate + DB + tests.
+- **"Move the runtime knowledge store to a gitignored dir"** — WRONG FIX (breaks the tracked shipped-store
+  invariant D14; the 2026-06-23 bundle-as-source migration was already tried and reverted). The real, unrelated
+  pollution was `tools/_*_resume_logs/` (~370 MB of campaign wave logs) — now gitignored; `.gitattributes`
+  marks the churning `knowledge.sqlite` blob `binary` (cross-operator sharing stays via `knowledge_sync.py`).
+
+**Lesson:** an external reviewer sees *symptoms* from outside and infers *causes* it cannot verify — grade
+each finding against the actual code before acting. Here 1 of 5 instance-findings was a real (cosmetic)
+gap; the other 4 were phantom causes or already-shipped features whose "fixes" would have added dead code
+that lies. The `kind:none`-over-a-known-fail-stage gap is the general trap: when two code paths in the same
+file compute the same fact (text rules vs the stage ledger), reconcile them so the human-facing summary
+can't disagree with the structured one.
