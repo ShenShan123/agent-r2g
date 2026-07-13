@@ -4015,3 +4015,39 @@ is silently disabled the moment `timeout` becomes a process-group leader — so 
 *hang*: "the flow never returned" leaves no row, so a frozen ledger + a live tool process past its
 timeout is a first-class alarm, invisible to `honesty.py`. When a campaign flat-lines, look for a
 process older than `ORFS_TIMEOUT` with `PPID=1` before assuming "legit slow."
+
+### 41. A CTS-stage crash (TritonCTS segfault) fell through to `unseen_crash` — the classifier had no cts branch (2026-07-12)
+
+Found by the sky130hs /r2g-debug tick: `unseen_crash` ticked 8→9, and the 9th was a NEW primary
+design (`i2c_master_i2c_master`, escalated post-#39-fix), distinct from the 8 `pdn_die` A/B arms.
+Its `flow.log` showed the true cause — a **TritonCTS segfault** at clock-tree synthesis:
+
+```
+cts::TritonCTS::initOneClockTree(...) → ... → make[1]: *** [do-4_1_cts] Error 245
+ERROR: Stage 'cts' failed (exit code 2) after 11s
+```
+
+The `process_one` crash classifier has honest stage-specific branches (synth memory/timeout/missing-
+header, place FLW-0024/PPL-0024, floorplan PDN-strap, route) that refine the line-1044 `unseen_crash`
+default — but **no `cts` branch**. So every cts-stage crash fell through to the catch-all, telling the
+learner/operator a *recognizable tool crash* was a *novel mystery* (the exact misclassification the
+2026-06-28 unseen_crash audit set out to eliminate). cts crashes are a real if small class (3 in the
+committed store, vs synth 122 / place 83 / route 73 / floorplan 12). NB the knowledge side was already
+honest — `runs.orfs_fail_stage='cts'` + an `orfs-fail-cts-*` event — so honesty.py stayed green; only
+the *ledger escalation reason* was imprecise.
+
+**Fix** (`engineer_loop.py` + `escalations.py`, TDD): add an `elif _fail_stage(entry) == "cts"` branch
+that labels the abort `cts_crash` with an honest note. It is a **label, not a recovery** — a TritonCTS
+`initOneClockTree` segfault is an OpenROAD internal crash the loop cannot fix by re-config, so it
+escalates as a distinct, groupable class (no speculative re-flow). **Critically**, `cts_crash` had to be
+added to `escalations.REASONS` — the systemic `test_all_loop_emitted_reasons_are_registered` guard (and
+runtime `open_escalation`) reject an unregistered reason with a ValueError that *crashes the worker* and
+buries the honest reason under `worker_exc:ValueError` — the exact latent-crash class that bit
+place_density_residual/synth_memory_residual/pdn_strap_residual/incomplete_missing_header/synth_timeout
+before. Tests: `test_escalations.py::test_cts_crash_is_valid_reason` (registration) +
+`test_cts_crash_branch_present_in_classifier` (the branch stays). Suite 827 passed / 2 skipped.
+
+**Lesson:** the crash classifier is only as honest as its stage coverage — a stage with no branch
+silently collapses into `unseen_crash`, and every new honest reason is a worker-crash landmine until it
+is registered in `escalations.REASONS`. Add the branch AND the reason together, and let the systemic
+registration guard prove they agree.

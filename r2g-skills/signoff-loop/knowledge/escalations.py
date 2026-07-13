@@ -77,7 +77,15 @@ REASONS = ("unknown_symptom", "catalog_exhausted", "unseen_crash",
            # (_signoff_escalation_reason, 2026-07-05) so the queue's triage reads "scan
            # bound / die size", not "tried everything". 13 of 37 catalog_exhausted
            # escalations in the sky130 round were actually this class.
-           "signoff_stuck_scan")
+           "signoff_stuck_scan",
+           # A crash at the CTS stage -- commonly a TritonCTS initOneClockTree segfault on a
+           # pathological clock structure (2026-07-12 i2c_master). A TOOL crash, not a
+           # flow-config abort the loop can fix, but a RECOGNIZABLE class, not an "unseen"
+           # mystery -- labeled honestly by process_one (failure-patterns.md #41). MUST be
+           # registered here or open_escalation raises ValueError and crashes the worker (the
+           # exact latent-crash class the residual notes above document -- see the systemic
+           # test_all_loop_emitted_reasons_are_registered guard).
+           "cts_crash")
 
 
 def _now() -> str:

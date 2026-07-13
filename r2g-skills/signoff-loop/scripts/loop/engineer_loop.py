@@ -1122,6 +1122,15 @@ def process_one(led: Ledger, entry: dict, conn, *,
             reason = "pdn_strap_residual"
             notes = (f"PDN-0185 insufficient width for met4/met5 straps (rc={rc}); flooring "
                      f"the die to {_PDN_DIE_FLOOR_UM}um did not clear")
+        elif entry.get("kind") != "ab_arm" and _fail_stage(entry) == "cts":
+            # A crash at clock-tree synthesis -- commonly a TritonCTS initOneClockTree segfault
+            # on a pathological clock structure. A TOOL crash, not a flow-config abort the loop
+            # can fix, but a RECOGNIZABLE class, not an "unseen" mystery (failure-patterns.md #41,
+            # 2026-07-12 i2c_master; continues the 2026-06-28 unseen_crash-reduction audit). Label
+            # it honestly so the learner/operator can group CTS crashes rather than chase them as
+            # novel symptoms; no speculative recovery of an OpenROAD internal segfault.
+            reason = "cts_crash"
+            notes = f"clock-tree synthesis (TritonCTS) crashed at the cts stage (rc={rc})"
         if not _route_abort_cleared:
             led.set_state(design, "escalated", reason=reason)
             if conn is not None:

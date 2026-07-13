@@ -110,6 +110,28 @@ def test_synth_timeout_is_valid_reason(tmp_path):
     assert escalations.list_open(conn)[0]["escalation_id"] == eid
 
 
+def test_cts_crash_is_valid_reason(tmp_path):
+    """process_one escalates a TritonCTS/cts-stage crash as 'cts_crash' (a recognizable tool
+    crash, not the 'unseen_crash' catch-all — failure-patterns #41, 2026-07-12 i2c_master).
+    Must be registered or open_escalation raises ValueError and crashes the worker."""
+    conn = _conn(tmp_path)
+    eid = escalations.open_escalation(
+        conn, design="i2c_master_i2c_master", project_path="/p/i2c", run_id="r1",
+        reason="cts_crash", notes="TritonCTS crashed at the cts stage (rc=245)")
+    assert escalations.list_open(conn)[0]["escalation_id"] == eid
+
+
+def test_cts_crash_branch_present_in_classifier():
+    """The process_one classifier must map a cts-stage failure to 'cts_crash' (not fall through
+    to unseen_crash). Guards the classification alongside the registration above."""
+    import re
+    from pathlib import Path
+    src = (Path(__file__).resolve().parents[1] / "scripts" / "loop" / "engineer_loop.py").read_text()
+    assert re.search(r'_fail_stage\(entry\)\s*==\s*"cts"', src), \
+        "engineer_loop lost its cts-stage classifier branch — cts crashes revert to unseen_crash"
+    assert 'reason = "cts_crash"' in src
+
+
 def test_all_loop_emitted_reasons_are_registered():
     """SYSTEMIC GUARD (prevents the 6th recurrence of the worker_exc:ValueError bug class).
 
