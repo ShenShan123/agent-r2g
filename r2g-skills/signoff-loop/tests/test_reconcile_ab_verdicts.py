@@ -39,9 +39,14 @@ def test_reconcile_flips_noise_verdicts_and_reverts_promotion(tmp_path):
         ("win",  [_samp(116)],             [_samp(113)]),
         ("loss", [_samp(123)],             [_samp(134)]),
     ]
-    for verdict, A, B in trials:
-        ab_runner.record_trial(conn, key=key, verdict=verdict, arm_a_run_id=None,
-                               arm_b_run_id=None,
+    for i, (verdict, A, B) in enumerate(trials):
+        # Distinct run_ids -> provenance_complete=True, so these DECISIVE verdicts count
+        # in judge_recipe. (Post-P0-1 (failure-patterns #48) a noise-promotion needing
+        # reconcile is a provenance-COMPLETE trial carrying an old-judge noise verdict;
+        # a None-run_id trial is provenance-incomplete and never promotes in the first
+        # place, so there would be nothing for reconcile to revert.)
+        ab_runner.record_trial(conn, key=key, verdict=verdict, arm_a_run_id=f"ra{i}",
+                               arm_b_run_id=f"rb{i}",
                                metrics={"A_samples": A, "B_samples": B})
     # judge_recipe promoted it on the frozen 3w1l corpus (the bug).
     assert recipe_lifecycle.get_status(conn, **key) == "promoted"
@@ -78,8 +83,8 @@ def test_reconcile_preserves_real_divergent_win(tmp_path):
                platform="sky130hd", strategy="route_relief")
     A = [_samp(5400, success=False, score=0.0, iters=None)]   # control: route timeout
     B = [_samp(37, success=True, score=0.9)]                  # relief: signs off
-    ab_runner.record_trial(conn, key=key, verdict="win", arm_a_run_id=None,
-                           arm_b_run_id=None, metrics={"A_samples": A, "B_samples": B})
+    ab_runner.record_trial(conn, key=key, verdict="win", arm_a_run_id="ra",
+                           arm_b_run_id="rb", metrics={"A_samples": A, "B_samples": B})
     assert recipe_lifecycle.get_status(conn, **key) == "promoted"
     out = reconcile_ab_verdicts.reconcile(conn)
     assert out["verdicts_flipped"] == []

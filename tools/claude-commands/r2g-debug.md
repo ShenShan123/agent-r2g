@@ -252,6 +252,25 @@ linkage, `L1/L2/L3` per-move, `K3` per-platform stall). Each below is a *lead* �
 - **Capped candidates re-planning after judge-v2 / `cand=` dropping at drain start** — EXPECTED (one fresh v2 round; `park_nondivergent` heals guaranteed-inconclusive rows to `parked`), not a runaway.
 - **Same strategy re-applied on the same design across sessions** — dead-fix gate off/bypassed (`dead_here` after ≥`R2G_FIX_DEAD_AFTER`=2 terminal fails + 0 clears; A/B arms bypass by design).
 - **`fail`/`partial` exist but `ab_trials` empty** — loop inert and lying; treat like an empty `heuristics.json`.
+- **A DECISIVE `ab_trial` with `provenance_complete=false` drove a promotion** (P0-1, #48) — an unverifiable trial (missing/identical arm run_ids) must NEVER move `recipe_status`. `judge_recipe` now excludes explicit-`false` rows; a `win`/`loss` here must not be what a promotion rests on:
+  ```bash
+  sqlite3 "$KDB" "SELECT strategy, verdict, COUNT(*) FROM ab_trials
+    WHERE verdict IN ('win','loss') AND json_extract(metrics_json,'\$.provenance_complete')=0
+    GROUP BY 1,2;"   # these are ignored by the judge — a promotion must rest on provenance-complete wins
+  ```
+- **A learned recipe live-ranked with NO `recipe_status` row** (P0-2 fail-open, #48) — every concrete recipe key in heuristics.json MUST be rostered; `filter_promoted` now FAILS CLOSED on an absent row (pre-fix it fail-opened to `promoted`), so an unrostered key is silently dropped from live ranking. Coverage MUST be complete (0):
+  ```bash
+  python3 - "$KDB" r2g-skills/signoff-loop/knowledge/heuristics.json <<'PY'
+  import sys, json, sqlite3
+  sys.path.insert(0, 'r2g-skills/signoff-loop/knowledge')
+  import recipe_lifecycle
+  conn = sqlite3.connect(sys.argv[1]); heur = json.load(open(sys.argv[2]))
+  miss = recipe_lifecycle.unrostered_keys(conn, heur)
+  print('unrostered recipe keys:', len(miss), '(MUST be 0)'); print(miss[:5])
+  PY
+  ```
+  If non-zero: a `learn()` enqueue crashed/partialed — re-run `learn_heuristics.py` off the committed db (idempotent `ensure_rostered` closes the gap).
+- **A/B arms that inherited the subject's POST-repair `config.mk`** (P0-3, #48) — arms now strip the `# >>> r2g signoff-fix (auto) >>>` block at materialization and stamp `baseline_config_sha` on the ledger entry. A trial whose two arms share a treated baseline (the candidate recipe already applied in BOTH) ties `inconclusive`; spot-check a fresh arm's `constraints/config.mk` carries no auto-block.
 - **Fmax `status='error'`** where a fallback was possible (null floorplan slack → post-place) — a bug, not honest `unconstrained`/`inconclusive`.
 - **`antenna_nonconverged` terminal verdicts** — honest negative evidence, NOT a hang or a fixer bug (#36): after 2 non-improving antenna iterations the loop STOPS, `reports/antenna_nonconverged.json` persists {residual_count, strategies_tried}, later sessions auto-exclude the proven-futile strategies (ingested `no_change`). Retry only deliberately via `R2G_FIX_RETRY_NONCONVERGED=1` (e.g. after a toolchain update); the marker self-clears on a CLEAN check. The alarm is the OPPOSITE: the same antenna strategy re-burning full reflows across sessions means the marker isn't being written/read.
 - **A fix's config edit that seemingly "didn't take"** — resume semantics (#35): config.mk is NOT a make prerequisite, so fix iterations now resume from the strategy's `rerun_from` with `make clean_<stage>` first (stage-scoped rebuild is the DEFAULT, downstream rebuilds via the odb chain). `R2G_FIX_FULL_REFLOW=1` only for an edit affecting a stage EARLIER than the declared `rerun_from`; `R2G_RESUME_NO_CLEAN=1` is pure crash-resume (unchanged config, e.g. finish-stage GDS resume) — never for applying an edit.
@@ -278,6 +297,7 @@ Closed only when ALL hold — show the SQL/output for each:
 - **Synth-only parity** (only when `flow_scope='synth_only'` rows exist): `python3 r2g-skills/rtl-acquire/scripts/knowledge/project_frontend_diagnosis.py --check "$KDB"` exits 0.
 - **Both DBs agree:** `python3 tools/check_db_integrity.py --platform "$PLATFORM"` exits 0. Explain any residual WARN (why it's not a live writer bug).
 - **Every ledger-clean is signoff-backed** (the blind spot the DBs can't see): `python3 tools/check_ledger_signoff_backed.py --platform "$PLATFORM"` with **`fabricated == 0`**.
+- **Recipe-lifecycle coverage (P0-2, #48):** `recipe_lifecycle.unrostered_keys(conn, heur)` is EMPTY — every learned recipe has a lifecycle row, so the fail-closed `filter_promoted` never silently drops a live recipe. And no promotion rests on a `provenance_complete=false` decisive trial (P0-1). (Recipe-lifecycle audit 2026-07-14; failure-patterns #48, Patterns 17-21.)
 - **Failure learning:** `fix_events`/`fix_trajectories` captured attempts incl. `abandoned`/`failed`. A **loss** verdict is closure evidence too (the judge got real signal and withheld promotion).
 - **Success learning + promotion:** ≥1 recipe `candidate → promoted` **on `$PLATFORM`**, backed by an `ab_trials` row whose arms diverged (v2 `metrics_json`: decisive `reason`, per-sample `judged_on` naming the recipe's symptom):
 

@@ -17,7 +17,12 @@ from __future__ import annotations
 import datetime as _dt
 import json
 
-GRANDFATHERED = "promoted"   # absent-row default
+GRANDFATHERED = "promoted"   # absent-row default for the STATIC cold-start path
+# Fail-closed marker for the LEARNED (indexed-recipe) path: a strategy present in
+# heuristics.json with NO recipe_status row means its candidate enqueue never landed
+# (a crashed/partial learn rebuild) — so it is UNVALIDATED, not grandfathered-live
+# (P0-2, failure-patterns #48, 2026-07-14). filter_promoted treats it as non-promoted.
+UNROSTERED = "unrostered"
 
 # Strategies whose A/B arms CANNOT diverge (no real edit applied): arm A and arm B
 # do byte-identical work, so every trial is guaranteed-inconclusive and burns a full
@@ -106,12 +111,17 @@ def enqueue_candidate(conn, *, provenance: str = "manual_revalidate",
     return True
 
 
-def get_status(conn, *, symptom_id, design_class, platform, strategy) -> str:
+def get_status(conn, *, symptom_id, design_class, platform, strategy,
+               default: str = GRANDFATHERED) -> str:
+    """Lifecycle status for a recipe key. `default` is returned when NO row exists:
+    GRANDFATHERED ('promoted') for the STATIC cold-start path (an un-A/B'd baseline
+    strategy is legitimately allowed to run on a novel symptom), UNROSTERED for the
+    LEARNED indexed-recipe path (filter_promoted passes it to FAIL CLOSED — P0-2)."""
     row = conn.execute(
         "SELECT status FROM recipe_status WHERE symptom_id=? AND design_class=?"
         " AND platform=? AND strategy=?",
         (symptom_id, design_class, platform, strategy)).fetchone()
-    return row[0] if row else GRANDFATHERED
+    return row[0] if row else default
 
 
 def _set(conn, status, provenance, *, symptom_id, design_class, platform,
@@ -142,15 +152,54 @@ def stage_shadow(conn, *, provenance: str, **key) -> None:
 
 def filter_promoted(conn, recipe_entry: dict | None, *, symptom_id: str,
                     design_class: str, platform: str) -> dict | None:
-    """Strip non-promoted strategies from a recipe entry before live ranking."""
+    """Strip non-promoted strategies from a LEARNED (indexed) recipe entry before live
+    ranking. FAIL-CLOSED on an absent row (P0-2, failure-patterns #48, 2026-07-14):
+    every learner recipe is enqueued as a candidate by diff_and_enqueue + covered by
+    ensure_rostered, so a strategy present in heuristics with NO recipe_status row means
+    its enqueue never completed (a crashed/partial learn) — it is UNVALIDATED and must
+    not be live-trusted. Passing default=UNROSTERED (not the cold-start GRANDFATHERED)
+    is what makes the absent row strip here, closing the old fail-open where a
+    heuristics-written-but-never-enqueued recipe ranked as if promoted."""
     if not recipe_entry:
         return recipe_entry
     kept = {s: v for s, v in (recipe_entry.get("strategies") or {}).items()
             if get_status(conn, symptom_id=symptom_id, design_class=design_class,
-                          platform=platform, strategy=s) == "promoted"}
+                          platform=platform, strategy=s,
+                          default=UNROSTERED) == "promoted"}
     out = dict(recipe_entry)
     out["strategies"] = kept
     return out
+
+
+def unrostered_keys(conn, heur: dict) -> list[tuple]:
+    """Concrete (non-rollup, non-NONDIVERGENT) recipe keys present in `heur` that carry
+    NO recipe_status row — the P0-2 fail-open surface. An EMPTY list is the healthy
+    invariant: every learned recipe is rostered as at least a candidate, so
+    filter_promoted's fail-closed default never strips a recipe merely because its
+    enqueue was skipped. Used by ensure_rostered (self-heal) and the honesty CLI."""
+    have = set(conn.execute(
+        "SELECT symptom_id, design_class, platform, strategy FROM recipe_status"))
+    return [key for key, _ in _iter_keys(heur)
+            if key[3] not in NONDIVERGENT_STRATEGIES and key not in have]
+
+
+def ensure_rostered(conn, heur: dict) -> list[tuple]:
+    """P0-2 coverage self-heal (failure-patterns #48): guarantee every concrete learned
+    recipe key has a lifecycle row, so filter_promoted's fail-closed default never
+    strips a recipe just because a crashed/partial diff_and_enqueue skipped it. A
+    still-unrostered key is enqueued as a **candidate** (provenance 'learner_coverage')
+    — the fail-closed choice: unvalidated until it wins A/B, NEVER fabricated as
+    promoted. Idempotent; returns the keys it newly rostered. NONDIVERGENT strategies
+    stay out of the queue (park_nondivergent owns them)."""
+    rostered = unrostered_keys(conn, heur)
+    for key in rostered:
+        conn.execute(
+            "INSERT OR IGNORE INTO recipe_status (symptom_id, design_class, platform, "
+            "strategy, status, provenance, generation, updated_at) "
+            "VALUES (?,?,?,?,?,?,?,?)",
+            (*key, "candidate", "learner_coverage", heur.get("generation"), _now()))
+    conn.commit()
+    return rostered
 
 
 def park_nondivergent(conn) -> int:

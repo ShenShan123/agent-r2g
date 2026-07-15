@@ -2922,6 +2922,78 @@ writes `heuristics.json`/`failure_candidates.json` NEXT TO itself. Guard:
 sandbox-db manage()). If you find a gutted heuristics.json, restore with
 `git checkout -- knowledge/heuristics.json` and re-run `learn_heuristics.py` off the committed db.
 
+### 2026-07-14 recipe-lifecycle audit (failure-patterns #48 — Patterns 17-21)
+
+An external audit (`docs/superpowers/plans/2026-07-14-recipe-lifecycle-audit.md`) probed the
+promote/demote lifecycle and reproduced two P0 fail-opens, one A/B design risk, and two
+determinism/scope gaps. All five were confirmed against the live tree and fixed TDD; the committed
+store was NOT mutated (0 rows were affected — see each pattern's "why non-disruptive").
+
+**Pattern 17 — an incomplete-provenance decisive trial still PROMOTED (P0-1, fail-open).**
+`ab_runner.record_trial` stamps `provenance_complete=false` and warns loudly when a decisive
+(`win`/`loss`) trial lacks two DISTINCT arm run_ids (unverifiable evidence, #45) — but then
+`judge_recipe` counted ALL `win`/`loss` rows with no provenance filter, so the unverifiable win
+promoted the recipe anyway. **Fix:** `judge_recipe` excludes any decisive row whose
+`metrics_json.provenance_complete` is EXPLICITLY `false`; an ABSENT key is a legacy pre-#45 trial,
+grandfathered as countable (the committed store has 0 explicit-`false` rows, so no verdict moved).
+The firewall stance: `record_trial` still WRITES the honest row + warning; the judge filters at the
+consumer. Guard: `tests/test_ab_runner.py::test_incomplete_provenance_{win_does_not_promote,
+loss_does_not_demote}`. (The reconcile tests were modernized to distinct run_ids: post-#48 a
+noise-promotion needing reconcile is a provenance-COMPLETE trial with an old-judge verdict — a
+None-run_id trial never promotes in the first place, so P0-1 SUBSUMES that reconcile case.)
+
+**Pattern 18 — a missing `recipe_status` row FAIL-OPENS to promoted (P0-2, fail-open).**
+`recipe_lifecycle.get_status` returns `GRANDFATHERED='promoted'` for an absent row. That is
+load-bearing for the STATIC cold-start path (an un-A/B'd baseline strategy must run on a novel
+symptom), but the LEARNED indexed-recipe path (`filter_promoted`) inherited it too — so a recipe
+that `learn()` wrote into heuristics.json but whose candidate enqueue CRASHED (the swallow-all
+try/except after the heuristics write) ranked live as if promoted, never A/B-validated. **Fix, three
+layers:** (a) `get_status` gained a `default` param; `filter_promoted` passes `default=UNROSTERED`
+so the LEARNED path FAILS CLOSED on an absent row (the STATIC `_annotate_live_gates` path keeps the
+cold-start `promoted` default); (b) `learn()` writes heuristics ATOMICALLY (tmp+rename) and calls
+new `recipe_lifecycle.ensure_rostered(conn, heur)` after `diff_and_enqueue` to guarantee every
+concrete recipe key has a lifecycle row (a still-missing key is rostered as a CANDIDATE — never
+fabricated promoted); (c) `unrostered_keys(conn, heur)` is the coverage invariant (0 on the committed
+store — verify with it after any learn). Guards: `tests/test_recipe_lifecycle.py` (fail-closed
+filter + ensure_rostered + get_status default) and `test_learn_recipes_indexed.py::
+test_learn_rosters_every_recipe_key`.
+
+**Pattern 19 — A/B arms inherit the subject's POST-repair config (P0-3, weakened experiment).**
+`plan_arms_for_candidates` copytrees each arm from the subject dir. A previously-FIXED subject
+carries the fixer's edits in its `config.mk` auto-block (`# >>> r2g signoff-fix (auto) >>>`, written
+by `diagnose_signoff_fix.apply_edits` for every `config_edits` strategy — density_relief,
+route_relief, antenna…). Both arms then inherit the treatment: arm A is no longer a clean control and
+arm B's forced recipe may be a no-op (`_applied()`), so the trial ties `inconclusive` and the causal
+reading is lost (not a false promotion, but a lost experiment). **Fix:** `_reset_arm_config_baseline`
+strips the auto-block from each arm at materialization (canonical `BLOCK_START/END` from
+diagnose_signoff_fix, so strip and apply never drift), restoring the human-authored baseline; each
+arm re-derives its OWN edits at fix time. Each `ab_arm` ledger entry now stamps `baseline_config_sha`
+for provenance. LIMITATION: place/synth backend-abort relief writes BARE exports (not the auto-block)
+via `_apply_recipe_strategy`; those subjects self-limit (a place-fixed design no longer
+place-aborts). Guard: `tests/test_plan_arms_isolation.py::
+test_plan_arms_resets_arm_config_to_pre_recipe_baseline`.
+
+**Pattern 20 — `mean_outcome_score` collapsed multiple runs/path ORDER-DEPENDENTLY (P1-1).**
+`learn_heuristics` built `score_of = {project_path: outcome_score}` with NO `ORDER BY`, so a path with
+>1 scored run (614/1206 of the corpus) kept whichever row SQLite returned LAST — `mean_outcome_score`
+flipped with insertion order (0.1,0.9→0.9 but 0.9,0.1→0.1). **Fix:** pick the LATEST-ingested run per
+path deterministically (`ROW_NUMBER() OVER (PARTITION BY project_path ORDER BY
+julianday(ingested_at) DESC, run_id DESC)`), matching the "latest-ingested row per project is
+canonical" rule ingest/repair already follow. `mean_outcome_score` is an advisory ranking tiebreaker,
+so it self-heals on the next `learn()`. Guard: `test_learn_recipes_indexed.py::
+test_mean_outcome_score_is_deterministic_latest_run`.
+
+**Pattern 21 — the live route path can't reorder learned recipes (P1-2, documented single-strategy).**
+`diagnose_signoff_fix` `--check route` sets `recipes=None` (no `load_indexed_recipe`, no lifecycle
+filter) and `_route_strategies` emits a single static `route_relief`. This is INTENTIONAL:
+route_relief is the sole live route fix and is deliberately NOT lifecycle-stripped (demoting the only
+route fix would leave route failures unfixable), and learned route RANKING rides the
+learner→heuristics `check=orfs_stage/class=route` path, not this live reader — with one strategy
+there is nothing to reorder. **Resolution:** documented as an intentional single-strategy path PLUS a
+self-announcing guard that WARNS loudly the moment the route catalog emits >1 strategy (at which point
+indexed ranking + lifecycle filtering must be wired here like drc/lvs). Guard:
+`test_route_ab_loop.py::test_route_live_path_is_single_strategy_and_guards_growth`.
+
 ## Dataset-Extraction Silent-Value Defects (features/labels; found by the 2026-07-05 RTL2Graph audit)
 
 A new failure class: the flow completes green, the CSVs materialize, and the VALUES are

@@ -115,6 +115,42 @@ def test_record_trial_warns_on_decisive_without_run_ids(tmp_path, capsys):
     assert "unverifiable" in capsys.readouterr().err
 
 
+def test_incomplete_provenance_win_does_not_promote(tmp_path):
+    """P0-1 (failure-patterns #48, 2026-07-14): a DECISIVE `win` whose provenance is
+    incomplete (missing/identical arm run_ids -> provenance_complete=False) is
+    UNVERIFIABLE and must NOT promote. record_trial still writes the row + warns, but
+    judge_recipe excludes it, so the recipe stays 'candidate'. A later VERIFIABLE win
+    (distinct run_ids) then promotes it — proving the gate blocks only the unverifiable
+    evidence, not real wins."""
+    conn = _conn(tmp_path)
+    recipe_lifecycle.enqueue_candidate(conn, **KEY)
+    # decisive win, but no distinct run_ids -> provenance_complete stamped False
+    ab_runner.record_trial(conn, key=KEY, verdict="win", arm_a_run_id=None,
+                           arm_b_run_id=None, metrics={})
+    assert recipe_lifecycle.get_status(conn, **KEY) == "candidate"   # NOT promoted
+    # identical run_ids are equally unverifiable
+    ab_runner.record_trial(conn, key=KEY, verdict="win", arm_a_run_id="rx",
+                           arm_b_run_id="rx", metrics={})
+    assert recipe_lifecycle.get_status(conn, **KEY) == "candidate"   # still NOT promoted
+    # a genuinely verifiable win (distinct run_ids) finally promotes
+    ab_runner.record_trial(conn, key=KEY, verdict="win", arm_a_run_id="ra",
+                           arm_b_run_id="rb", metrics={})
+    assert recipe_lifecycle.get_status(conn, **KEY) == "promoted"
+
+
+def test_incomplete_provenance_loss_does_not_demote(tmp_path):
+    """P0-1 mirror: an unverifiable `loss` (no distinct run_ids) must not demote a
+    promoted recipe either — it carries no decisive weight in the corpus judge."""
+    conn = _conn(tmp_path)
+    recipe_lifecycle.enqueue_candidate(conn, **KEY)
+    ab_runner.record_trial(conn, key=KEY, verdict="win", arm_a_run_id="ra",
+                           arm_b_run_id="rb", metrics={})           # verifiable win
+    assert recipe_lifecycle.get_status(conn, **KEY) == "promoted"
+    ab_runner.record_trial(conn, key=KEY, verdict="loss", arm_a_run_id=None,
+                           arm_b_run_id=None, metrics={})           # unverifiable loss
+    assert recipe_lifecycle.get_status(conn, **KEY) == "promoted"   # unchanged
+
+
 def test_judge_both_fail_is_inconclusive_never_win(tmp_path):
     arm_a = {"is_success": False, "wall_s": 900.0, "fix_iters": None}
     arm_b = {"is_success": False, "wall_s": 100.0, "fix_iters": None}

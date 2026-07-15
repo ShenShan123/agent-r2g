@@ -87,6 +87,53 @@ def test_plan_arms_sets_arm_platform_from_ab_key(tmp_path, monkeypatch):
             f"arm {a['design']} inherited stale PLATFORM instead of ab_key: {cfg!r}"
 
 
+def test_plan_arms_resets_arm_config_to_pre_recipe_baseline(tmp_path, monkeypatch):
+    """P0-3 (recipe-lifecycle audit 2026-07-14, failure-patterns #48): a previously-FIXED
+    subject carries the fixer's auto-block in config.mk. Both A/B arms must be materialized
+    from the PRE-recipe baseline (auto-block stripped), so arm A is a clean control and
+    arm B's forced recipe is not a no-op — otherwise the trial ties inconclusive and the
+    causal reading is lost. Verify neither arm inherits the subject's post-repair
+    CORE_UTILIZATION delta, and the baseline_config_sha is stamped on the ledger arm."""
+    import re
+    from pathlib import Path
+    import ab_runner
+    import recipe_lifecycle
+    import diagnose_signoff_fix as dsf
+
+    # subject as a previously-fixed design: authored CORE_UTILIZATION=40, then density_relief
+    # lowered it to 17 IN the r2g auto-block (exactly how diagnose --apply writes it).
+    subj = tmp_path / "fixed_subject"
+    (subj / "constraints").mkdir(parents=True)
+    base = "export DESIGN_NAME = s\nexport PLATFORM = nangate45\nexport CORE_UTILIZATION = 40\n"
+    (subj / "constraints" / "config.mk").write_text(
+        dsf.apply_edits(base, {"CORE_UTILIZATION": "17"}))
+    # sanity: the subject really does carry the post-repair delta in the auto-block
+    assert "= 17" in (subj / "constraints" / "config.mk").read_text()
+
+    cand = {"symptom_id": "sym", "design_class": "logic/small", "platform": "nangate45",
+            "strategy": "density_relief"}
+    monkeypatch.setattr(recipe_lifecycle, "pending_candidates", lambda conn: [cand])
+    monkeypatch.setattr(el, "_ab_coverage_gap", lambda conn, key: False)
+    monkeypatch.setattr(el, "_symptom_check", lambda conn, sid, strat=None: "both")
+    monkeypatch.setattr(ab_runner, "plan_trial", lambda conn, **k: {
+        "designs": [{"design_name": "s", "project_path": str(subj), "cell_count": 1}],
+        "match_level": "exact"})
+
+    led = el.Ledger(tmp_path / "l.jsonl")
+    el.plan_arms_for_candidates(led, conn=None, repeats=1)
+
+    arms = [e for e in led.entries() if e.get("kind") == "ab_arm"]
+    assert {a["arm"] for a in arms} == {"A", "B"}       # both arms planned
+    for a in arms:
+        cfg = (Path(a["project_path"]) / "constraints" / "config.mk").read_text()
+        # the auto-block (and its post-repair CORE_UTILIZATION=17) is gone from BOTH arms
+        assert dsf.BLOCK_START not in cfg, f"arm {a['design']} kept the auto-block: {cfg!r}"
+        util = re.search(r"(?m)^\s*(?:export\s+)?CORE_UTILIZATION\s*=\s*(\S+)", cfg)
+        assert util and util.group(1) == "40", \
+            f"arm {a['design']} inherited post-repair util instead of baseline: {cfg!r}"
+        assert a.get("baseline_config_sha"), "arm missing baseline_config_sha provenance"
+
+
 def test_plan_arms_skips_missing_subject_dir(tmp_path, monkeypatch):
     """2026-07-03: a subject whose dir no longer exists (wiped round / clean-slate
     reset) must NOT become a ledger arm. The copytree guard `src.is_dir()` silently

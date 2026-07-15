@@ -866,6 +866,15 @@ def main(argv=None) -> int:
     # the drc/lvs report shape the indexed/symptom recipe readers assume. The static
     # route_relief strategy already carries the cold-start fix; learned ranking for
     # the route symptom rides through the learner -> heuristics, not this reader.
+    #
+    # P1-2 (recipe-lifecycle audit 2026-07-14, failure-patterns #48): this is an
+    # INTENTIONAL single-strategy live path. route_relief is the ONLY live route fix and
+    # is deliberately NOT lifecycle-stripped — demoting the sole route fix would leave
+    # route failures unfixable, so route is grandfathered/static (unlike drc/lvs, whose
+    # learned recipes ARE lifecycle-filtered). With one strategy there is no execution
+    # order to reorder, so learned RANKING is a no-op for route today. The guard just
+    # below fails LOUDLY the moment the route catalog grows past one strategy — at which
+    # point indexed ranking + lifecycle filtering MUST be wired here like drc/lvs.
     if args.check == "route":
         recipes, pooled = None, {}
         idx_recipe = None
@@ -908,6 +917,18 @@ def main(argv=None) -> int:
     plan = build_plan(drc, lvs, cfg, check=args.check, exclude=exclude, recipes=recipes,
                       tcheck=tcheck, route=route)
     _rank_plan_strategies(plan, recipes, pooled=pooled)
+    if args.check == "route" and len(plan.get("strategies", [])) > 1:
+        # P1-2 self-announcing guard (recipe-lifecycle audit 2026-07-14): the live route
+        # path is single-strategy by design (see the comment above). A route catalog that
+        # now emits >1 strategy has outgrown that assumption — learned indexed ranking +
+        # recipe-lifecycle filtering are NOT wired here, so execution order is static and
+        # a demoted route recipe would still auto-apply. Fail loudly instead of silently
+        # mis-ordering: wire load_indexed_recipe(check='orfs_stage', class='route') +
+        # filter_promoted for route before shipping a second route strategy.
+        print("WARNING: route catalog emitted >1 strategy but learned indexed ranking + "
+              "recipe-lifecycle filtering are NOT wired for the live route path (P1-2, "
+              "failure-patterns #48); route execution order is static. Wire route indexed "
+              "ranking before adding a second route strategy.", file=sys.stderr)
     attach_lessons(plan, check=args.check,
                    vclass=_current_vclass(args.check, drc, lvs), platform=plat)
     _annotate_live_gates(plan, proj, check=args.check, sid=_sid,

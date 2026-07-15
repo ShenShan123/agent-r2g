@@ -1227,6 +1227,58 @@ def _localize_arm_platform(dst: Path, platform: str) -> None:
     cfg.write_text(new, encoding="utf-8")
 
 
+def _config_sha(dst: Path) -> str | None:
+    """sha256 (12 hex) of an arm's constraints/config.mk, or None if absent — the
+    baseline-provenance stamp recorded on each ab_arm ledger entry (P0-3)."""
+    cfg = dst / "constraints" / "config.mk"
+    if not cfg.is_file():
+        return None
+    return hashlib.sha256(cfg.read_bytes()).hexdigest()[:12]
+
+
+def _reset_arm_config_baseline(dst: Path) -> str | None:
+    """Reconstruct an A/B arm's PRE-RECIPE config baseline by stripping the r2g
+    signoff-fix auto-block from its config.mk (P0-3, recipe-lifecycle audit 2026-07-14;
+    failure-patterns #48).
+
+    copytree materializes each arm from the SUBJECT project dir. When the subject is a
+    previously-FIXED design, its config.mk already carries the fixer's auto-applied edits
+    — density_relief/route_relief/antenna and every other `config_edits` strategy land in
+    the '# >>> r2g signoff-fix (auto) >>>' marked block (diagnose_signoff_fix.apply_edits).
+    Without this, BOTH arms inherit that post-repair config, so arm A is not a clean
+    control and arm B's forced recipe may already be applied (_applied() no-ops) → the
+    trial ties inconclusive and the causal reading of the verdict is lost. Stripping the
+    block restores the human-authored baseline; each arm then re-derives its OWN edits
+    (arm A free-choice, arm B rank-first) during its own fix run (reports/ is excluded so
+    the fixer always re-runs). Returns the arm config's sha256 (12 hex) AFTER reset for
+    the trial ledger, or None when there is no config.mk. Uses the CANONICAL block markers
+    from diagnose_signoff_fix (scripts/reports on sys.path at module load) so the strip and
+    the apply can never drift. NOTE: place/synth backend-abort relief writes BARE exports
+    (not the marked block) via _apply_recipe_strategy; those subjects self-limit as A/B
+    subjects (a place-fixed design no longer place-aborts) — see the audit doc."""
+    cfg = dst / "constraints" / "config.mk"
+    if not cfg.is_file():
+        return None
+    import diagnose_signoff_fix as _dsf     # scripts/reports on sys.path (module load)
+    text = cfg.read_text(encoding="utf-8")
+    out, skip = [], False
+    for ln in text.splitlines():
+        s = ln.strip()
+        if s == _dsf.BLOCK_START:
+            skip = True
+            continue
+        if s == _dsf.BLOCK_END:
+            skip = False
+            continue
+        if not skip:
+            out.append(ln)
+    body = "\n".join(out).rstrip("\n")
+    stripped = (body + "\n") if body else ""
+    if stripped != text:
+        cfg.write_text(stripped, encoding="utf-8")
+    return hashlib.sha256(stripped.encode("utf-8")).hexdigest()[:12]
+
+
 def _ab_coverage_gap(conn, key: dict) -> bool:
     """True if an A/B trial for this candidate cannot produce a decisive verdict and so
     must NOT be planned (2026-06-24 audit, bugs #1/#2). Two cases: (1) the strategy
@@ -1464,6 +1516,13 @@ def plan_arms_for_candidates(led: Ledger, conn, *, n_ab_designs: int = 2,
                         # period_relax's SDC edit) actually take effect, not the subject's
                         # failing-period SDC (2026-06-25 SDC-pinning fix).
                         _localize_arm_sdc(dst)
+                        # P0-3 (recipe-lifecycle audit 2026-07-14, failure-patterns #48):
+                        # strip the subject's r2g signoff-fix auto-block so BOTH arms start
+                        # from the human-authored PRE-recipe baseline. Otherwise a
+                        # previously-fixed subject makes arm A a treated (not control) arm
+                        # and arm B's forced recipe a no-op, collapsing the trial to an
+                        # uninformative tie. Each arm re-derives its own edits at fix time.
+                        _reset_arm_config_baseline(dst)
                     # Pin the arm's config.mk PLATFORM to the TRIAL's platform on EVERY plan
                     # (idempotent, guarded on dst.is_dir() so it also corrects an ALREADY-
                     # materialized arm whose config.mk carries a stale prior-round PLATFORM).
@@ -1485,6 +1544,12 @@ def plan_arms_for_candidates(led: Ledger, conn, *, n_ab_designs: int = 2,
                                  "arm": arm, "strategy": key["strategy"], "repeat": r,
                                  "check": check,
                                  "ab_key": key, "match_level": trial["match_level"]}
+                    # P0-3 auditability: the arm's baseline (auto-block-stripped) config
+                    # sha, so a trial's provenance shows both arms started from the same
+                    # pre-recipe baseline (the audit's baseline_config_hash recommendation).
+                    _cfg_sha = _config_sha(dst)
+                    if _cfg_sha:
+                        arm_entry["baseline_config_sha"] = _cfg_sha
                     if d_pin_target:
                         arm_entry["pin_perimeter_target"] = d_pin_target
                     led.add(arm_entry)

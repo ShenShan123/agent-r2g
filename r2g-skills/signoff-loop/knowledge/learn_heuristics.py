@@ -429,10 +429,11 @@ def _indexed_recipes(trajectories: list[dict],
     '*' pooled rollups at each relaxation level. Strategy counts mirror
     _recipes_from_trajectories semantics (cleared/win/no_change/regression).
 
-    score_of maps project_path -> the run's dense outcome_score (Win 1). Each
-    strategy accrues a `mean_outcome_score` over the runs whose fix episodes used
-    it — the tiebreaker fix_model ranks on WITHIN equal clean-rate. Absent
-    (legacy DB / no scored runs) -> the field is omitted and ranking is unchanged."""
+    score_of maps project_path -> the LATEST-ingested run's dense outcome_score (Win 1;
+    P1-1 made the per-path collapse deterministic). Each strategy accrues a
+    `mean_outcome_score` over the runs whose fix episodes used it — the tiebreaker
+    fix_model ranks on WITHIN equal clean-rate. Absent (legacy DB / no scored runs) ->
+    the field is omitted and ranking is unchanged."""
     score_of = score_of or {}
 
     def _node():
@@ -539,10 +540,22 @@ def learn(db_path: Path | str,
     # Win 1: per-run dense reward, joined into recipes as a ranking tiebreaker.
     # NULL-filtered so legacy/unscored runs simply don't contribute (neutral); bench
     # runs excluded (Win 3).
+    # P1-1 (recipe-lifecycle audit 2026-07-14, failure-patterns #48): a project_path with
+    # MULTIPLE scored runs (614/1206 of the corpus) must collapse DETERMINISTICALLY. The
+    # old bare dict comprehension kept whichever row SQLite returned LAST (no ORDER BY),
+    # so mean_outcome_score flipped with insertion order (0.1,0.9 -> 0.9 but 0.9,0.1 ->
+    # 0.1). Pick the LATEST-INGESTED run per project_path (julianday parses both the "Z"
+    # and numeric-offset ingested_at regimes; run_id DESC breaks ties) — the same
+    # "latest-ingested row per project is canonical" rule ingest/repair already follow.
     score_of = {r[0]: r[1] for r in conn2.execute(
-        "SELECT project_path, outcome_score FROM runs "
-        "WHERE project_path IS NOT NULL AND outcome_score IS NOT NULL "
-        "AND COALESCE(is_bench, 0) = 0")}
+        "SELECT project_path, outcome_score FROM ("
+        "  SELECT project_path, outcome_score, ROW_NUMBER() OVER ("
+        "    PARTITION BY project_path "
+        "    ORDER BY julianday(ingested_at) DESC, run_id DESC) AS rn "
+        "  FROM runs "
+        "  WHERE project_path IS NOT NULL AND outcome_score IS NOT NULL "
+        "  AND COALESCE(is_bench, 0) = 0"
+        ") WHERE rn = 1")}
     gen = _bump_generation(conn2)
     conn2.close()
     for (fam, plat), recipes in _recipes_from_trajectories(trajectories).items():
@@ -563,7 +576,13 @@ def learn(db_path: Path | str,
         "recipes": _indexed_recipes(trajectories, class_of, score_of),
     }
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    # Atomic write (2026-07-14): tmp + rename so a crash mid-write never leaves a
+    # truncated heuristics.json (the fix path degrades to cold-start on a corrupt file,
+    # but a clean swap is strictly better and keeps the on-disk recipe set consistent
+    # with the recipe_status rows the enqueue below writes).
+    tmp_path = out_path.with_name(out_path.name + ".tmp")
+    tmp_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    tmp_path.replace(out_path)
 
     # Tier −1 Gate A: enqueue new/changed recipes as A/B candidates so the
     # shadow→candidate→promoted lifecycle fires on EVERY learner rebuild, not only
@@ -575,6 +594,12 @@ def learn(db_path: Path | str,
             lc = knowledge_db.connect(db_path)
             try:
                 recipe_lifecycle.diff_and_enqueue(lc, data, prev=prev_heur)
+                # P0-2 coverage self-heal (failure-patterns #48): guarantee EVERY
+                # concrete recipe key has a lifecycle row. filter_promoted now FAILS
+                # CLOSED on an absent row, so a recipe a crashed/partial enqueue skipped
+                # would otherwise be silently dropped from live ranking — ensure_rostered
+                # rosters it as an (unvalidated) candidate instead. Idempotent.
+                recipe_lifecycle.ensure_rostered(lc, data)
             finally:
                 lc.close()
         except Exception as exc:                       # pragma: no cover - guard

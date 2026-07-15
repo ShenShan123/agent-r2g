@@ -428,11 +428,25 @@ def judge_recipe(conn, *, symptom_id: str, design_class: str, platform: str,
     key = dict(symptom_id=symptom_id, design_class=design_class,
                platform=platform, strategy=strategy)
     rows = conn.execute(
-        "SELECT verdict FROM ab_trials WHERE symptom_id=? AND design_class=? AND "
-        "platform=? AND strategy=?",
+        "SELECT verdict, metrics_json FROM ab_trials WHERE symptom_id=? AND "
+        "design_class=? AND platform=? AND strategy=?",
         (symptom_id, design_class, platform, strategy)).fetchall()
-    wins = sum(1 for (v,) in rows if v == "win")
-    losses = sum(1 for (v,) in rows if v == "loss")
+    # P0-1 (failure-patterns #48, 2026-07-14): a DECISIVE trial whose metrics stamp
+    # provenance_complete EXPLICITLY False cannot be traced back to two DISTINCT arm
+    # runs (missing/identical run_ids — failure-patterns #45), so its win/loss is
+    # UNVERIFIABLE and must NOT drive a lifecycle transition. record_trial still WRITES
+    # the row (honest history + the loud warning) — the firewall is "record the truth,
+    # filter at the consumer" — but the judge excludes it HERE. An ABSENT
+    # provenance_complete key is a legacy pre-#45 trial, grandfathered as countable so
+    # the committed corpus's verdicts stay stable (0 rows are explicitly False today).
+    def _verifiable(mj) -> bool:
+        try:
+            m = json.loads(mj) if mj else {}
+        except (TypeError, ValueError):
+            return True
+        return m.get("provenance_complete") is not False
+    wins = sum(1 for v, mj in rows if v == "win" and _verifiable(mj))
+    losses = sum(1 for v, mj in rows if v == "loss" and _verifiable(mj))
     if wins > losses:
         recipe_lifecycle.promote(conn, evidence=f"ab_corpus:{wins}w{losses}l", **key)
         return "promoted"

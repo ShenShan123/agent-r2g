@@ -16,6 +16,39 @@ import learn_heuristics
 import recipe_lifecycle
 
 
+def test_route_live_path_is_single_strategy_and_guards_growth(tmp_path, monkeypatch, capsys):
+    """P1-2 (recipe-lifecycle audit 2026-07-14, failure-patterns #48): the live route
+    diagnosis path is INTENTIONALLY single-strategy (route_relief is the sole live route
+    fix and is never lifecycle-stripped), so the normal case emits NO P1-2 warning. If the
+    route catalog ever grows past one strategy, a LOUD guard fires because learned indexed
+    ranking + recipe-lifecycle filtering are not wired for the live route path."""
+    import diagnose_signoff_fix as dsf
+    proj = tmp_path / "rproj"
+    (proj / "constraints").mkdir(parents=True)
+    (proj / "reports").mkdir(parents=True)
+    (proj / "constraints" / "config.mk").write_text(
+        "export PLATFORM = sky130hd\nexport CORE_UTILIZATION = 45\n")
+    (proj / "reports" / "route.json").write_text(
+        json.dumps({"status": "fail", "total_violations": 100}))
+    # isolate from the real knowledge store: the live-gate annotator connects to it, and
+    # that is orthogonal to P1-2's route-catalog guard.
+    monkeypatch.setattr(dsf, "_annotate_live_gates", lambda plan, *a, **k: plan)
+
+    # normal case: exactly one live route strategy -> no P1-2 warning
+    assert dsf.main([str(proj), "--check", "route", "--list"]) == 0
+    assert "P1-2" not in capsys.readouterr().err
+
+    # grown catalog: >1 route strategy -> the self-announcing guard fires
+    monkeypatch.setattr(dsf, "_route_strategies", lambda cfg, exclude, to_floor=False: [
+        {"id": "route_relief", "config_edits": {"CORE_UTILIZATION": "40"},
+         "rerun_from": "floorplan", "recheck": "route", "auto_apply": True, "rationale": "x"},
+        {"id": "route_relief_v2", "config_edits": {"CORE_UTILIZATION": "35"},
+         "rerun_from": "floorplan", "recheck": "route", "auto_apply": True, "rationale": "y"}])
+    assert dsf.main([str(proj), "--check", "route", "--list"]) == 0
+    err = capsys.readouterr().err
+    assert "route catalog emitted >1 strategy" in err and "P1-2" in err
+
+
 def _mk_route_project(tmp_path: Path, name: str) -> Path:
     """A sky130hd design that aborted at route (timeout) and whose fix_log records
     a CLEARED route_relief episode -> ingest stores the route symptom + a fix_event
