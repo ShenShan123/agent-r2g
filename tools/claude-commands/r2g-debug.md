@@ -1,5 +1,5 @@
 ---
-description: Drive an RTL→GDS sign-off campaign on an ORFS platform (default sky130hd — genuinely clean-able KLayout DRC + Netgen LVS + RCX; sky130hs equally clean-able since 2026-07-09 via the bundled sibling-DRC-deck + .lyt lefdef repairs; nangate45/asap7/gf180/ihp also work) in parallel waves, hunt r2g-skills bugs, and prove the engineer-learning-loop is closed (DRC/LVS clean where the deck allows + best Fmax + promoted recipes). Also independently VERIFIES the RTL→Graph dataset conversion across three dimensions — topology (5 PyG views b–f), feature statistics, and labels↔sign-off reports — against raw DEF/LEF/liberty/SPEF + OpenDB ground truth (opt-in PDNSim IR-drop re-run) — and AUDITS the rtl-acquire synth-only corpus supply line (flow_scope='synth_only' honesty, synth-frontend-* event parity, publish gating).
+description: Drive an RTL→GDS sign-off campaign on an ORFS platform (default sky130hd — genuinely clean-able KLayout DRC + Netgen LVS + RCX; sky130hs equally clean-able since 2026-07-09 via the bundled sibling-DRC-deck + .lyt lefdef repairs; nangate45/asap7/gf180/ihp also work) in parallel waves, hunt r2g-skills bugs, and prove the engineer-learning-loop is closed (DRC/LVS clean where the deck allows + best Fmax + promoted recipes). Also independently VERIFIES the RTL→Graph dataset conversion across three dimensions — topology (5 PyG views b–f, HeteroData by default), feature statistics, and labels↔sign-off reports — against raw DEF/LEF/liberty/SPEF + OpenDB ground truth (opt-in PDNSim IR-drop re-run) — and AUDITS the rtl-acquire synth-only corpus supply line (flow_scope='synth_only' honesty, synth-frontend-* event parity, publish gating).
 argument-hint: "[overrides, e.g. PLATFORM=sky130hd WAVE_MAX=24 WORKERS=3 NUM_CORES=4]"
 ---
 
@@ -321,6 +321,13 @@ dimensions: `r2g-skills/def-graph/references/graph-dataset.md` ("Comprehensive v
 first**). The pipeline is platform-sensitive (quoted liberty, PITCH direction, layer names, MACRO ids),
 so verify on **both sky130 and nangate45** — a bug can hide on one.
 
+**The five views are `HeteroData` by default** (2026-07-16; `R2G_GRAPH_KIND=homo` for the legacy flat
+tensors, `both` for both). The verified block-positional homogeneous `Data` is still built first as the
+source of truth (a value-preserving re-view — `graph_lib.homo_to_hetero`, exact inverse `hetero_to_homo`);
+`verify_graph_dataset.py` reconstructs homo **independently** at load and runs the full check surface on it,
+so hetero needs no separate oracle — a conversion bug fails a homo check. Don't "fix" a hetero build by
+forcing `R2G_GRAPH_KIND=homo`; that hides the default the corpus ships.
+
 **The signoff gate is now in-stage machinery, not operator convention** (2026-07-10, #34): every
 def-graph stage runs the shared `signoff_gate.py` — required fail-closed (MISSING = blocked): drc ∈
 {clean, clean_beol}, lvs ∈ {clean, skipped}, ORFS complete, route residuals 0 when provable; timing is
@@ -344,12 +351,20 @@ export OPENROAD_EXE=/proj/workarea/user5/OpenROAD-flow-scripts/tools/install/Ope
 
 `tools/verify_graph_dataset.py` is the oracle — independent CSV re-derivation (separate pandas, **not**
 `graph_lib`) + raw liberty/LEF/DEF/SPEF re-parse, in **three named check groups** (each proven to FAIL on a
-deliberate corruption by `test_verify_comprehensive.py`):
+deliberate corruption by `test_verify_comprehensive.py`) — plus a fourth **`hetero_checks`** group that runs
+only when the dataset is heterogeneous (the default):
 
 - **`topology_checks`** — all five views b–f: node/edge counts (d/e/f by the clique formula Σ C(k,2)),
-  block-positional `node_name` order (pin block included), the `[fwd0,rev0,…]` fwd/rev interleaving on
-  directed + `rc_edge_*` edges, `edge_attr`==the folded entity (c=pin, d/e=gate/net, f=net), clock/reset +
-  FILL/TAP excluded. A stale pre-RC `.pt` (`edge_y` width 5, no `rc_edge_*`) FAILs loudly, never IndexErrors.
+  block-positional `node_name` order (pin block included), `edge_attr`==the folded entity (c=pin, d/e=gate/net,
+  f=net), clock/reset + FILL/TAP excluded. On a **homo** dataset it also checks the `[fwd0,rev0,…]` fwd/rev
+  interleaving on directed + `rc_edge_*` edges; on a **hetero** dataset that homo-layout guard is swapped for
+  the hetero-native equivalent — per edge-store tensor-row alignment (index/attr/type/y sliced by one column
+  tensor) + reverse-relation symmetry (`(a,rel,b)` has `(b,rel,a)` with equal count). A stale pre-RC `.pt`
+  (`edge_y` width 5, no `rc_edge_*`) FAILs loudly, never IndexErrors.
+- **`hetero_checks`** (hetero only) — per-view node types == the view's blocks, per-type tensor widths
+  (`x` 9 = graph_id+8 feats, `y`/`y_raw` 5), edge relations reference only present node types, and the
+  manifest's per-variant `hetero` node/edge-type breakdown matches the tensors. Negative controls on a
+  corrupted hetero label / `edge_attr` fail loudly (`b.y1[gate]`, `c edge_attr`).
 - **`feature_stat_checks`** — re-derives `placement_status_id`/`fanout`, bounds `num_layer`/`nearest_tap`,
   categorical vocab/enum coverage, and recomputes `features_stats.json`/`labels_stats.json` to catch a
   stale/hand-edited stats gate.
