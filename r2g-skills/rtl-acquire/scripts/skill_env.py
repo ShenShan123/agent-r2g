@@ -193,10 +193,6 @@ def knowledge_dir() -> Path:
 
 # --- path helpers (the scrubbed call-site surface) ---------------------------
 
-def skill_path(rel: str) -> Path:
-    return SKILL_DIR / rel
-
-
 def skill_reference_path(rel: str) -> Path:
     return REF_DIR / rel
 
