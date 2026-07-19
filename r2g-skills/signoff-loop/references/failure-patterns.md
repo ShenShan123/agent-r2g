@@ -4611,3 +4611,48 @@ reference here, it would REGRESS us):**
 **Lesson:** an upstream "debugged" reference is a *hypothesis*, not ground truth. Diff it subsystem-by-subsystem,
 separate genuine improvements (adopt) from its own bugs (report, never port). Where the fork already fixed a
 class of defect, aligning naively re-introduces it.
+
+### 48. Real-DEF correspondence guards went INERT — pinned RUN dirs rotted, and the oracle drifted behind a production fix (2026-07-19 /r2g-debug Step 5c)
+
+**Symptom.** `def-graph/tests/test_techlib_def_parse.py` reported "13 passed, 4 skipped" — green. The 4 skips
+were its only tests that touch a REAL DEF: the correspondence guards proving `route_segments` reproduces the
+wirelength and congestion walks. They had been skipping for months on a machine holding **3858** usable
+`6_final.def` files.
+
+**Root cause (two failures stacked).**
+1. **Pinned campaign paths rot.** The DEFs were hardcoded to `design_cases/aes_core/backend/RUN_2026-04-12_18-04-55`
+   and `cordic/backend/RUN_2026-05-17_05-58-40`. A `backend/RUN_<timestamp>/` is *campaign output* — wiped,
+   re-run and re-dated constantly (and `design_cases/` is gitignored, so CI never sees it). Both pins were
+   deleted; `pytest.skip("DEF absent (machine-local)")` fired and the suite stayed green. **The skip was
+   indistinguishable from a pass** — the exact failure `/r2g-debug` warns about ("never trust a SKIP as a pass").
+2. **The oracle drifted behind a production fix — masked by (1).** The congestion side compares against an
+   inline copy of the *pre-consolidation* congestion walk. The 2026-07-05 RECT-patch fix (defect #2 above)
+   deliberately changed `route_segments` to strip `RECT ( dx dy dx dy )` patch groups, and `route_segments`'
+   own docstring says the sky130hd behavior "intentionally *diverges* from the originals (they were wrong)".
+   Nobody updated the inline oracle — because the pins had ALREADY rotted before that fix landed, so the test
+   that would have caught the drift never ran. Re-activating the guards surfaced it immediately:
+   `NEW met1 ( 641700 522750 ) RECT ( -365 -70 0 70 )` → oracle expected the phantom point
+   `(641700, 522750, -365, -70)`, `route_segments` correctly yielded `[]`.
+
+**Not a production defect.** `extract_congestion.py` and `extract_wirelength.py` BOTH import
+`techlib.def_parse.route_segments`, so the shipped extractors were always correct; only the test's frozen
+copy encoded the old buggy semantics.
+
+**Resolution.** DEFs are now RESOLVED, never pinned (`_resolve_def`): prefer the purpose-built machine-local
+reference DEFs (`rtl2graph_verify/{aescore_sky,cordic_ng45}_*.def` — stable, one per platform family, not
+campaign output), else glob the newest built `design_cases/*/backend/RUN_*/{final,results}/6_final.def`; skip
+only when NEITHER exists. The congestion oracle gained an **independently written** RECT stripper
+(`_strip_rect_patches`, a token scan — deliberately not def_parse's single regex, so it stays a second opinion
+that disagrees if `_ROUTE_RECT_RE` ever mis-anchors). Parametrize ids corrected (they had the platforms
+backwards: it is aescore=sky130, cordic=nangate45). Result: **17 passed, 0 skipped**, both platform families
+actually exercised.
+
+**Still inert, deliberately left alone:** `test_techlib_crossplatform.py`'s baseline gate skips for the same
+reason, but *self-announces* with its remedy ("run `tools/regen_extract_baseline.sh` to restore") — the honest
+form of this bug. Its remedy is however ALSO stale: that script pins the same two deleted RUN dirs. Re-pinning
+would change a byte-for-byte baseline guarding a long-completed migration (the techlib restructure), so it is
+an explicit operator decision, not a drive-by fix.
+
+*Generalizable rule: a test input that lives under campaign output must be RESOLVED at run time, and a skip
+that can fire silently is a guard you no longer have. Prefer a loud, self-announcing skip that names its
+remedy — and re-check that the remedy still works.*

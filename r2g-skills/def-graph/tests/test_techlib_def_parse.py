@@ -7,14 +7,17 @@ currently re-implement independently. These tests:
 
   1. Pin the synthetic ``*``-relative / trailing-token / single-point / leading-``*``
      edge cases directly.
-  2. Prove byte-for-result CORRESPONDENCE on two REAL DEFs (aes_core nangate45 +
-     cordic sky130hd): per-net Manhattan wirelength recomputed via
-     ``route_segments`` must equal ``parse_def_wirelength`` exactly, and the
-     per-route-line segment sequence must equal what congestion's regex+walk
-     produces (copied inline here — the extractor itself is NOT modified).
+  2. Prove byte-for-result CORRESPONDENCE on two REAL DEFs, one per platform family
+     (aescore sky130 + cordic nangate45 — the parsers are platform-sensitive):
+     per-net Manhattan wirelength recomputed via ``route_segments`` must equal
+     ``parse_def_wirelength`` exactly, and the per-route-line segment sequence must
+     equal what congestion's regex+walk produces (copied inline here — the extractor
+     itself is NOT modified).
 
-The real-DEF tests skip cleanly when design_cases/ is absent (it is gitignored /
-machine-local), so the suite still runs on a bare checkout.
+The real-DEF tests RESOLVE their inputs (see ``_resolve_def``) rather than pinning a
+timestamped campaign run, and skip only when neither a machine-local reference DEF nor
+any built design_cases/ run exists — so the suite still runs on a bare checkout without
+going silently inert on a machine that has plenty of DEFs.
 """
 from __future__ import annotations
 
@@ -31,8 +34,42 @@ import extract_wirelength as ewl
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-AES_DEF = REPO_ROOT / "design_cases" / "aes_core" / "backend" / "RUN_2026-04-12_18-04-55" / "results" / "6_final.def"
-CORDIC_DEF = REPO_ROOT / "design_cases" / "cordic" / "backend" / "RUN_2026-05-17_05-58-40" / "results" / "6_final.def"
+
+# Reference DEFs must be RESOLVED, never hardcoded to a timestamped run dir.
+# A backend RUN_<timestamp>/ is campaign output: it is wiped, re-run and re-dated
+# constantly, so a pinned path rots into a permanent `pytest.skip` and the guard goes
+# inert with the suite still green. That is exactly what happened here -- both pins
+# (aes_core RUN_2026-04-12, cordic RUN_2026-05-17) had been deleted, so all four
+# real-DEF correspondence tests silently skipped on a machine carrying 3858 usable
+# 6_final.def files (2026-07-19 /r2g-debug Step 5c). "Never trust a SKIP as a pass."
+#
+# Resolution order:
+#   1. the purpose-built machine-local reference DEFs (stable, one per platform family,
+#      not campaign output -- these are the Step 5c anchors)
+#   2. any built design_cases/ run, newest first (final/ is the modern layout, results/
+#      the legacy one)
+# Only a checkout with NEITHER skips.
+_VERIFY_DIR = Path("/proj/workarea/user5/rtl2graph_verify")
+
+
+def _newest_campaign_def():
+    """Newest design_cases/ 6_final.def, or None. Sorted by mtime, not by name:
+    RUN_ dirs are timestamped but designs are not comparable lexically."""
+    cands = [*REPO_ROOT.glob("design_cases/*/backend/RUN_*/final/6_final.def"),
+             *REPO_ROOT.glob("design_cases/*/backend/RUN_*/results/6_final.def")]
+    cands = [p for p in cands if p.is_file()]
+    return max(cands, key=lambda p: p.stat().st_mtime) if cands else None
+
+
+def _resolve_def(reference_name):
+    ref = _VERIFY_DIR / reference_name
+    return ref if ref.is_file() else _newest_campaign_def()
+
+
+# cordic_ng45 = nangate45, aescore_sky = sky130 -- two platform families, because the
+# parsers are platform-sensitive (layer names, PITCH direction, name escaping).
+AES_DEF = _resolve_def("aescore_sky_5_route.def")
+CORDIC_DEF = _resolve_def("cordic_ng45_5_route.def")
 
 
 # --------------------------------------------------------------------------- #
@@ -194,8 +231,34 @@ def _wirelength_via_route_segments(def_file):
 _CONG_POINT_RE = re.compile(r"\(\s*([^\s\)]+)\s+([^\s\)]+)(?:\s+[^\)]*)?\s*\)")
 
 
+def _strip_rect_patches(line):
+    """Drop ``RECT ( dx dy dx dy )`` patch groups — independently of def_parse.
+
+    Written as a token scan rather than def_parse's single regex so this stays a real
+    second opinion: if ``_ROUTE_RECT_RE`` ever mis-anchors, this disagrees and the
+    correspondence test fails.
+
+    This models the CURRENT contract. The pre-2026-07-05 oracle below had no RECT
+    handling at all, so it read the patch offsets as an absolute routing point — the
+    defect that inflated RECT-bearing nets ~100-400x. sky130hd DEFs carry RECT groups;
+    nangate45 DEFs do not, which is why the divergence only ever showed on sky130.
+    """
+    toks = line.split()
+    out, i = [], 0
+    while i < len(toks):
+        if toks[i] == "RECT" and i + 5 < len(toks) and toks[i + 1] == "(":
+            body = toks[i + 2:i + 6]
+            closes = toks[i + 6] == ")" if i + 6 < len(toks) else False
+            if closes and all(re.fullmatch(r"-?\d+", t) for t in body):
+                i += 7          # skip RECT ( a b c d )
+                continue
+        out.append(toks[i])
+        i += 1
+    return " ".join(out)
+
+
 def _congestion_segments_for_line(line):
-    points = _CONG_POINT_RE.findall(line)
+    points = _CONG_POINT_RE.findall(_strip_rect_patches(line))
     if len(points) < 2:
         return []
     out = []
@@ -259,14 +322,14 @@ def _iter_def_route_lines(def_file):
 @pytest.mark.parametrize(
     "def_path",
     [
-        pytest.param(AES_DEF, id="aes_core-nangate45"),
-        pytest.param(CORDIC_DEF, id="cordic-sky130hd"),
+        pytest.param(AES_DEF, id="aescore-sky130"),
+        pytest.param(CORDIC_DEF, id="cordic-nangate45"),
     ],
 )
 def test_route_segments_matches_wirelength_per_net(def_path):
     """route_segments reproduces parse_def_wirelength's per-net length, exactly."""
-    if not def_path.is_file():
-        pytest.skip(f"DEF absent (machine-local): {def_path}")
+    if def_path is None or not def_path.is_file():
+        pytest.skip("no reference DEF and no built design_cases/ run (machine-local)")
 
     expected_wl, _net_types, _name = ewl.parse_def_wirelength(str(def_path))
     actual_wl = _wirelength_via_route_segments(str(def_path))
@@ -292,14 +355,14 @@ def test_route_segments_matches_wirelength_per_net(def_path):
 @pytest.mark.parametrize(
     "def_path",
     [
-        pytest.param(AES_DEF, id="aes_core-nangate45"),
-        pytest.param(CORDIC_DEF, id="cordic-sky130hd"),
+        pytest.param(AES_DEF, id="aescore-sky130"),
+        pytest.param(CORDIC_DEF, id="cordic-nangate45"),
     ],
 )
 def test_route_segments_matches_congestion_segment_sequence(def_path):
     """Per-route-line segment sequence equals congestion's regex+walk output."""
-    if not def_path.is_file():
-        pytest.skip(f"DEF absent (machine-local): {def_path}")
+    if def_path is None or not def_path.is_file():
+        pytest.skip("no reference DEF and no built design_cases/ run (machine-local)")
 
     lines_seen = 0
     seg_lines = 0
