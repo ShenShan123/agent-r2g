@@ -239,16 +239,31 @@ def promote_one(design: str, *, out_root: Path, base_dir: Path, args,
     manifest = {str(e.get("path")): e.get("sha256")
                 for e in (meta.get("source_manifest") or []) if e.get("sha256")}
     if manifest:
+        # COVERAGE first (2026-07-19 audit P0-R4, failure-patterns #52): the loop
+        # below used to digest only files the manifest happened to mention and
+        # then stamp source_bytes_verified=True regardless. A real 5-file
+        # eth_rxethmac candidate supplied with a 1-file manifest therefore
+        # promoted with source_bytes_verified=true and rtl_file_count=5 — four
+        # files free to change while the result positively claimed full
+        # verification. A partial proof is not a proof: require an entry for
+        # EVERY rtl_file before any per-file comparison is meaningful.
+        uncovered = [str(p) for p in rtl_files if str(p) not in manifest]
+        if uncovered:
+            result["status"] = "source_manifest_incomplete"
+            result["reason"] = (
+                f"source_manifest_incomplete: {len(uncovered)} of {len(rtl_files)} "
+                f"rtl_files have no manifest digest (e.g. {uncovered[:2]}); "
+                f"re-expand to regenerate a complete manifest before promoting")
+            return result
         changed = []
         for p in rtl_files:
-            want = manifest.get(str(p))
-            if want:
-                try:
-                    got = hashlib.sha256(p.read_bytes()).hexdigest()
-                except OSError:
-                    got = None
-                if got != want:
-                    changed.append(str(p))
+            want = manifest[str(p)]
+            try:
+                got = hashlib.sha256(p.read_bytes()).hexdigest()
+            except OSError:
+                got = None
+            if got != want:
+                changed.append(str(p))
         if changed:
             result["status"] = "rtl_bytes_changed_since_synth"
             result["reason"] = (f"rtl_bytes_changed_since_synth: {len(changed)} file(s) "
@@ -257,7 +272,27 @@ def promote_one(design: str, *, out_root: Path, base_dir: Path, args,
             return result
         result["source_bytes_verified"] = True
     else:
+        # A legacy candidate carries no manifest, so its synth-proven bytes cannot
+        # be reconstructed at all. Recording that honestly is not the same as
+        # ENFORCING it (2026-07-19 audit P0-R6): promotion used to continue
+        # straight into project creation and vendoring with the false stamp, so an
+        # automatic campaign could publish a design whose provenance is
+        # unknowable. Block by default and offer a logged operator override, which
+        # is exactly how the license gate already fails closed on legacy
+        # 'unknown' candidates.
         result["source_bytes_verified"] = False   # legacy candidate: honest stamp
+        if not getattr(args, "allow_unverified_source", False):
+            result["status"] = "source_manifest_missing"
+            result["reason"] = (
+                "source_manifest_missing: legacy candidate has no synth-time "
+                "source_manifest, so its proven bytes cannot be reconstructed; "
+                "re-expand it, or pass --allow-unverified-source to promote "
+                "anyway (the unverified stamp is kept in every downstream manifest)")
+            return result
+        result["source_verification_override"] = "operator:--allow-unverified-source"
+        print(f"WARNING: {design}: promoting with UNVERIFIED source bytes "
+              f"(no synth-time manifest) per --allow-unverified-source; "
+              f"source_bytes_verified=false is retained downstream", file=sys.stderr)
     synth_cfg = parse_synth_config(Path(str(meta.get("design_config") or "")))
     # Unconstrained-clock gate (2026-07-16 full-pipeline issue 5): a SEQUENTIAL
     # design falling back to a virtual clock has meaningless setup/hold labels
@@ -413,6 +448,11 @@ def main() -> int:
     ap.add_argument("--require-publish-eligible", action="store_true",
                     help="additionally gate on the publish-eligibility CSV")
     ap.add_argument("--publish-eligible-csv", type=Path, default=None)
+    ap.add_argument("--allow-unverified-source", action="store_true",
+                    help="promote a legacy candidate that has no synth-time "
+                         "source_manifest (its proven bytes cannot be "
+                         "reconstructed); source_bytes_verified=false is kept in "
+                         "every downstream manifest. Operator recovery only.")
     ap.add_argument("--force", action="store_true",
                     help="overwrite an existing promoted project's constraints")
     ap.add_argument("--run", action="store_true",

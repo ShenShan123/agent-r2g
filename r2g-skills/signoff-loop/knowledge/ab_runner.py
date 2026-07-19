@@ -558,6 +558,16 @@ def judge_recipe(conn, *, symptom_id: str, design_class: str, platform: str,
     Returns the new status, or None when left unchanged."""
     key = dict(symptom_id=symptom_id, design_class=design_class,
                platform=platform, strategy=strategy)
+    # A PARKED recipe is never judgeable (2026-07-19 audit P0-N1,
+    # failure-patterns #52). 'parked' means precisely "the A/B harness cannot
+    # differentiate this strategy's arms", so ANY decisive verdict carrying its
+    # key is spurious by construction — typically a trial planned before the
+    # park that outlived it. Leaving the corpus unread here (rather than only
+    # blocking promote) also stops such a trial from demoting or re-opening the
+    # row. record_trial still writes the trial: honest history, filtered at the
+    # consumer — the same firewall the provenance filter below uses.
+    if recipe_lifecycle.get_status(conn, default="", **key) == "parked":
+        return None
     rows = conn.execute(
         "SELECT verdict, metrics_json, arm_a_run_id, arm_b_run_id, trial_id "
         "FROM ab_trials WHERE symptom_id=? AND "

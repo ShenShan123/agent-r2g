@@ -240,17 +240,25 @@ def park_nondivergent(conn) -> int:
     the top of every drain, so a store that predates the enqueue filter converges
     without a manual migration). NOT a demotion: 'parked' records only that the
     A/B harness cannot differentiate the strategy's arms; the strategy itself stays
-    in the static catalog. Returns the number of rows parked."""
+    in the static catalog. Returns the number of rows parked.
+
+    Routes through _set() rather than a bulk UPDATE (2026-07-19 audit P0-N1,
+    failure-patterns #52): parking IS a lifecycle transition, so it must bump
+    status_version like every other one. A raw UPDATE left the version frozen,
+    which silently disarmed the plan/judge staleness handshake — a trial planned
+    while the row was still 'candidate' kept looking current across the park, so
+    a late win could re-promote the very recipe we parked as un-A/B-able."""
     if not NONDIVERGENT_STRATEGIES:
         return 0
     ph = ",".join("?" for _ in NONDIVERGENT_STRATEGIES)
-    cur = conn.execute(
-        f"UPDATE recipe_status SET status='parked', "
-        f"provenance='nondivergent_no_real_edit', updated_at=? "
-        f"WHERE status='candidate' AND strategy IN ({ph})",
-        (_now(), *sorted(NONDIVERGENT_STRATEGIES)))
-    conn.commit()
-    return cur.rowcount
+    rows = conn.execute(
+        f"SELECT symptom_id, design_class, platform, strategy FROM recipe_status"
+        f" WHERE status='candidate' AND strategy IN ({ph})",
+        tuple(sorted(NONDIVERGENT_STRATEGIES))).fetchall()
+    for sid, dclass, plat, strat in rows:
+        _set(conn, "parked", "nondivergent_no_real_edit",
+             symptom_id=sid, design_class=dclass, platform=plat, strategy=strat)
+    return len(rows)
 
 
 def pending_candidates(conn) -> list[dict]:

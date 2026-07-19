@@ -224,9 +224,21 @@ def build_feature_views(feature_root: str, graph_key: str):
 # --- Label loading + per-entity value builders --------------------------------
 
 def load_label_df(label_root: str, file_name: str) -> pd.DataFrame:
+    """An ABSENT label file yields an empty frame, not an exception
+    (failure-patterns.md #52; 2026-07-19 audit P0-N4).
+
+    Raising here made a failed label extraction surface as an uncaught
+    FileNotFoundError traceback from the graph builder AND the verifier — which
+    reads as a graph-builder or design defect, when the real event was one
+    extractor dying upstream. Worse, it produced NO manifest at all, so nothing
+    machine-readable recorded why the build stopped. Degrading to an empty frame
+    routes the gap through the existing honesty projection instead: label_health
+    reports the file 'missing', the y slot is all-NaN like any other unusable
+    label, and the manifest status drops to 'ok_with_label_gaps'. Fail-soft, but
+    LOUD — the same contract the label builders already follow."""
     path = os.path.join(label_root, file_name)
     if not os.path.isfile(path):
-        raise FileNotFoundError(f"label file not found: {path}")
+        return pd.DataFrame()
     return pd.read_csv(path)
 
 
@@ -246,7 +258,8 @@ _LABEL_KEY_COLS = {
 }
 
 
-def label_health(label_dfs: dict[str, pd.DataFrame], design_key: str) -> dict[str, dict]:
+def label_health(label_dfs: dict[str, pd.DataFrame], design_key: str,
+                 label_root: str | None = None) -> dict[str, dict]:
     """Per-label-file usability check, mirroring what build_*_label_values
     silently require before joining. The builders deliberately stay fail-soft
     (a broken label file yields NaN y, never a crashed graph build) — this
@@ -256,7 +269,16 @@ def label_health(label_dfs: dict[str, pd.DataFrame], design_key: str) -> dict[st
     health: dict[str, dict] = {}
     for spec in LABEL_SPECS:
         df = label_dfs[spec["file"]]
-        if "Design" not in df.columns:
+        # An ABSENT file is its own diagnosis (P0-N4): reporting it as "no
+        # 'Design' column — raw/unprocessed csv?" would send an operator hunting
+        # a format bug in a file that was never written, when the real event is
+        # upstream (run_labels.sh quarantined a failed extractor's target).
+        if label_root is not None and not os.path.isfile(
+                os.path.join(label_root, spec["file"])):
+            status, reason = "missing", (
+                f"{spec['file']} not present in {label_root} — extractor failed or "
+                f"never ran (see labels/*.log and reports/labels_stats.json)")
+        elif "Design" not in df.columns:
             status, reason = "unusable", (
                 f"no 'Design' column — raw/unprocessed csv? (columns: {list(df.columns)[:6]})")
         elif spec["column"] not in df.columns:

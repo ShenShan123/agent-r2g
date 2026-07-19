@@ -181,8 +181,18 @@ def _check_journal_and_crossdb(con, results, platform):
     # Severity stays WARN (never ALARM): the journal is a best-effort, gitignored
     # ledger, so gating a wave driver / CI on it would trade this alarm-fatigue
     # failure for a worse one.
+    # Order by INSTANT, never by string (failure-patterns.md #52; 2026-07-19 audit
+    # P1-N2). The journal mixes timestamp regimes at scale -- this store holds
+    # ~42k 'Z' rows beside ~14k '+HH:MM' offset rows -- and a lexical compare
+    # silently inverts them: '2026-07-18T10:00:00+08:00' (02:00Z) sorts ABOVE
+    # '2026-07-18T03:00:00Z' (03:00Z), so a resolving action that is really OLDER
+    # than the dangle looks newer and the dangle is written off as re-ingest
+    # residue. That hides a live writer failure behind the benign class -- the
+    # exact distinction this check exists to draw. julianday() normalizes both
+    # regimes to one instant scale; the ORIGINAL ts is still carried for display.
     dangling_rows = con.execute("""
-        SELECT a.run_id, a.project_path, MAX(a.ts) AS last_ts
+        SELECT a.run_id, a.project_path, a.ts AS last_ts,
+               MAX(julianday(a.ts)) AS last_j
           FROM j.actions a
           LEFT JOIN runs r ON r.run_id = a.run_id
          WHERE a.run_id IS NOT NULL AND r.run_id IS NULL
@@ -191,16 +201,24 @@ def _check_journal_and_crossdb(con, results, platform):
         results.append(("PASS", "J4", "no journal run_id dangles -- every linked action resolves to a run"))
     else:
         # Newest RESOLVING action per project -- the re-ingest recovery signal.
-        resolved_ts = {p: t for p, t in con.execute("""
-            SELECT a.project_path, MAX(a.ts) FROM j.actions a
+        resolved_j = {p: j for p, j in con.execute("""
+            SELECT a.project_path, MAX(julianday(a.ts)) FROM j.actions a
               JOIN runs r ON r.run_id = a.run_id
              GROUP BY a.project_path""").fetchall()}
         gone = reingest = unexplained = 0
         leads = []
-        for _run_id, proj, last_ts in dangling_rows:
+        for _run_id, proj, last_ts, last_j in dangling_rows:
+            rec_j = resolved_j.get(proj)
             if not Path(proj).is_dir():
                 gone += 1                      # project wiped/renamed -> frozen history
-            elif (resolved_ts.get(proj) or "") >= (last_ts or ""):
+            elif last_j is None or rec_j is None:
+                # An unparseable ts cannot be ordered, so it cannot be EXPLAINED
+                # either. Fail toward the lead: a silent 'residue' on a timestamp
+                # we could not read is exactly the false-clean this check exists
+                # to prevent.
+                unexplained += 1
+                leads.append(proj)
+            elif rec_j >= last_j:
                 # >= not >: journal ts is second-resolution, so the re-ingest that
                 # re-minted the run commonly ties the orphaned row's timestamp. A
                 # resolving action CONTEMPORANEOUS with the dangle is still proof
@@ -209,7 +227,8 @@ def _check_journal_and_crossdb(con, results, platform):
             else:
                 unexplained += 1
                 leads.append(proj)
-        newest = max((r[2] or "") for r in dangling_rows)
+        # Newest by INSTANT too, so the reported headline ts is the real latest.
+        newest = max(dangling_rows, key=lambda r: (r[3] is not None, r[3] or 0.0))[2] or ""
         verdict = (f"{unexplained} UNEXPLAINED on live projects"
                    if unexplained else "0 UNEXPLAINED -- flat residue, not a live writer bug")
         msg = (f"{len(dangling_rows)} dangling journal run_id(s): "

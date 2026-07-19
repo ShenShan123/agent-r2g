@@ -133,13 +133,43 @@ def solution_origin(*, symptom_id: str, design_class: str, platform: str,
             "SELECT status, provenance FROM recipe_status WHERE symptom_id=? "
             "AND design_class=? AND platform=? AND strategy=?",
             (symptom_id, design_class, platform, strategy)).fetchone()
+        # Scope evidence by the FULL lifecycle key, exactly like recipe_status
+        # above (failure-patterns.md #52; 2026-07-19 audit P1-N1). These queries
+        # used to match on symptom_id + strategy alone, so a trace for
+        # (S, logic/small, nangate45, density_relief) silently absorbed a
+        # sky130hd/cpu-large loss and a sky130hd repair episode as if they were
+        # this key's own history. density_relief alone spans 44 lifecycle keys
+        # across 9 symptoms and 22 domains, so the mixing is the normal case, not
+        # a corner. Ranking never consumed this, but operator/Agent explanations
+        # and audit evidence did -- and a trace that cannot be trusted is worse
+        # than no trace.
+        #
+        # Cross-domain evidence is still genuinely useful here (this skill's whole
+        # premise is that a fix learned on nangate45 transfers to sky130hd), so it
+        # is RETAINED -- but under `transfer_evidence`, tagged with its own domain,
+        # never merged into the exact-key record.
         trials = _rows(kc, "SELECT trial_id, verdict, match_level, metrics_json,"
                            " ts FROM ab_trials WHERE symptom_id=? AND strategy=?"
-                           " ORDER BY trial_id", (symptom_id, strategy))
+                           " AND design_class=? AND platform=?"
+                           " ORDER BY trial_id",
+                       (symptom_id, strategy, design_class, platform))
+        xfer_trials = _rows(kc, "SELECT trial_id, design_class, platform, verdict,"
+                                " match_level, ts FROM ab_trials WHERE symptom_id=?"
+                                " AND strategy=? AND NOT (design_class=? AND"
+                                " platform=?) ORDER BY trial_id",
+                            (symptom_id, strategy, design_class, platform))
+        # fix_trajectories carries platform + design_family (no design_class), so
+        # platform is the finest domain key available on this table.
         episodes = _rows(kc, "SELECT fix_session_id, design_name, project_path,"
                              " platform, outcome, winning_strategy "
                              "FROM fix_trajectories WHERE symptom_id=? AND"
-                             " winning_strategy=?", (symptom_id, strategy))
+                             " winning_strategy=? AND platform=?",
+                         (symptom_id, strategy, platform))
+        xfer_episodes = _rows(kc, "SELECT fix_session_id, design_name, platform,"
+                                  " outcome, winning_strategy "
+                                  "FROM fix_trajectories WHERE symptom_id=? AND"
+                                  " winning_strategy=? AND (platform IS NULL OR"
+                                  " platform<>?)", (symptom_id, strategy, platform))
         symptoms = _rows(kc, "SELECT check_type, class, predicates_json "
                              "FROM symptoms WHERE symptom_id=?", (symptom_id,))
     finally:
@@ -169,10 +199,32 @@ def solution_origin(*, symptom_id: str, design_class: str, platform: str,
         "ab_trials": trials,
         "episodes": episodes,                       # designs + their actions
         "bugs": bugs,
+        # Same symptom+strategy, DIFFERENT domain. Advisory prior only — never
+        # this key's own causal record. Each row carries its source domain so a
+        # reader (or a future automation) can weight it by match level.
+        "transfer_evidence": {
+            "ab_trials": xfer_trials,
+            "episodes": xfer_episodes,
+        },
     }
 
 
-def bug_solutions(*, symptom_id: str, knowledge_db_path=DEFAULT_KDB) -> list[dict]:
+def bug_solutions(*, symptom_id: str, design_class: str | None = None,
+                  platform: str | None = None,
+                  knowledge_db_path=DEFAULT_KDB) -> list[dict]:
+    """Strategies that historically resolved a symptom, with their lifecycle status.
+
+    `status` used to be the LATEST recipe_status row for (symptom, strategy)
+    ordered by updated_at across EVERY design class and platform (2026-07-19
+    audit P1-N1). A recipe promoted on nangate45/logic-small and demoted on
+    sky130hd/cpu-large therefore reported whichever domain was touched last —
+    a status belonging to no concrete key, flipping as unrelated domains moved.
+
+    Pass design_class+platform for one concrete key's status. Unscoped, the
+    per-domain breakdown is returned in `status_by_domain` and `status` collapses
+    to the shared value only when every domain agrees, else 'mixed' — never a
+    single domain's answer dressed up as the recipe's.
+    """
     kc = _ro(knowledge_db_path)
     try:
         sols = _rows(kc, "SELECT winning_strategy AS strategy,"
@@ -183,11 +235,22 @@ def bug_solutions(*, symptom_id: str, knowledge_db_path=DEFAULT_KDB) -> list[dic
                          "GROUP BY winning_strategy ORDER BY n_resolved DESC",
                      (symptom_id,))
         for s in sols:
-            row = kc.execute(
-                "SELECT status FROM recipe_status WHERE symptom_id=? AND"
-                " strategy=? ORDER BY julianday(updated_at) DESC LIMIT 1",
-                (symptom_id, s["strategy"])).fetchone()
-            s["status"] = row[0] if row else "promoted"
+            if design_class is not None and platform is not None:
+                row = kc.execute(
+                    "SELECT status FROM recipe_status WHERE symptom_id=? AND"
+                    " strategy=? AND design_class=? AND platform=?",
+                    (symptom_id, s["strategy"], design_class, platform)).fetchone()
+                s["status"] = row[0] if row else "promoted"   # grandfathered default
+                s["status_by_domain"] = []
+            else:
+                doms = _rows(kc, "SELECT design_class, platform, status FROM"
+                                 " recipe_status WHERE symptom_id=? AND strategy=?"
+                                 " ORDER BY design_class, platform",
+                             (symptom_id, s["strategy"]))
+                s["status_by_domain"] = doms
+                distinct = {d["status"] for d in doms}
+                s["status"] = (distinct.pop() if len(distinct) == 1
+                               else ("mixed" if distinct else "promoted"))
             s["proven_on"] = (s["proven_on"] or "").split(",")
     finally:
         kc.close()

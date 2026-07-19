@@ -350,6 +350,16 @@ def is_success(row: dict) -> bool:
     even though they produced a clean GDS — clean DRC/LVS/RCX cannot exist
     without a completed finish stage. Absence of signoff data alone is NOT a
     success: at least one POSITIVE clean signal is required.
+
+    An EXPLICIT orfs_status='fail' is an unconditional veto (2026-07-19 audit
+    P0-R1, failure-patterns #52). The relaxed path was written to rescue runs
+    whose backend record is merely INCOMPLETE ('partial'/'unknown'); 'fail' is
+    not incomplete, it is a positive statement that the backend aborted. A run
+    that died at synth cannot have produced the clean DRC/LVS/RCX sitting in its
+    row — those fields are stale carry-over from an earlier flow in the same
+    project dir (ingest reads reports/ per PROJECT, not per run). Without the
+    veto that staleness taught the learner that a failed backend run was a
+    clean exemplar and inflated recipe confidence.
     """
     drc = row.get("drc_status")
     lvs = row.get("lvs_status")
@@ -379,7 +389,11 @@ def is_success(row: dict) -> bool:
         or drc in ("clean", "clean_beol")
         or rcx == "complete"
     )
-    relaxed = has_positive_signoff and drc_not_failed and lvs_not_failed and rcx_not_failed
+    orfs_failed = row.get("orfs_status") == "fail"
+    relaxed = (
+        not orfs_failed
+        and has_positive_signoff and drc_not_failed and lvs_not_failed and rcx_not_failed
+    )
     return strict or relaxed
 
 

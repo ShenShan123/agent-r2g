@@ -1980,9 +1980,21 @@ def _ab_global_regression(conn, a_run_id: str | None,
 # ── Cross-check repair-cycle detection (P1-18, 2026-07-15) ────────────────────
 def _global_repair_state(conn, run_id: str | None) -> str | None:
     """A fingerprint of the WHOLE signoff state a run reached: the DRC violation-class
-    set + DRC/LVS status + LVS mismatch class + timing tier. Two runs with the same
-    fingerprint are in the SAME global signoff state — a repair that returns a design to
-    a prior state made no global progress. None when unreadable."""
+    set (with magnitudes) + DRC/LVS status + LVS mismatch class + timing tier. Two runs
+    with the same fingerprint are in the SAME global signoff state — a repair that
+    returns a design to a prior state made no global progress. None when unreadable.
+
+    Magnitudes matter (failure-patterns.md #52; 2026-07-19 audit P1-R2). The class
+    set alone discarded every count, so M1_SPACING x100 and M1_SPACING x10
+    fingerprinted identically and _detect_repair_cycle called a 90% reduction a
+    cycle — escalating repair_cycle_nonconverged and stopping a campaign that was
+    converging. Raw counts are the opposite error: 100 vs 99 would be a "new"
+    state and no real ping-pong would ever be caught. So each class carries a
+    MAGNITUDE bucket (count.bit_length(): 1-1, 2-3, 4-7, 8-15, ...), i.e. the
+    documented tolerance is a factor of ~2 — a halving is material progress,
+    anything less is the same state. Bucketing also errs the safe way: a boundary
+    straddle lets the campaign continue rather than ending it early, and a genuine
+    ping-pong returns to the same bucket anyway."""
     if not run_id:
         return None
     try:
@@ -1996,8 +2008,15 @@ def _global_repair_state(conn, run_id: str | None) -> str | None:
     try:
         import symptom as _symptom
         cats = json.loads(row[1] or "{}")
-        drc = sorted({_symptom.normalize_class(k) for k, v in cats.items()
-                      if ((v or {}).get("count") or 0) > 0})
+        mags: dict[str, int] = {}
+        for k, v in cats.items():
+            count = int((v or {}).get("count") or 0)
+            if count <= 0:
+                continue
+            cls = _symptom.normalize_class(k)
+            # Same class from two raw keys -> keep the worst magnitude.
+            mags[cls] = max(mags.get(cls, 0), count.bit_length())
+        drc = sorted(mags.items())
     except Exception:
         drc = []
     return json.dumps({"drc": drc, "drc_status": row[0], "lvs": row[2],

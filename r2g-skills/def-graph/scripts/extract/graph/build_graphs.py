@@ -589,7 +589,7 @@ def main():
     # label columns — e.g. an interrupted extractor left a raw tool dump — or
     # a design_key mismatch) means its y slot is silently all-NaN. Warn AND
     # record it in the manifest so downstream sees the degradation.
-    health = gl.label_health(label_dfs, args.design)
+    health = gl.label_health(label_dfs, args.design, args.labels)
     for fname, h in health.items():
         if h["status"] != "ok":
             print(f"WARNING: {fname} {h['status']}: {h['reason']} — "

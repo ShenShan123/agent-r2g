@@ -233,6 +233,44 @@ def test_no_cycle_on_monotonic_progress(tmp_path):
     assert el._detect_repair_cycle(conn, "/p/design") is None
 
 
+# ── P1-R2 (2026-07-19 audit, failure-patterns #52): magnitudes count ─────────
+
+def test_quantitative_progress_is_not_a_cycle(tmp_path):
+    """The fingerprint kept only the SET of nonzero DRC classes, so the real
+    wbuart32 pair — same M1_SPACING class at counts 100 and 10 — fingerprinted
+    identically and a 90% reduction was escalated as repair_cycle_nonconverged,
+    stopping a campaign that was converging."""
+    conn = _conn(tmp_path)
+    _seed_state(conn, "r1", "2026-06-10T00:00:00",
+                drc_cats={"M1_SPACING": {"count": 100}}, timing="clean")
+    _seed_state(conn, "r2", "2026-06-10T01:00:00",
+                drc_cats={"M1_SPACING": {"count": 10}}, timing="clean")
+    assert el._detect_repair_cycle(conn, "/p/design") is None
+
+
+def test_immaterial_change_is_still_a_cycle(tmp_path):
+    """The tolerance is a factor of ~2: 100 -> 95 is noise, not progress, so a
+    genuine ping-pong is still caught. Raw counts would have lost this."""
+    conn = _conn(tmp_path)
+    _seed_state(conn, "r1", "2026-06-10T00:00:00",
+                drc_cats={"M1_SPACING": {"count": 100}}, timing="clean")
+    _seed_state(conn, "r2", "2026-06-10T01:00:00",
+                drc_cats={}, timing="violated")
+    _seed_state(conn, "r3", "2026-06-10T02:00:00",
+                drc_cats={"M1_SPACING": {"count": 95}}, timing="clean")
+    assert el._detect_repair_cycle(conn, "/p/design") is not None
+
+
+def test_regression_in_magnitude_is_a_new_state_not_a_repeat(tmp_path):
+    """Getting WORSE is also not a revisit of the better state."""
+    conn = _conn(tmp_path)
+    _seed_state(conn, "r1", "2026-06-10T00:00:00",
+                drc_cats={"M1_SPACING": {"count": 10}}, timing="clean")
+    _seed_state(conn, "r2", "2026-06-10T01:00:00",
+                drc_cats={"M1_SPACING": {"count": 400}}, timing="clean")
+    assert el._detect_repair_cycle(conn, "/p/design") is None
+
+
 # ── P1-13: regression auto-demotion is wired into the learner ────────────────
 
 def _seed_regressions(conn, *, project, platform, design_class, n=2,

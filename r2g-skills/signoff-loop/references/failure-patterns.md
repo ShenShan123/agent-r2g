@@ -3007,6 +3007,105 @@ re-queues as `candidate` if/when a future trial fires for that key).
 (Issue 5 of this report — DEF/signoff-gate provenance loss in def-graph — is documented with the
 2026-07-16 full-pipeline entry below.)
 
+### 2026-07-19 post-consolidation audit (failure-patterns #52 — 20 claims audited, 9 fixed)
+
+`docs/superpowers/plans/2026-07-19-post-consolidation-agent-and-full-pipeline-audit.md`, probed at
+136bb7d in a foreign checkout, claimed 20 defects (14 P0 / 6 P1) + 4 policy decisions. **Unlike the #50/#51
+round, the claims did NOT all hold** — audit each one against live code before fixing:
+
+- **Not reproducible here.** The report's "Production Store Integrity Snapshot" listed 4 WARNs including
+  `24/24 A/B-trial symptoms had no ab_launch action`, `6/6 promoted without promote`, `27/27 escalations
+  without escalate`. On this checkout L1/L2/L3 all **PASS** (`0 alarm, 1 warn, 15 pass`). `journal.sqlite`
+  is **gitignored and machine-local**, so journal-coverage findings from a foreign checkout say nothing
+  about this store — never port a journal-side verdict across machines.
+- **Deliberate design, not a defect.** P0-R3 ("legacy unverifiable A/B wins can still promote"): an ABSENT
+  `provenance_complete` is grandfathered-countable ON PURPOSE (`ab_runner.judge_recipe._verifiable`,
+  documented at #48/P0-1). 77 legacy decisive trials carry NULL run_ids; rejecting them would move 21
+  promoted keys, violating the standing **0-flips** discipline. This is the report's own "unresolved policy
+  decision" class and needs an operator ruling, not a silent code change.
+- **Missing evidence.** The companion doc the report cites for P0-N7/P1-N6
+  (`2026-07-19-real-instance-fix-value-assessment.md`) and its harness
+  (`tools/audit_post_consolidation_2026_07_19.py`) were never delivered to this repo.
+
+Nine confirmed defects, all fixed TDD (each test proven red pre-fix, green post-fix; committed
+`knowledge.sqlite` verdicts unchanged):
+
+- **P0-R1 — an explicit ORFS failure could be learnable SUCCESS.** `knowledge_db.is_success`'s relaxed
+  path required a positive signoff signal but never vetoed `orfs_status='fail'`. The relaxed path exists
+  to rescue runs whose backend record is merely INCOMPLETE (`partial`/`unknown`); `fail` is not
+  incomplete. Blast radius on the real store: **exactly 1 row** — `rv32i_csr/nangate45`, whose
+  `stage_times_json` is a single 10-second `synth` at status 2 yet carries `drc=clean lvs=clean
+  rcx=complete` (stale fields from an earlier flow in the same project dir — ingest reads `reports/` per
+  PROJECT, not per run). Fixing it corrects a lie rather than moving a verdict.
+- **P0-N1 — parking bypassed the lifecycle version.** `recipe_lifecycle.park_nondivergent` did a raw bulk
+  `UPDATE` instead of `_set()`, so `status_version` never moved. That version IS the A/B plan→judge
+  staleness handshake (#50 issue 6), so a trial planned while the row was `candidate` still looked current
+  after the park and a late win could re-promote a deliberately non-divergent recipe. Parking now routes
+  through `_set()`, and `judge_recipe` refuses to read the corpus at all for a `parked` key (record the
+  trial as honest history, filter at the consumer — the same firewall the provenance filter uses).
+  *Lesson: the bug was not a missing guard but an existing guard with a road around it.*
+- **P0-N3 — an explicit `flow_variant` did not select the requested run.** All three stage runners took
+  `flow_variant` as `$3` but used it ONLY for the live-ORFS-results fallback; the five run-selection loops
+  took the first reverse-sorted `RUN_*` holding a final DEF. `run_graphs.sh <proj> nangate45 variant_a`
+  returned 0 while publishing variant_b's layout — a dataset-identity failure of the same silent class as
+  #30. New shared `scripts/flow/_select_run.sh` (sibling of `_provenance.sh`, one copy) filters on
+  `run-meta.json`'s recorded `flow_variant`. No variant requested ⇒ byte-identical legacy ordering; a
+  requested variant fails CLOSED (an unrecorded run cannot satisfy an explicit request).
+- **P0-N4 — a failed extractor republished stale labels under a fresh marker.** `run_labels.sh`'s
+  `run_soft` is fail-soft BY DESIGN (one dead extractor must degrade one column, not abort six) but was
+  also fail-SILENT: extractors wrote in place, so a failure left the PREVIOUS run's CSV at the canonical
+  path and the unconditional stats roll-up stamped a fresh completion marker over it. `run_soft` now
+  quarantines each declared target to `<name>.stale` BEFORE launching, so a failure leaves the path absent
+  — which `compute_label_stats` already calls `skipped`. Second half: `graph_lib.load_label_df` raised
+  `FileNotFoundError` on an absent label, killing the builder AND verifier with a traceback and producing
+  NO manifest; it now degrades to an empty frame and `label_health` reports an explicit `missing` status,
+  so the manifest honestly reads `ok_with_label_gaps`.
+- **P0-R4 — a partial source manifest claimed full verification.** `promote_candidates.py` digested only
+  files the manifest happened to mention, then set `source_bytes_verified=True` regardless. A real 5-file
+  `eth_rxethmac` candidate with a 1-file manifest promoted with `source_bytes_verified=true` and
+  `rtl_file_count=5`. Coverage is now checked FIRST: every `rtl_file` needs a manifest entry
+  (`source_manifest_incomplete`) before any per-file comparison is meaningful.
+- **P0-R6 — legacy candidates with no manifest auto-promoted.** The `source_bytes_verified=false` stamp
+  was descriptive, not an enforcement gate: promotion continued into project creation and vendoring, so an
+  automatic campaign could publish a design whose synth-proven bytes cannot be reconstructed. Now blocked
+  (`source_manifest_missing`) with a logged `--allow-unverified-source` operator override that RETAINS the
+  false stamp downstream — matching how the license gate already fails closed on legacy `unknown`.
+- **P1-N1 — the canonical trace API mixed recipe domains.** `observe.solution_origin` scoped
+  `recipe_status` by the full key but `ab_trials` by `symptom_id+strategy` and `fix_trajectories` by
+  `symptom_id+winning_strategy`, so a nangate45/logic-small trace silently absorbed a sky130hd/cpu-large
+  loss. `density_relief` alone spans 44 lifecycle keys across 9 symptoms and 22 domains, so mixing is the
+  normal case. Evidence is now full-key scoped, with cross-domain rows RETAINED under `transfer_evidence`
+  tagged by domain (transfer is this skill's premise — it just must not masquerade as the key's own
+  record). `bug_solutions` no longer reports a latest-row-across-domains status: it takes optional
+  `design_class`/`platform`, else returns `status_by_domain` and collapses to `mixed` when domains disagree.
+- **P1-N2 — J4 ordered mixed-timezone timestamps as STRINGS.** This store really is mixed: ~42k `Z` rows
+  beside ~14k `+HH:MM` offset rows. Lexically `2026-07-18T10:00:00+08:00` (02:00Z) sorts ABOVE
+  `2026-07-18T03:00:00Z` (03:00Z), so a resolving action genuinely OLDER than a dangle looked newer and
+  the dangle was written off as benign re-ingest residue — hiding a live writer failure behind the benign
+  class, i.e. defeating the very distinction 9d5125f added J4 to draw. Now ordered by
+  `julianday()`; the original ts is kept for display, and an UNPARSEABLE ts is never silently benign.
+  Verdict on the real store is unchanged (8 dangles, 2 UNEXPLAINED).
+- **P1-R2 — repair-cycle detection discarded violation counts.** `_global_repair_state` kept only the SET
+  of nonzero DRC classes, so the real `wbuart32` pair (same `M1_SPACING`, counts 100 and 10) fingerprinted
+  identically and a 90% reduction escalated as `repair_cycle_nonconverged`, stopping a converging
+  campaign. Each class now carries a MAGNITUDE bucket (`count.bit_length()`): the documented tolerance is a
+  factor of ~2, so a halving is progress and 100→95 is still the same state. Raw counts would have been
+  the opposite error (100 vs 99 = "new" state ⇒ no ping-pong ever caught); bucketing also errs toward
+  letting a campaign continue, which is the cheaper failure direction.
+
+**Audited but NOT fixed — architectural or operator-decision, listed so the next round does not re-derive
+them:** P0-R2 (A/B ownership infers from an `strategy[:8]` arm-dir name rather than a durable
+`ab_trial_plan`), P0-R3 (above), P0-R5 (include headers not vendored/frozen), P0-R7 (project-level signoff
+reports not bound to the selected DEF's digest), P0-R8 (feature/label freshness is mtime- not
+content-based), P0-R9 (graph publication is not an atomic generation swap), P0-N2 (synth `config.mk` is
+re-parsed at promote time, so top params/defines are not frozen), P0-N7 (no graph schema-version contract),
+P1-N6 (relocated corpora keep absolute acquisition-time paths), P1-R1 (no-PPA re-ingests collapse distinct
+attempts), P1-R3 (diagnosis can learn a superseded intermediate timing failure). These share ONE root the
+report names correctly: **identity is inferred from mutable paths, filenames, timestamps, and file
+presence** instead of carried as one immutable generation id. Fixing them piecemeal adds another local
+guard per symptom; the durable fix is a compilation-input → candidate → project → run → X/Y → graph
+identity chain.
+
 ### 2026-07-16 full-pipeline issue-report audit (failure-patterns #51 — 12 issues + 1 found in verification)
 
 The companion audit (`docs/superpowers/plans/2026-07-16-full-pipeline-issue-report.md`) probed the

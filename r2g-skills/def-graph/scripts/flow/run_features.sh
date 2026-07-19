@@ -56,7 +56,7 @@ DEF="${R2G_DEF:-}"
 RUN_DIR=""  # the backend RUN_* the DEF came from (SPEF is paired from the SAME run)
 BACKEND_DIR="$PROJECT_DIR/backend"
 if [[ -z "$DEF" && -d "$BACKEND_DIR" ]]; then
-  for run in $(ls -d "$BACKEND_DIR"/RUN_* 2>/dev/null | sort -r); do
+  for run in $(bash "$(dirname "${BASH_SOURCE[0]}")/_select_run.sh" "$BACKEND_DIR" "${FLOW_VARIANT_ARG:-}"); do
     for sub in final results; do
       [[ -z "$DEF" && -f "$run/$sub/6_final.def" ]] && { DEF="$run/$sub/6_final.def"; RUN_DIR="$run"; }
     done
@@ -120,7 +120,7 @@ if [[ -z "$SPEF" && -n "$RUN_DIR" ]]; then
   done
 fi
 if [[ -z "$SPEF" && -d "$BACKEND_DIR" ]]; then
-  for run in $(ls -d "$BACKEND_DIR"/RUN_* 2>/dev/null | sort -r); do
+  for run in $(bash "$(dirname "${BASH_SOURCE[0]}")/_select_run.sh" "$BACKEND_DIR" "${FLOW_VARIANT_ARG:-}"); do
     for sub in rcx results; do
       [[ -z "$SPEF" && -f "$run/$sub/6_final.spef" ]] && SPEF="$run/$sub/6_final.spef"
     done

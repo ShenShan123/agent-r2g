@@ -63,7 +63,7 @@ ODB="${R2G_ODB:-}"; DEF="${R2G_DEF:-}"; RUN_DIR=""  # RUN_DIR: the backend run t
   echo "NOTE: labels DEF/ODB overridden (R2G_DEF=${DEF:-<none>} R2G_ODB=${ODB:-<none>})" >&2
 BACKEND_DIR="$PROJECT_DIR/backend"
 if [[ ( -z "$ODB" || -z "$DEF" ) && -d "$BACKEND_DIR" ]]; then
-  for run in $(ls -d "$BACKEND_DIR"/RUN_* 2>/dev/null | sort -r); do
+  for run in $(bash "$(dirname "${BASH_SOURCE[0]}")/_select_run.sh" "$BACKEND_DIR" "${FLOW_VARIANT_ARG:-}"); do
     for sub in final results; do
       [[ -z "$ODB" && -f "$run/$sub/6_final.odb" ]] && { ODB="$run/$sub/6_final.odb"; RUN_DIR="$run"; }
       [[ -z "$DEF" && -f "$run/$sub/6_final.def" ]] && { DEF="$run/$sub/6_final.def"; RUN_DIR="$run"; }
@@ -136,7 +136,7 @@ if [[ -z "$SPEF" && -n "$RUN_DIR" ]]; then
   done
 fi
 if [[ -z "$SPEF" && -d "$BACKEND_DIR" ]]; then
-  for run in $(ls -d "$BACKEND_DIR"/RUN_* 2>/dev/null | sort -r); do
+  for run in $(bash "$(dirname "${BASH_SOURCE[0]}")/_select_run.sh" "$BACKEND_DIR" "${FLOW_VARIANT_ARG:-}"); do
     for sub in rcx results; do
       [[ -z "$SPEF" && -f "$run/$sub/6_final.spef" ]] && SPEF="$run/$sub/6_final.spef"
     done
@@ -169,13 +169,39 @@ echo "clk_period=$CLOCK_PERIOD clk_port=${CLOCK_PORT:-<auto>} supply=$SUPPLY_VOL
 OPENROAD="${OPENROAD_EXE:-openroad}"
 LABEL_TIMEOUT="${LABEL_TIMEOUT:-2400}"
 
-run_soft() {  # name + command...; never aborts the orchestrator
+# run_soft <name> <targets> <command...>
+#   <targets>: space-separated CSVs this extractor OWNS (may be empty).
+#
+# Fail-soft is deliberate — one dead extractor must degrade ONE label column, not
+# abort the other six. But fail-soft must not be mistaken for fail-silent
+# (failure-patterns.md #52; 2026-07-19 audit P0-N4): the extractors used to write
+# in place, so a FAILED extractor left the PREVIOUS run's CSV sitting at the
+# canonical path, and the unconditional stats roll-up below then stamped a fresh
+# completion marker over it. The result was a label set dated today, built from
+# values extracted days ago against a different DEF — invisible downstream,
+# because a stale CSV is perfectly well-formed and reads 'ok' at every gate.
+#
+# So: quarantine each target BEFORE launching. On success the extractor recreates
+# it; on failure the path stays ABSENT, which compute_label_stats.py already
+# classifies 'skipped' and graph_lib.label_health already reports as a gap. The
+# old file is kept as <name>.stale for forensics, never at the canonical path.
+run_soft() {  # name + targets + command...; never aborts the orchestrator
   local name="$1"; shift
+  local targets="$1"; shift
   echo "--- $name ---"
+  local t
+  for t in $targets; do
+    [[ -f "$t" ]] && mv -f "$t" "$t.stale"
+  done
   if timeout --signal=TERM --kill-after=30 "$LABEL_TIMEOUT" "$@" > "$LABELS_DIR/$name.log" 2>&1; then
     echo "  $name: ok"
+    for t in $targets; do rm -f "$t.stale"; done
   else
     echo "  $name: FAILED (see $LABELS_DIR/$name.log)" >&2
+    for t in $targets; do
+      [[ -f "$t.stale" ]] && echo "  $name: prior $(basename "$t") quarantined to $(basename "$t").stale" \
+        "— NOT republished as current (failure-patterns.md #52)" >&2
+    done
   fi
 }
 
@@ -192,13 +218,13 @@ if [[ -n "$DEF" ]]; then
   # congestion over the GCells its footprint overlaps (the Congestion_Parse method).
   # Absent/unparseable -> the extractor falls back to origin-GCell mapping and warns.
   R2G_PLATFORM="$PLATFORM" TECH_LEF="$TECH_LEF" SC_LEF="$SC_LEF" ADDITIONAL_LEFS="$ADDITIONAL_LEFS" \
-    run_soft congestion \
+    run_soft congestion "$LABELS_DIR/cell_congestion.csv" \
     python3 "$LABELS_SRC/extract_congestion.py" "$DEF" "$LABELS_DIR/cell_congestion.csv" "$DESIGN_NAME"
 fi
 
 # --- Wirelength (DEF) ------------------------------------------------------
 if [[ -n "$DEF" ]]; then
-  run_soft wirelength \
+  run_soft wirelength "$LABELS_DIR/wirelength.csv" \
     python3 "$LABELS_SRC/extract_wirelength.py" "$DEF" "$LABELS_DIR/wirelength.csv" "$DESIGN_NAME"
 fi
 
@@ -212,25 +238,25 @@ TIMING_LIBS="$LIB_FILES $ADDITIONAL_LIBS"
 if [[ -n "$ODB" ]]; then
   ODB_FILE="$ODB" R2G_LIB_FILES="$TIMING_LIBS" OUTPUT_CSV="$LABELS_DIR/timing_features.csv" \
     CLOCK_PERIOD="$CLOCK_PERIOD" CLOCK_PORT="$CLOCK_PORT" DESIGN_NAME="$DESIGN_NAME" \
-    run_soft timing "$OPENROAD" -no_splash -exit "$LABELS_SRC/extract_timing.tcl"
+    run_soft timing "$LABELS_DIR/timing_features.csv" "$OPENROAD" -no_splash -exit "$LABELS_SRC/extract_timing.tcl"
 elif [[ -n "$DEF" ]]; then
   DEF_FILE="$DEF" R2G_LIB_FILES="$TIMING_LIBS" TECH_LEF="$TECH_LEF" OUTPUT_CSV="$LABELS_DIR/timing_features.csv" \
     CLOCK_PERIOD="$CLOCK_PERIOD" CLOCK_PORT="$CLOCK_PORT" DESIGN_NAME="$DESIGN_NAME" \
-    run_soft timing "$OPENROAD" -no_splash -exit "$LABELS_SRC/extract_timing.tcl"
+    run_soft timing "$LABELS_DIR/timing_features.csv" "$OPENROAD" -no_splash -exit "$LABELS_SRC/extract_timing.tcl"
 fi
 
 # --- IR drop (ODB) — liberty needed so PDNSim can compute cell power -------
 if [[ -n "$ODB" ]]; then
   ODB_FILE="$ODB" R2G_LIB_FILES="$TIMING_LIBS" OUTPUT_RPT="$LABELS_DIR/ir_drop.csv" \
     SUPPLY_VOLTAGE="$SUPPLY_VOLTAGE" DESIGN_NAME="$DESIGN_NAME" \
-    run_soft irdrop "$OPENROAD" -no_splash -exit "$LABELS_SRC/extract_irdrop.tcl"
+    run_soft irdrop "$LABELS_DIR/ir_drop.csv" "$OPENROAD" -no_splash -exit "$LABELS_SRC/extract_irdrop.tcl"
 fi
 
 # --- RC parasitic labels (SPEF) --------------------------------------------
 # ground cap (net-node), coupling cap (net-pair edge), equivalent resistance
 # (pin-pair edge). Fail-soft: extract_rc.py writes header-only CSVs when no SPEF
 # is present, so the graph stage simply leaves the RC labels/edges empty.
-run_soft rc python3 "$LABELS_SRC/extract_rc.py" "${SPEF:-}" "$LABELS_DIR" "$DESIGN_NAME"
+run_soft rc "$LABELS_DIR/net_ground_cap.csv $LABELS_DIR/coupling_cap.csv $LABELS_DIR/equiv_res.csv" python3 "$LABELS_SRC/extract_rc.py" "${SPEF:-}" "$LABELS_DIR" "$DESIGN_NAME"
 
 # --- Stats roll-up ---------------------------------------------------------
 python3 "$LABELS_SRC/compute_label_stats.py" "$LABELS_DIR" "$REPORTS_DIR/labels_stats.json" "$DESIGN_NAME" "$PLATFORM"

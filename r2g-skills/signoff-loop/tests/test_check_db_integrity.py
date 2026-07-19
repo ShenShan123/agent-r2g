@@ -195,6 +195,66 @@ def test_J4_all_benign_dangles_read_as_flat(tmp_path, capsys):
     assert "flat residue" in j4
 
 
+def _stamp(jdb, project_path, run_id, ts):
+    """Insert one journal action at an EXACT timestamp (append_action stamps its
+    own), so the mixed-regime ordering below is reproducible."""
+    con = sqlite3.connect(jdb)
+    con.execute("INSERT INTO actions (ts, project_path, actor, action_type, run_id)"
+                " VALUES (?,?,?,?,?)", (ts, project_path, "loop", "tool_invoke", run_id))
+    con.commit()
+    con.close()
+
+
+def test_J4_orders_mixed_timezone_timestamps_by_instant(tmp_path, capsys):
+    """J4 compared ISO timestamps as STRINGS (2026-07-19 audit P1-N2). The journal
+    mixes regimes at scale -- the production store holds ~42k 'Z' rows beside ~14k
+    '+HH:MM' offset rows -- and lexically '...T10:00:00+08:00' (02:00Z) sorts ABOVE
+    '...T03:00:00Z' (03:00Z). So a resolving action that is really OLDER than the
+    dangle looked newer, and a LIVE writer failure was written off as benign
+    re-ingest residue: a false clean on the one distinction J4 exists to draw."""
+    live = tmp_path / "tz_proj"
+    live.mkdir()
+    kdb = _kdb(tmp_path, runs=[("RRESOLVE", str(live), "pass", None, "nangate45")])
+    jdb = _jdb(tmp_path)
+    # Resolving action at 02:00Z, written as +08:00 -- lexically the LARGER string.
+    _stamp(jdb, str(live), "RRESOLVE", "2026-07-18T10:00:00+08:00")
+    # Dangling action at 03:00Z -- the genuinely NEWER instant.
+    _stamp(jdb, str(live), "MISSING", "2026-07-18T03:00:00Z")
+    assert _run(kdb, jdb) == 0
+    j4 = [ln for ln in capsys.readouterr().out.splitlines() if "J4" in ln][0]
+    assert "1 UNEXPLAINED" in j4, f"newer dangle misread as residue: {j4}"
+    assert "0 re-ingest residue" in j4
+
+
+def test_J4_equal_instant_across_regimes_is_still_residue(tmp_path, capsys):
+    """The '>= not >' contemporaneity rule must survive normalization: the SAME
+    instant spelled in two regimes is still proof the writer recovered."""
+    live = tmp_path / "tz_eq"
+    live.mkdir()
+    kdb = _kdb(tmp_path, runs=[("RRESOLVE", str(live), "pass", None, "nangate45")])
+    jdb = _jdb(tmp_path)
+    _stamp(jdb, str(live), "RRESOLVE", "2026-07-18T11:00:00+08:00")   # 03:00Z
+    _stamp(jdb, str(live), "MISSING", "2026-07-18T03:00:00Z")         # 03:00Z
+    assert _run(kdb, jdb) == 0
+    j4 = [ln for ln in capsys.readouterr().out.splitlines() if "J4" in ln][0]
+    assert "1 re-ingest residue" in j4
+    assert "0 UNEXPLAINED" in j4
+
+
+def test_J4_unparseable_timestamp_is_never_silently_benign(tmp_path, capsys):
+    """A ts we cannot order cannot be EXPLAINED — it must surface as a lead, not
+    be waved through as residue."""
+    live = tmp_path / "tz_bad"
+    live.mkdir()
+    kdb = _kdb(tmp_path, runs=[("RRESOLVE", str(live), "pass", None, "nangate45")])
+    jdb = _jdb(tmp_path)
+    _stamp(jdb, str(live), "RRESOLVE", "2026-07-18T23:00:00Z")
+    _stamp(jdb, str(live), "MISSING", "not-a-timestamp")
+    assert _run(kdb, jdb) == 0
+    j4 = [ln for ln in capsys.readouterr().out.splitlines() if "J4" in ln][0]
+    assert "1 UNEXPLAINED" in j4
+
+
 def test_platform_scope_isolates_correspondence(tmp_path, capsys):
     """--platform must scope L1/L2: a sky130hd-only ledger gap is invisible when the
     run under test is nangate45 (the campaign /r2g-debug drives)."""

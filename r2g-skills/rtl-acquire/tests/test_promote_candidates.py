@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
 import sys
 import tempfile
@@ -46,7 +47,8 @@ def _args(**over) -> argparse.Namespace:
     base = dict(designs=[], all=False, out_root=None, base_dir=None, platform="",
                 clock_port="", clock_period=10.0, core_utilization=30,
                 place_density=0.20, require_publish_eligible=False,
-                publish_eligible_csv=None, force=False, run=False, dry_run=False)
+                publish_eligible_csv=None, force=False, run=False, dry_run=False,
+                allow_unverified_source=False)
     base.update(over)
     return argparse.Namespace(**base)
 
@@ -64,7 +66,11 @@ class PromoteFixture(unittest.TestCase):
 
     def _mk_candidate(self, design: str, rtl_text: str, *, top: str,
                       status: str = "success", extra_meta: dict | None = None,
-                      synth_cfg_lines: list[str] | None = None) -> None:
+                      synth_cfg_lines: list[str] | None = None,
+                      manifest: bool = True) -> None:
+        """manifest=True stamps a COMPLETE synth-time source_manifest, which is
+        what a modern expansion produces. Pass manifest=False for the legacy
+        pre-manifest shape, which promotion now blocks (audit P0-R6)."""
         ddir = self.out_root / design
         ddir.mkdir(parents=True, exist_ok=True)
         rtl = self.root / "downloads" / design / "top.v"
@@ -87,6 +93,10 @@ class PromoteFixture(unittest.TestCase):
                 "synth_variant": "yosys_abc_area0", "platform": "nangate45",
                 "rtl_files": [str(rtl)],
                 "design_config": str(synth_proj / "config.mk")}
+        if manifest:
+            meta["source_manifest"] = [
+                {"path": str(rtl),
+                 "sha256": hashlib.sha256(rtl.read_bytes()).hexdigest()}]
         meta.update(extra_meta or {})
         (ddir / "design_meta.json").write_text(json.dumps(meta), encoding="utf-8")
         with open(self.out_root / "index.csv", "a", newline="", encoding="utf-8") as f:
@@ -182,6 +192,100 @@ class PromoteTests(PromoteFixture):
         pj = json.loads((self.base / "runfail" / "reports" / "promote.json").read_text())
         self.assertEqual(pj["status"], "promoted_flow_failed")
         self.assertEqual(pj["orfs_rc"], 1)
+
+
+class SourceProofGateTests(PromoteFixture):
+    """Source-byte provenance must be an ENFORCED gate, not a descriptive stamp
+    (2026-07-19 audit P0-R4 / P0-R6, failure-patterns #52)."""
+
+    def _multi_file_candidate(self, design: str, *, covered: int) -> None:
+        """A 5-file candidate whose manifest covers only `covered` of them —
+        the real eth_rxethmac shape from the report."""
+        ddir = self.out_root / design
+        ddir.mkdir(parents=True, exist_ok=True)
+        src = self.root / "downloads" / design
+        src.mkdir(parents=True, exist_ok=True)
+        rtl_files = []
+        for i in range(5):
+            p = src / f"m{i}.v"
+            # m0 keeps the real top module; the rest are distinct siblings, so
+            # validate_config still resolves DESIGN_NAME.
+            p.write_text(RTL_CLK if i == 0
+                         else RTL_CLK.replace("toy_top", f"m{i}"), encoding="utf-8")
+            rtl_files.append(p)
+        synth_proj = self.root / "workspace" / "synth_projects" / design / "constraints"
+        synth_proj.mkdir(parents=True, exist_ok=True)
+        (synth_proj / "config.mk").write_text("\n".join([
+            "export DESIGN_NAME = toy_top", "export PLATFORM = nangate45",
+            "export ABC_AREA = 0", "export SYNTH_VARIANT = yosys_abc_area0",
+            f"export VERILOG_FILES = {' '.join(str(p) for p in rtl_files)}",
+            f"export VERILOG_INCLUDE_DIRS = {src}"]) + "\n", encoding="utf-8")
+        meta = {"design": design, "top": "toy_top", "status": "success",
+                "synth_variant": "yosys_abc_area0", "platform": "nangate45",
+                "rtl_files": [str(p) for p in rtl_files],
+                "design_config": str(synth_proj / "config.mk"),
+                "source_manifest": [
+                    {"path": str(p),
+                     "sha256": hashlib.sha256(p.read_bytes()).hexdigest()}
+                    for p in rtl_files[:covered]]}
+        (ddir / "design_meta.json").write_text(json.dumps(meta), encoding="utf-8")
+        with open(self.out_root / "index.csv", "a", newline="", encoding="utf-8") as f:
+            w = csv.DictWriter(f, fieldnames=["design", "top", "status"])
+            if f.tell() == 0:
+                w.writeheader()
+            w.writerow({"design": design, "top": "toy_top", "status": "success"})
+
+    def test_partial_manifest_cannot_claim_verification(self) -> None:
+        """5 RTL files, 1 manifest entry: promotion used to return
+        source_bytes_verified=true with rtl_file_count=5 — four unverified files
+        free to change behind a positive claim of full verification."""
+        self._multi_file_candidate("partial", covered=1)
+        res = self._promote("partial")
+        self.assertEqual(res["status"], "source_manifest_incomplete", res)
+        self.assertFalse(res.get("source_bytes_verified"))
+        self.assertIn("4 of 5", res["reason"])
+        self.assertFalse((self.base / "partial").exists(),
+                         "blocked promotion must stop BEFORE project creation")
+
+    def test_complete_manifest_still_promotes(self) -> None:
+        self._multi_file_candidate("complete", covered=5)
+        res = self._promote("complete")
+        self.assertEqual(res["status"], "promoted", res)
+        self.assertTrue(res["source_bytes_verified"])
+
+    def test_legacy_candidate_without_manifest_is_blocked(self) -> None:
+        """The real legacy picorv32_core shape: no manifest at all. Recording
+        source_bytes_verified=false honestly is not the same as enforcing it —
+        promotion used to continue into project creation and vendoring."""
+        self._mk_candidate("legacy", RTL_CLK, top="toy_top", manifest=False)
+        res = self._promote("legacy")
+        self.assertEqual(res["status"], "source_manifest_missing", res)
+        self.assertFalse(res["source_bytes_verified"])
+        self.assertFalse((self.base / "legacy").exists(),
+                         "blocked promotion must stop BEFORE project creation")
+
+    def test_operator_override_promotes_but_keeps_the_unverified_stamp(self) -> None:
+        """Recovery stays possible — but the downstream manifest must never
+        claim a verification that did not happen."""
+        self._mk_candidate("legacy2", RTL_CLK, top="toy_top", manifest=False)
+        res = self._promote("legacy2", allow_unverified_source=True)
+        self.assertEqual(res["status"], "promoted", res)
+        self.assertFalse(res["source_bytes_verified"])
+        self.assertEqual(res["source_verification_override"],
+                         "operator:--allow-unverified-source")
+        prov = json.loads((self.base / "legacy2" / "metadata.json").read_text())
+        self.assertFalse(prov.get("source_bytes_verified", False),
+                         "override must not launder the unverified stamp")
+
+    def test_changed_bytes_still_blocked(self) -> None:
+        """The pre-existing byte-drift gate must survive the coverage check."""
+        self._mk_candidate("drift", RTL_CLK, top="toy_top")
+        meta_path = self.out_root / "drift" / "design_meta.json"
+        meta = json.loads(meta_path.read_text())
+        Path(meta["rtl_files"][0]).write_text(RTL_CLK + "\n// mutated\n",
+                                              encoding="utf-8")
+        res = self._promote("drift")
+        self.assertEqual(res["status"], "rtl_bytes_changed_since_synth", res)
 
 
 class ClockDetectTests(unittest.TestCase):
