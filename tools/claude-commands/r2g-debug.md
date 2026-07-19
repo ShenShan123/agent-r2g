@@ -386,8 +386,13 @@ bash r2g-skills/def-graph/scripts/flow/run_graphs.sh design_cases/<design> "$PLA
 "$R2G_GRAPH_PYTHON" tools/verify_graph_dataset.py --batch design_cases                        # sweep (non-zero on any fail)
 ```
 
-A green `--batch` is the primary evidence (baselines: iir 167/167, DMA_Controller_DMA_fsm 164/164 sky130hd;
-168/168 with `--signoff-recheck`). But **a verifier is only as good as its checks** — confirm it exits
+A green `--batch` is the primary evidence (sky130hd baselines, 2026-07-18: iir 294/294,
+DMA_Controller_DMA_fsm 291/291, adder_tree 295/295, cordic 291/291, and 216–217/217 for the smaller
+apb_spi_core_rtl_APBSlaveI / blake2s_core / bm_sfifo_rtl — per-design counts scale with which label
+families apply, so compare a design against ITSELF across runs, never against another design). The
+count grew from the pre-2026-07-16 baselines (iir 167) when the hetero + `*_raw` label-twin groups
+landed — **a rising check count is the verifier getting stronger, never a regression**. But **a
+verifier is only as good as its checks** — confirm it exits
 non-zero on a real mismatch and its re-parsers don't re-implement the extractor's bug. Per-label correctness
 is 5b below; the feature-side **silent-value defect checklist** (quoted-liberty units, driver
 `max_capacitance`, MACRO id, `tracks_per_layer` numeric — each a shipped bug) lives in `failure-patterns.md`
@@ -471,8 +476,13 @@ counts are unchanged.
   python3 scripts/validate/validate_publish_readiness.py   # → quality/publish_validation.json pass:true
       # per-design netlist_graph.pt + mapped_netlist.v exist, cell_stats.json cells>0 (the check that
       # REPLACED the retired 30pt mapping-coverage gate), graph_stat_drift + duplicate-leakage bounds
-  python3 scripts/knowledge/project_frontend_diagnosis.py --check \
+  python3 scripts/knowledge/project_frontend_diagnosis.py --check --require-nonempty \
       ../signoff-loop/knowledge/knowledge.sqlite            # synth-only honesty parity, non-zero on lie
+      # --require-nonempty is REQUIRED here: bare --check exits 0 on an EMPTY synth_only projection
+      # (deliberate + backward-compatible, 2026-07-13 #46) while PRINTING that an empty set is NOT a
+      # pass. You reach this step only AFTER a corpus round, so empty == the projection silently
+      # failed, not "no corpus" -- without the flag that reads as a green gate. Exit 2 = UNPROVEN
+      # (repopulate the projection), exit 1 = a real lie (a synth fail missing its frontend event).
   ```
 - **Frontend-repair honesty chain** (after a wave with synth fails): `repair/classify_failed_candidates.py`
   → `repair/auto_fix_failures.py` → `knowledge/project_frontend_diagnosis.py` (writes `diagnosis.json` +
