@@ -764,6 +764,96 @@ def _source_manifest(paths: list[Path]) -> list[dict]:
     return out
 
 
+_INCLUDE_RE = re.compile(r'^\s*`include\s+"([^"]+)"', re.MULTILINE)
+
+
+def _header_closure(source_files: list[Path], include_dirs: list[Path],
+                    max_depth: int = 8) -> list[Path]:
+    """Every `include`d header the frontend reaches, transitively.
+
+    P0-R5 (failure-patterns.md #52): `source_manifest` covered `source_files`
+    only, and `vendor_rtl` copied only those, so headers resolved through
+    VERILOG_INCLUDE_DIRS were neither digested nor vendored. Four of eight
+    successful 2026-07-16 candidates depended on such headers (ethmac_defines.v,
+    timescale.v). A header could therefore change after the synth-only proof and
+    make ORFS elaborate a different circuit than the one that was qualified,
+    while promotion still reported source_bytes_verified=true.
+
+    Deliberately a lexical scan, not a preprocessor: it over-approximates
+    (includes inside `ifdef` branches that never fire are still captured), which
+    is the safe direction — digesting and vendoring a header we did not strictly
+    need costs a few KB, missing one we did need is the defect.
+    """
+    search = [Path(d) for d in include_dirs]
+    for f in source_files:
+        search.append(Path(f).parent)
+    seen: dict[str, Path] = {}
+    queue = list(source_files)
+    depth = 0
+    while queue and depth < max_depth:
+        nxt: list[Path] = []
+        for f in queue:
+            try:
+                text = Path(f).read_text(encoding="utf-8", errors="ignore")
+            except OSError:
+                continue
+            for name in _INCLUDE_RE.findall(text):
+                for d in search:
+                    cand = (d / name)
+                    try:
+                        if not cand.is_file():
+                            continue
+                    except OSError:      # unreadable mount — not a candidate
+                        continue
+                    key = str(cand.resolve())
+                    if key not in seen and cand.resolve() not in {
+                            Path(s).resolve() for s in source_files}:
+                        seen[key] = cand
+                        nxt.append(cand)
+                    break
+        queue = nxt
+        depth += 1
+    return [seen[k] for k in sorted(seen)]
+
+
+def _compile_manifest(source_files: list[Path], include_dirs: list[Path],
+                      *, top: str, top_parameters, synth_frontend,
+                      synth_memory_max_bits, synth_variant, defines=None) -> dict:
+    """The FROZEN compilation inputs that produced the synth-only proof.
+
+    P0-N2 (failure-patterns.md #52): promotion re-parsed the synth project's
+    MUTABLE config.mk to recover top parameters, frontend, memory settings and
+    include dirs. The audit synth-qualified a design at `WIDTH 8`, edited the
+    config.mk to `WIDTH 16` without touching a single RTL byte, and promotion
+    reported source_bytes_verified=true while carrying WIDTH=16 into the full
+    flow — a different circuit, positively claiming verification.
+
+    RTL bytes were never the whole compilation input. This freezes the rest at
+    synth time so promotion reads a record instead of re-reading mutable state,
+    and `config_digest` lets promotion detect any drift in one comparison.
+    """
+    headers = _header_closure(source_files, include_dirs)
+    params = dict(top_parameters or {})
+    man = {
+        "top": top,
+        # Ordered: include search order is semantically significant (first match
+        # wins), so a set would lose real information.
+        "include_dirs": [str(Path(d)) for d in include_dirs],
+        "top_parameters": params,
+        "defines": dict(defines or {}),
+        "synth_frontend": synth_frontend or None,
+        "synth_memory_max_bits": synth_memory_max_bits or None,
+        "synth_variant": synth_variant or None,
+        "header_manifest": _source_manifest(headers),
+    }
+    # One digest over the NORMALIZED inputs — the single value promotion compares.
+    man["config_digest"] = sha256_text(json.dumps(
+        {k: man[k] for k in ("top", "top_parameters", "defines", "synth_frontend",
+                             "synth_memory_max_bits", "synth_variant")},
+        sort_keys=True))
+    return man
+
+
 def synth_log_from(run_dir: Path | None, dest: Path) -> None:
     candidates = []
     if run_dir is not None:
@@ -1281,6 +1371,17 @@ def main() -> int:
                 "source_manifest": _src_manifest,
                 "source_digest": sha256_text(
                     "\n".join(str(e["sha256"]) for e in _src_manifest)),
+                # The rest of the compilation input (P0-N2/P0-R5, #52): top
+                # parameters, defines, frontend, include ORDER and the header
+                # closure. RTL bytes alone never determined the circuit —
+                # promotion must read this frozen record, not re-parse the
+                # mutable synth config.mk.
+                "compile_manifest": _compile_manifest(
+                    source_files, [Path(d) for d in (include_dirs or [])],
+                    top=top, top_parameters=top_parameters,
+                    synth_frontend=synth_frontend,
+                    synth_memory_max_bits=synth_memory_max_bits,
+                    synth_variant=synth_variant),
                 "sv2v_fallback_used": fallback_used == "sv2v",
                 "vhd2vl_fallback_used": fallback_used == "vhd2vl",
                 "lec_lite_status": lec_status,

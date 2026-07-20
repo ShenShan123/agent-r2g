@@ -601,8 +601,48 @@ def _outcome_score(stage_rank: int | None, vrr: float | None,
     return min(1.0, max(0.0, w_stage * stage_progress + w_vrr * vrr))
 
 
-def _compute_run_id(project: Path, ppa_path: Path) -> str:
-    marker = str(ppa_path.stat().st_mtime_ns) if ppa_path.exists() else ""
+def _attempt_marker(run_dir: Path | None, stage_log_path: Path | None) -> str:
+    """Per-ATTEMPT identity for a project with no reports/ppa.json (P1-R1).
+
+    The marker used to be `ppa.json`'s mtime, which degenerates to the empty
+    string when that file is absent — so every no-PPA ingest of a project hashed
+    to the SAME run_id and the later one silently REPLACEd the earlier
+    (`INSERT OR REPLACE` on a primary key), taking its failure_events and
+    run_violations with it. The audit lost a clean wbuart32 attempt this way when
+    a subsequent failed attempt was ingested over it.
+
+    No-PPA is the common case, not an exotic one: `run_orfs.sh` never writes
+    ppa.json (extract_ppa.py must be invoked explicitly), so every backend
+    attempt that aborts before extraction lands here.
+
+    Two immutable per-attempt signals replace it:
+      * the RUN dir's tag — minted by run_orfs.sh as
+        `RUN_<timestamp>_<pid>_<4 hex random>` with create-must-succeed
+        semantics, i.e. already designed to be collision-resistant per attempt;
+      * a digest of that attempt's stage ledger — the record of what the attempt
+        actually DID, so re-ingesting an unchanged attempt stays idempotent while
+        an attempt whose outcome differs gets its own row.
+    """
+    parts: list[str] = []
+    if run_dir is not None:
+        parts.append(run_dir.name)
+    if stage_log_path is not None:
+        try:
+            parts.append(hashlib.sha1(stage_log_path.read_bytes()).hexdigest())
+        except OSError:
+            pass
+    return ":".join(parts)
+
+
+def _compute_run_id(project: Path, ppa_path: Path, run_dir: Path | None = None,
+                    stage_log_path: Path | None = None) -> str:
+    # ppa.json's mtime stays the marker whenever that file exists — changing it
+    # would re-key every existing row in the committed store and orphan its
+    # projections. Only the previously-empty no-PPA marker gains content.
+    if ppa_path.exists():
+        marker = str(ppa_path.stat().st_mtime_ns)
+    else:
+        marker = _attempt_marker(run_dir, stage_log_path)
     h = hashlib.sha1()
     h.update(str(project.resolve()).encode("utf-8"))
     h.update(b":")
@@ -795,7 +835,10 @@ def ingest(project: Path,
     power_mw = total_power_w * 1000.0 if total_power_w is not None else None
 
     ppa_path = project / "reports" / "ppa.json"
-    run_id = _compute_run_id(project, ppa_path)
+    # run_dirs[0] / stage_log_path were already resolved above; feeding them in
+    # gives a no-PPA attempt a distinct identity instead of a constant one (P1-R1).
+    run_id = _compute_run_id(project, ppa_path,
+                             run_dirs[0] if run_dirs else None, stage_log_path)
 
     # design_class's SIZE band must be STABLE across re-ingests of the SAME project.
     # An FLW-0024 place-abort re-ingest has cell_count=NULL (no cells were placed),

@@ -170,20 +170,39 @@ fi
 # LAST by run_features.sh/run_labels.sh), not just an early CSV: a stage killed
 # mid-way leaves fresh-looking CSVs but no marker, and building graphs on such
 # a half-finished dir silently loses labels (2026-07-05 irdrop incident).
+#
+# The marker must also match the DEF by CONTENT, not by mtime (P0-R8,
+# failure-patterns.md #52). Mtimes are not identity: a content-preserving touch,
+# a timestamp-preserving copy, a DEF written with an older mtime, or an
+# extractor-schema change all read "fresh" while the CSVs describe a different
+# layout. The audit reproduced this on the real picorv32_core — DIEAREA edited,
+# mtime restored, stale X/Y reused under an `ok` manifest.
+#
+# Fail-closed: a marker with NO recorded provenance is UNVERIFIABLE, so the
+# stage re-runs once and is strict from then on. R2G_STAGE_FRESHNESS=mtime
+# restores the legacy comparison for operators who need it (matches the
+# R2G_SIGNOFF_GATE=warn escape hatch).
 FEATURES_DIR="$PROJECT_DIR/features"
 LABELS_DIR="$PROJECT_DIR/labels"
-needs_stage() {  # dir probe_csv completion_marker_json
+STAGE_FRESHNESS="${R2G_STAGE_FRESHNESS:-content}"
+needs_stage() {  # dir probe_csv completion_marker_json stage_name
   [[ ! -f "$1/$2" ]] && return 0
-  [[ "$1/$2" -ot "$DEF" ]] && return 0
   [[ ! -f "$3" ]] && return 0
-  [[ "$3" -ot "$DEF" ]] && return 0
-  return 1
+  if [[ "$STAGE_FRESHNESS" == "mtime" ]]; then
+    [[ "$1/$2" -ot "$DEF" ]] && return 0
+    [[ "$3" -ot "$DEF" ]] && return 0
+    return 1
+  fi
+  # Content-based: reuse only when the marker records THIS DEF's digest.
+  python3 "$(dirname "${BASH_SOURCE[0]}")/_stage_provenance.py" check \
+    --stats "$3" --def "$DEF" --stage "${4:-stage}" && return 1
+  return 0
 }
-if needs_stage "$FEATURES_DIR" "nodes_gate.csv" "$REPORTS_DIR/features_stats.json"; then
+if needs_stage "$FEATURES_DIR" "nodes_gate.csv" "$REPORTS_DIR/features_stats.json" features; then
   echo "--- features stale/missing/incomplete: running run_features.sh ---"
   bash "$(dirname "${BASH_SOURCE[0]}")/run_features.sh" "$PROJECT_DIR" "$PLATFORM" "$FLOW_VARIANT_ARG"
 fi
-if needs_stage "$LABELS_DIR" "wirelength.csv" "$REPORTS_DIR/labels_stats.json"; then
+if needs_stage "$LABELS_DIR" "wirelength.csv" "$REPORTS_DIR/labels_stats.json" labels; then
   echo "--- labels stale/missing/incomplete: running run_labels.sh ---"
   bash "$(dirname "${BASH_SOURCE[0]}")/run_labels.sh" "$PROJECT_DIR" "$PLATFORM" "$FLOW_VARIANT_ARG"
 fi

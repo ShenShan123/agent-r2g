@@ -28,3 +28,80 @@ def write_json_atomic(path: Path | str, obj, *, indent: int = 2,
         os.replace(tmp, path)
     finally:
         tmp.unlink(missing_ok=True)     # no stray tmp on a failed dump/replace
+
+
+# --------------------------------------------------------------------------- #
+# Report provenance envelope (P0-R7, failure-patterns.md #52).                 #
+# --------------------------------------------------------------------------- #
+# A signoff report lives at <project>/reports/<tool>.json — PROJECT level, not
+# run level — while a project accumulates many backend RUN_* dirs. Nothing in
+# drc.json or lvs.json said WHICH run's layout it judged, so the def-graph
+# signoff gate could certify run Z's DEF with run A's clean reports. The audit
+# reproduced it on two real wbuart32 runs with different DEF digests (R1
+# d6426fae…, R2 cc2da796…): the gate returned pass_with_caveats because it only
+# checked that the R2 DEF lived under the R2 dir — it never asked where the
+# reports came from.
+#
+# This stamps the missing half. Attribution order, most authoritative first:
+#   1. an explicit run_dir the caller already resolved;
+#   2. <ORFS results>/.r2g_restaged — the identity-bearing marker
+#      _restage_for_signoff.sh writes, naming the RUN it staged the artifacts
+#      FROM (full-pipeline Issue 7). This is the run the tool actually judged.
+#   3. the newest backend RUN_* — a guess, recorded as such via `source`.
+#
+# Absent provenance is a legacy report, not a lie: the gate treats it as an
+# explicit caveat rather than a blocker, so existing projects keep passing and
+# self-heal on their next signoff run. A report that DISAGREES with the selected
+# run is the hard block.
+
+def _restage_run_tag(project_root: Path) -> str:
+    """The RUN basename recorded by the last restage, if we can still see it."""
+    for marker in sorted(project_root.glob("backend/RUN_*/.r2g_restaged")):
+        try:
+            tag = marker.read_text(encoding="utf-8").strip().splitlines()[0].strip()
+            if tag:
+                return tag
+        except (OSError, IndexError):
+            continue
+    return ""
+
+
+def run_provenance(project_root: Path | str, run_dir: Path | str | None = None) -> dict:
+    """The `provenance` envelope every signoff report carries.
+
+    `source` records HOW the run was attributed so a consumer can weigh it:
+    'explicit' and 'restage_marker' are authoritative, 'latest_run' is a guess.
+    """
+    project_root = Path(project_root)
+    if run_dir:
+        rd = Path(run_dir)
+        return {"run_tag": rd.name, "run_dir": str(rd.resolve()), "source": "explicit"}
+
+    tag = _restage_run_tag(project_root)
+    if tag:
+        rd = project_root / "backend" / tag
+        return {"run_tag": tag,
+                "run_dir": str(rd.resolve()) if rd.is_dir() else None,
+                "source": "restage_marker"}
+
+    runs = sorted(project_root.glob("backend/RUN_*"))
+    if runs:
+        return {"run_tag": runs[-1].name, "run_dir": str(runs[-1].resolve()),
+                "source": "latest_run"}
+    return {"run_tag": None, "run_dir": None, "source": "none"}
+
+
+def stamp_run_provenance(result: dict, project_root: Path | str,
+                         run_dir: Path | str | None = None) -> dict:
+    """Attach the provenance envelope to a report dict in place; return it.
+
+    Never raises — an unattributable report must still be written (it degrades to
+    the gate's `unknown` caveat), because losing the whole verdict would be worse
+    than losing its attribution.
+    """
+    try:
+        result["provenance"] = run_provenance(project_root, run_dir)
+    except Exception as e:  # noqa: BLE001
+        result["provenance"] = {"run_tag": None, "run_dir": None,
+                                "source": "error", "detail": str(e)[:200]}
+    return result

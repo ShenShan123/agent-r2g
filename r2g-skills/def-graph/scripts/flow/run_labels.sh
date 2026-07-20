@@ -261,5 +261,13 @@ run_soft rc "$LABELS_DIR/net_ground_cap.csv $LABELS_DIR/coupling_cap.csv $LABELS
 # --- Stats roll-up ---------------------------------------------------------
 python3 "$LABELS_SRC/compute_label_stats.py" "$LABELS_DIR" "$REPORTS_DIR/labels_stats.json" "$DESIGN_NAME" "$PLATFORM"
 
+# --- Stage provenance (P0-R8) ----------------------------------------------
+# Record WHICH DEF these labels were extracted from (full sha256, plus the
+# backend run/variant), so the graph stage can reuse this dir only when the DEF
+# is byte-identical. Mtimes are not identity — see _stage_provenance.py.
+python3 "$(dirname "${BASH_SOURCE[0]}")/_stage_provenance.py" stamp \
+  --stats "$REPORTS_DIR/labels_stats.json" --def "$DEF" --stage labels \
+  --run-dir "${RUN_DIR:-}" --flow-variant "${FLOW_VARIANT_ARG:-}" --platform "$PLATFORM"
+
 echo "Labels: $LABELS_DIR"
 echo "Stats:  $REPORTS_DIR/labels_stats.json"

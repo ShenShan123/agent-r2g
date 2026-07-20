@@ -166,7 +166,22 @@ def detect_issues(text: str, project: Path) -> list:
     # because flow.log contains intermediate repair messages that are not
     # authoritative. The PPA-based checks (below) use 6_report.json which
     # reflects the final state after all repairs.
-    if not ppa_data:
+    #
+    # ...and skip equally when the STAGE LEDGER says the flow ran to a clean
+    # finish (P1-R3, failure-patterns.md #52). The guard above recognized the
+    # hazard ("intermediate repair messages that are not authoritative") but
+    # keyed it solely on ppa.json's presence — and run_orfs.sh never writes
+    # ppa.json, so on any run where extract_ppa was not invoked the
+    # acknowledged-unreliable text was trusted with no substitute authority. The
+    # audit's untouched SUCCESSFUL wbuart32 run — six stages at status 0, clean
+    # DRC, no ppa.json — was diagnosed kind=timing_violation from a
+    # repair_timing progress line, and ingest_run writes every diagnosis issue
+    # straight into failure_events as a first-class signature. That teaches the
+    # learner a repair strategy for a violation that was already resolved.
+    #
+    # A terminal-CLEAN ledger is the veto; a failed or incomplete one is not, so
+    # a genuine terminal timing failure without PPA stays diagnosable.
+    if not ppa_data and not _terminal_stages_clean(project):
         # Neutralize the clean-timing negations BEFORE the substring scan: the
         # phrase 'no setup violations found' CONTAINS the alarm substring 'setup
         # violation' (violations = violation + s), so a clean STA report
@@ -326,6 +341,40 @@ def _latest_run(project: Path):
     runs = sorted([d for d in backend.iterdir()
                    if d.is_dir() and d.name.startswith('RUN_')])
     return runs[-1] if runs else None
+
+
+_FULL_FLOW_STAGES = ('synth', 'floorplan', 'place', 'cts', 'route', 'finish')
+
+
+def _stage_passed(status) -> bool:
+    """The ledger writes an int shell exit code; fixtures/legacy writers use
+    'pass'/'fail' strings. Mirrors ingest_run._norm_stage_status."""
+    if isinstance(status, bool):
+        return status
+    if isinstance(status, (int, float)):
+        return int(status) == 0
+    return str(status).strip().lower() in ('0', 'pass', 'passed', 'ok', 'success')
+
+
+def _terminal_stages_clean(project: Path) -> bool:
+    """Did this run reach a clean finish according to its stage ledger?
+
+    The authority that build_diagnosis's text fallback lacked (P1-R3). True only
+    when EVERY full-flow stage is present and passing — an absent, partial or
+    unreadable ledger returns False, so an unknown state never silently
+    suppresses a real diagnosis.
+    """
+    try:
+        stages, _ = read_stage_summary(project)
+    except Exception:  # noqa: BLE001 — diagnosis must never fail on its own evidence
+        return False
+    if not stages:
+        return False
+    seen = {}
+    for s in stages:                      # last record per stage wins (resume/rerun)
+        if s.get('stage'):
+            seen[str(s['stage']).strip().lower()] = s.get('status')
+    return all(st in seen and _stage_passed(seen[st]) for st in _FULL_FLOW_STAGES)
 
 
 def read_stage_summary(project: Path):

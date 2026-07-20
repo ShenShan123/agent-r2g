@@ -334,6 +334,64 @@ handling, and the `compute_feature_stats` honesty gate). Rule: a fixture liberty
 MUST be one-attribute-per-line (the parser uses anchored `re.match`) — a crammed
 pin silently drops direction/clock/cap and the test passes vacuously.
 
+## Generation identity: schema version + staged publish (2026-07-20)
+
+Three properties every published generation now carries. All three come from the
+2026-07-19 post-consolidation audit (failure-patterns.md #52 → the 2026-07-20
+identity-chain round), whose shared finding was that dataset identity was being
+*inferred* from file presence and mtimes rather than *carried*.
+
+**`graph_schema_version` (P0-N7).** `build_graphs.GRAPH_SCHEMA_VERSION` (currently
+`1`) rides every `graph_manifest.json`, and `tools/verify_graph_dataset.py` pins
+`SUPPORTED_GRAPH_SCHEMA` to the version it can check. **Bump them together**, and
+add a HISTORY line to the constant's docstring in `build_graphs.py` saying what
+changed.
+
+A manifest with **no** version — anything published before 2026-07-20 — is
+rejected by the verifier with a rebuild hint, not grandfathered. That is
+intentional: an old generation verified against new expectations produces a
+verdict you cannot trust in either direction. The audit's real picorv32 manifest
+read `status: ok` while scoring 171/186 because 14 `y_raw`/`edge_y_raw` fields and
+one HPWL check belonged to a newer contract. Rebuild it (`run_graphs.sh`) rather
+than reasoning about which of the 15 failures matter.
+
+Why a version when the manifest already lists `x_schema_per_type` / `y_schema` /
+`y_raw_schema`: those are structural and self-describing, but they do not ORDER
+two generations, and they are blind to a semantic change that preserves column
+names and arity — a unit change, a normalization-base change, a re-ordering of
+`y`-slot meanings. (The sibling rtl-acquire skill has versioned its pre-layout
+`netlist_graph.pt` since the start; this closes the asymmetry.)
+
+**Staged publish + `generation_id` (P0-R9).** `build_graphs.py` builds every view
+into `dataset/.staging-<generation_id>/` and moves them into the live dataset dir
+only once all of them exist; the staging dir is removed in a `finally`. Before
+this, views were written directly into the live dir and only the manifest was
+replaced atomically — so a failure after the first view left a MIXED generation
+under the previous, still-green manifest.
+
+This is **not** claimed to be atomic: POSIX has no multi-file rename. What it
+guarantees is that a failed rebuild leaves the previous generation byte-identical,
+because every realistic failure (build error, OOM, the `GRAPH_TIMEOUT` kill, an
+unwritable output) happens before anything live is touched. The residual window is
+the commit loop itself — `os.replace` over already-materialized files. The
+`generation_id` in the manifest exists so a torn commit is at least detectable.
+
+**Stage provenance (P0-R8).** `scripts/flow/_stage_provenance.py` stamps the DEF's
+full sha256, the backend run tag/variant, and an X/Y `STAGE_SCHEMA_VERSION` into
+`reports/{features,labels}_stats.json` — the stage-completion markers, so there is
+still ONE marker per stage. `run_graphs.sh` reuses a features/ or labels/ dir only
+when that record matches the DEF it is about to graph, byte for byte.
+
+Mtimes were never identity: a content-preserving `touch`, any timestamp-preserving
+copy or restore, a DEF written with an older mtime than the CSVs, a same-second
+pair, and any extractor-schema change all read "fresh". The audit edited the real
+`picorv32_core` DEF's `DIEAREA`, restored the mtime, and watched the stale X/Y get
+attached to the new layout under an `ok` manifest.
+
+An unstamped legacy marker is *unverifiable*, hence treated as stale — the stage
+re-runs once and is strict from then on. `R2G_STAGE_FRESHNESS=mtime` restores the
+old comparison for an operator who needs it.
+
 ## Provenance + audit (2026-07-05)
 
 Ported from the operator-provided `RTL2Graph/` pipeline (odb2def, base_garph,

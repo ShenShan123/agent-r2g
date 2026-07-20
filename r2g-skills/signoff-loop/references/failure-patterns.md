@@ -3130,17 +3130,136 @@ Nine confirmed defects, all fixed TDD (each test proven red pre-fix, green post-
   stamp (`if _planned_sv is not None`) and no already-planned arm can retroactively gain one; at migration
   time there were **1454 unjudged arm entries, none stamped**, so every one stays grandfathered.
 
-**Audited but NOT fixed — architectural or operator-decision, listed so the next round does not re-derive
-them:** P0-R3 (above), P0-R5 (include headers not vendored/frozen), P0-R7 (project-level signoff
-reports not bound to the selected DEF's digest), P0-R8 (feature/label freshness is mtime- not
-content-based), P0-R9 (graph publication is not an atomic generation swap), P0-N2 (synth `config.mk` is
-re-parsed at promote time, so top params/defines are not frozen), P0-N7 (no graph schema-version contract),
-P1-N6 (relocated corpora keep absolute acquisition-time paths), P1-R1 (no-PPA re-ingests collapse distinct
-attempts), P1-R3 (diagnosis can learn a superseded intermediate timing failure). These share ONE root the
-report names correctly: **identity is inferred from mutable paths, filenames, timestamps, and file
-presence** instead of carried as one immutable generation id. Fixing them piecemeal adds another local
-guard per symptom; the durable fix is a compilation-input → candidate → project → run → X/Y → graph
-identity chain.
+**The remaining ten were closed on 2026-07-20 — see the next section.** They shared ONE root the report
+names correctly: **identity is inferred from mutable paths, filenames, timestamps, and file presence**
+instead of carried as one immutable generation id.
+
+### 2026-07-20 identity-chain round (failure-patterns #52 continued — the 10 parked claims closed)
+
+The claims #52 deliberately parked as "architectural" (P0-R5/R7/R8/R9, P0-N2, P0-N7, P1-N6, P1-R1, P1-R3)
+plus the P0-R3 operator ruling. All ten re-derived against live code first; **all ten reproduced** (P0-R7
+and P1-N6 partially — see below). Fixed TDD, every test proven red by stashing only the source. Tests
+1485 → 1534; honesty gates green; `check_db_integrity` unchanged at `0 alarm, 1 warn, 15 pass`; committed
+`knowledge.sqlite` + `heuristics.json` **unchanged**.
+
+The unifying move is the one the report asked for: **carry identity instead of inferring it.** Each fix is
+a call site of a small shared recorder, not another bespoke guard.
+
+**def-graph — the dataset generation is now identified, verified, and published as a unit.**
+
+- **P0-R8 — feature/label freshness was mtime-based.** `run_graphs.sh needs_stage()` compared CSV/marker
+  mtimes to the DEF's. Mtimes are not identity: a content-preserving `touch`, any timestamp-preserving
+  copy/restore, a DEF written with an OLDER mtime (always reads fresh), a same-second pair (`-ot` is
+  strict), and any extractor-schema change all slip through. New shared `scripts/flow/_stage_provenance.py`
+  (sibling of `_provenance.sh`/`_select_run.sh`, one copy) stamps the DEF's **sha256** + run tag + variant
+  + an X/Y `STAGE_SCHEMA_VERSION` into each stage's stats JSON — the completion marker, so there is still
+  ONE marker — and `needs_stage` reuses a stage only on an exact digest match. The digest is NOT
+  reimplemented: it calls `signoff_gate._def_fingerprint`, which already streamed exactly this hash for
+  exactly this reason. Fail-closed — an unstamped legacy marker is *unverifiable*, hence stale, so a stage
+  re-runs once and is strict forever after (`R2G_STAGE_FRESHNESS=mtime` restores the old comparison).
+- **P0-R9 — graph publication was not atomic.** Each `{v}_graph.pt` was written DIRECTLY into the live
+  dataset dir and only the manifest was `os.replace`d, so a failure after the first view left a MIXED
+  generation (new b, old c–f) under the previous still-green manifest. The atomic manifest rename was a
+  commit point in name only: it committed a pointer to files already mutated in place. `build_graphs.py`
+  now builds every view into `dataset/.staging-<gen>/` and moves them into place only once ALL exist,
+  cleaning the staging dir in a `finally`. **This is deliberately not claimed to be atomic** — POSIX has no
+  multi-file rename, and overclaiming would be the same species of lie the audit is about. What it buys is
+  that every failure that realistically happens (build error, OOM, the 2400 s timeout, an unwritable
+  output) now occurs before anything live is touched; the residual window is an `os.replace` loop over
+  already-materialized files. `generation_id` in the manifest makes a torn commit *detectable*.
+- **P0-N7 — no graph schema-version contract.** The manifest recorded file presence and status but never
+  the tensor contract, so an old generation stayed officially `ok`; the audit's real picorv32 manifest read
+  `status: ok` while scoring 171/186 (14 `y_raw`/`edge_y_raw` fields + one HPWL check belonged to a newer
+  contract). The self-describing column lists (`x_schema_per_type`/`y_schema`) are structural but do not
+  ORDER generations and are blind to a semantic change that preserves names and arity. `build_graphs.
+  GRAPH_SCHEMA_VERSION` (=1) now rides every manifest, mirrored by `verify_graph_dataset.SUPPORTED_GRAPH_
+  SCHEMA`. An unversioned manifest is **rejected, not grandfathered** — that is the point: 15 scattered
+  tensor-field mismatches are a puzzle, one "rebuild this generation" is an instruction, and verifying an
+  old generation against new expectations cannot yield a trustworthy verdict either way. *Note the
+  asymmetry this closes: rtl-acquire has versioned its pre-layout `netlist_graph.pt` since the start.*
+- **P0-R7 — signoff reports were never bound to the run (PARTIAL claim).** The report understates what
+  existed: `_check_binding` is real and enforced. Its blind spot is direction. It binds DEF→run_dir, and in
+  the normal flow the DEF is *discovered under* that run dir, so the check is near-tautological — while the
+  verdicts themselves come from PROJECT-level `reports/`, and a project accumulates many `RUN_*`. Two real
+  wbuart32 runs (R1 `d6426fae…`, R2 `cc2da796…`) let R1's clean bundle certify R2's layout. New
+  `report_io.stamp_run_provenance` puts an attribution envelope on `drc.json`/`lvs.json` (run tag + how it
+  was attributed), preferring the **`.r2g_restaged` marker** — which already names the run whose artifacts
+  the tool actually judged (full-pipeline Issue 7) — over the newest-run guess. `signoff_gate.
+  _check_report_binding` then BLOCKS on a report naming a different run. Unattributed reports are a caveat,
+  not a blocker (re-running DRC/LVS corpus-wide purely for attribution costs hours per design; they
+  self-heal). **And a single-run project is `bound` even unattributed** — with one run there is no other
+  run the verdicts could describe, so flagging it would put every existing clean design into
+  `pass_with_caveats` and drown the caveats that mean something. *Lesson: a guard that fires on every
+  project fires on none — three existing tests going amber was the signal that the RULE was wrong, not
+  the tests.*
+
+**rtl-acquire — the compilation input, not just the RTL bytes, is now frozen.**
+
+- **P0-N2 — compilation inputs were mutable after proof.** Promotion re-parsed the synth project's MUTABLE
+  `config.mk` for top params/frontend/memory. The audit qualified a design at `WIDTH 8`, edited config.mk
+  to `WIDTH 16` without touching one RTL byte, and promotion carried WIDTH=16 into the full flow while
+  reporting `source_bytes_verified=true`. Sharpest detail: `design_meta.json` **already carried a frozen
+  `top_parameters`** and promotion never read it — the immutable copy existed and the mutable one won.
+  Expansion now freezes a typed `compile_manifest` (top params, defines, frontend, memory bits, variant,
+  ordered include dirs, header closure, `config_digest`); promotion reads THAT, and any config.mk
+  disagreement is `compile_inputs_changed_since_synth`.
+- **P0-R5 — include headers were neither digested nor vendored.** `source_manifest` covered `source_files`
+  only and `vendor_rtl` copied only those, while promotion appended the synth-time EXTERNAL
+  `VERILOG_INCLUDE_DIRS` to the promoted config. New `_header_closure` walks `` `include `` transitively
+  (a lexical scan, deliberately over-approximating — digesting a header we did not need costs a few KB;
+  missing one is the defect), digests it into the manifest, and `vendor_headers` copies it into the
+  project. Headers keep their EXACT basename (an `include` resolves by name, so `vendor_rtl`'s uniquifying
+  rename would break them); a genuine basename collision is REPORTED, never silently resolved to whichever
+  copy landed last. The promoted config now lists only the vendored `rtl/`, so the project is
+  self-contained — the audit's own acceptance test.
+- **P1-N6 — relocated corpora could not re-promote (PARTIAL claim).** ENOENT was already a structured
+  failure; the live hole was **EACCES**, which `Path.is_file()` re-raises, so one unreadable candidate
+  aborted an entire `--all` run. **Measured, not assumed: 708/708 local `design_meta.json` point at
+  `/home/yuany/...` (absent here) and 708/708 have a complete local `rtl/`.** `resolve_candidate_rtl` now
+  falls back to the corpus's own vendored copy — flat name, then the **longest matching path tail**, then a
+  unique recursive basename match. The tail rule matters: 34 of the 708 vendor a NESTED tree and several
+  share a basename across subdirectories, so a basename-only match would pick the wrong file. Ambiguous
+  matches are left unresolved rather than guessed. **Result: 708/708 now resolve** (674 by flat name, 34 by
+  tail). The manifest KEY stays the RECORDED path — relocation changes where bytes are READ from, never
+  which digest they are checked against, so relocation cannot launder a byte change.
+
+**signoff-loop — attempt identity, terminal-state authority, and the legacy-evidence ruling.**
+
+- **P1-R1 — no-PPA re-ingests collapsed distinct attempts.** `_compute_run_id` hashed project path +
+  `ppa.json` mtime, and the marker degenerates to `""` when that file is absent — so EVERY no-PPA ingest of
+  a project shared one id and `INSERT OR REPLACE` overwrote the earlier row, deleting its `failure_events`
+  and `run_violations` too. No-PPA is the COMMON case, not exotic: `run_orfs.sh` never writes ppa.json, so
+  every attempt aborting before `extract_ppa` lands here. The marker now falls back to the RUN tag
+  (`RUN_<ts>_<pid>_<4 hex>`, already collision-resistant by construction) plus a digest of that attempt's
+  stage ledger — distinct attempts get distinct rows, an unchanged re-ingest stays idempotent. **The
+  with-ppa derivation is byte-identical** (pinned by a test): changing it would re-key every existing row
+  and orphan its projections. *The identity was in hand all along — ingest already resolves the RUN dir a
+  few lines above and simply never fed it into the hash.*
+- **P1-R3 — diagnosis learned superseded intermediate timing failures.** Rule #7's comment already named
+  the hazard ("flow.log contains intermediate repair messages that are not authoritative") but keyed the
+  guard solely on `ppa.json` presence — and run_orfs.sh never writes it, so on any run without an explicit
+  `extract_ppa` the acknowledged-unreliable text was trusted with NO substitute authority. The audit's
+  untouched SUCCESSFUL wbuart32 (six stages at status 0, clean DRC) was diagnosed `kind=timing_violation`
+  from a `repair_timing` progress line — and `ingest_run` writes every diagnosis issue straight into
+  `failure_events` as a first-class signature, teaching a repair strategy for an already-resolved
+  violation. New `_terminal_stages_clean` makes the stage ledger authoritative: a terminal-CLEAN ledger
+  vetoes the text fallback. The veto is narrow by design — absent, partial or unreadable ledgers return
+  False — so a genuine terminal timing failure without PPA stays diagnosable.
+- **P0-R3 — legacy unverifiable A/B wins: QUARANTINE FORWARD ONLY (operator ruling, 2026-07-20).** #52
+  ruled this deliberate design and escalated it; the ruling is to stop legacy evidence driving NEW
+  transitions while preserving existing deployments. An ABSENT `provenance_complete` with NULL arm run_ids
+  is no longer grandfathered-countable. **Nothing is demoted**: such a key simply nets 0w0l and
+  `judge_recipe`'s `return None` leaves its state untouched. An absent-provenance row that DOES carry both
+  run_ids is reconstructible and gets the normal live re-derivation. New verified evidence still governs
+  fully, including demoting a legacy-promoted key that now loses. **Verified on the real store by
+  re-judging all 114 trial keys: 0 lifecycle statuses changed, promoted 25 → 25**, with the 77 legacy
+  decisive trials (matching the audit's count exactly) excluded. Rows stay in `ab_trials` as honest
+  history — record the truth, filter at the consumer, the same firewall the provenance filter uses.
+
+**Two contract changes downstream consumers should know about** (both deliberate, both test-pinned):
+`promote_candidates` now returns the specific `rtl_files_unresolved` instead of a generic `failed` for
+unreachable RTL (matching the established per-cause convention), and an unversioned graph manifest now
+FAILS `verify_graph_dataset.py` with a rebuild hint instead of dribbling out mismatched tensor checks.
 
 ### 2026-07-16 full-pipeline issue-report audit (failure-patterns #51 — 12 issues + 1 found in verification)
 

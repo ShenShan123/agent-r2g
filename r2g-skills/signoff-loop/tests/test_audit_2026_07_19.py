@@ -204,16 +204,25 @@ def test_absent_recipe_row_yields_no_version(tmp_path):
     assert el._recipe_status_version(conn, dict(_PARKED_KEY)) is None
 
 
-def test_parked_guard_does_not_block_ordinary_recipes(tmp_path):
-    """The guard keys on 'parked' only — a normal candidate still judges."""
+def test_parked_guard_does_not_block_ordinary_recipes(tmp_path, monkeypatch):
+    """The guard keys on 'parked' only — a normal candidate still judges.
+
+    The evidence must now be VERIFIABLE to drive a transition (P0-R3, 2026-07-20:
+    untraceable legacy rows with NULL run_ids are quarantined), so this seeds a
+    stamped trial with resolvable arms rather than the bare NULL-run_id row it
+    used to rely on. The assertion under test is unchanged: a non-parked key
+    reaches its corpus and transitions.
+    """
     conn = _conn(tmp_path)
     key = dict(symptom_id="S2", design_class="logic/small",
                platform="nangate45", strategy="density_relief")
     _seed_candidate(conn, key, version=1)
+    monkeypatch.setattr(ab_runner, "_runs_exist", lambda *a, **k: True)
+    monkeypatch.setattr(ab_runner, "_arms_owned", lambda *a, **k: True)
     conn.execute(
         "INSERT INTO ab_trials (symptom_id, design_class, platform, strategy,"
         " verdict, metrics_json, arm_a_run_id, arm_b_run_id) VALUES (?,?,?,?,?,?,?,?)",
         (key["symptom_id"], key["design_class"], key["platform"], key["strategy"],
-         "win", json.dumps({}), None, None))
+         "win", json.dumps({"provenance_complete": True}), "RID_A", "RID_B"))
     conn.commit()
     assert ab_runner.judge_recipe(conn, **key) == "promoted"

@@ -56,7 +56,9 @@ import glob
 import json
 import math
 import os
+import shutil
 import sys
+import uuid
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -77,6 +79,32 @@ GATE_COLS = pad_schema_cols(GATE_SCHEMA)
 NET_COLS = pad_schema_cols(NET_SCHEMA)
 IOPIN_COLS = pad_schema_cols(IOPIN_SCHEMA)
 PIN_COLS = pad_schema_cols(PIN_SCHEMA)
+
+# --- Published tensor contract (P0-N7, failure-patterns.md #52) ------------
+# The version of the TENSOR CONTRACT this builder emits — bumped whenever a
+# published graph's tensors change meaning, arity, or normalization. It rides in
+# every graph_manifest.json so a consumer can tell a current generation from an
+# older, structurally incompatible one WITHOUT probing individual tensor fields.
+#
+# Why a version and not just the self-describing column lists already in the
+# manifest (x_schema_per_type / y_schema / y_raw_schema): those are structural,
+# but they do not ORDER two generations and they are blind to a semantic change
+# that preserves column names and arity (a unit change, a normalization base
+# change, a re-ordering of y-slot meanings). The audit's real picorv32 manifest
+# read `status: ok` while scoring 171/186 against the current contract — 14
+# y_raw/edge_y_raw fields and one HPWL check belonged to a newer generation.
+#
+# The sibling rtl-acquire skill has versioned its pre-layout netlist graphs since
+# the start (graph_stats.py `graph_schema_version`); this closes the asymmetry.
+#
+# HISTORY — bump this AND tools/verify_graph_dataset.py's SUPPORTED_GRAPH_SCHEMA
+# together, and state the migration in references/graph-dataset.md:
+#   1  2026-07-20  first versioned contract. x[N,10] / y[N,6] + the y_raw,
+#                  edge_y_raw, rc_edge_y_raw twins (2026-07-14), HeteroData
+#                  default (2026-07-16), LEF-geometry pin centers / HPWL and
+#                  num_drivers no-fill (2026-07-14). Everything published before
+#                  this stamp is UNVERSIONED and must be rebuilt, not trusted.
+GRAPH_SCHEMA_VERSION = 1
 
 
 def _torch():
@@ -624,12 +652,43 @@ def main():
               file=sys.stderr)
 
     os.makedirs(args.out_dir, exist_ok=True)
-    # Absolute paths of every {v}_graph*.pt this build writes — the set stale-file
-    # cleanup keeps (full-pipeline #6, 2026-07-16).
+
+    # --- Staged generation (P0-R9, failure-patterns.md #52) ----------------
+    # Every .pt is built into a private staging dir and only MOVED into the live
+    # dataset dir once ALL of them exist. Before this, each view was written
+    # directly into the live dir and only the manifest was replaced atomically —
+    # so a failure after the first view (the audit reproduced it by making the C
+    # output unwritable on a real 52,574-node picorv32 rebuild) left a MIXED
+    # generation: a new b beside an old c..f, under the previous still-green
+    # manifest. The atomic manifest rename was a commit point in name only; it
+    # committed a pointer to files that had already been mutated in place.
+    #
+    # This does NOT make publication a single atomic operation — POSIX has no
+    # multi-file rename. What it does is move every failure that can actually
+    # happen (build errors, OOM, the run_graphs.sh timeout, an unwritable
+    # output) into the staging phase, where nothing live has been touched yet.
+    # The residual window is the commit loop itself: N already-materialized
+    # os.replace calls, milliseconds rather than minutes. `generation_id` is
+    # stamped in the manifest so a torn commit is at least DETECTABLE.
+    generation_id = uuid.uuid4().hex[:16]
+    staging = os.path.join(args.out_dir, f".staging-{generation_id}")
+    if os.path.isdir(staging):  # pragma: no cover - uuid collision
+        shutil.rmtree(staging)
+    os.makedirs(staging)
+
+    # Absolute LIVE paths of every {v}_graph*.pt this build publishes — the set
+    # stale-file cleanup keeps (full-pipeline #6, 2026-07-16).
     written_pt = set()
+    # staged path -> live path, replayed by the commit loop below.
+    staged_pt = {}
     manifest = {
         "design": args.design,
         "graph_id": args.graph_id,
+        # The tensor contract this generation was built against (P0-N7). A
+        # consumer that does not recognize the version must reject the dataset
+        # rather than probe individual tensor fields.
+        "graph_schema_version": GRAPH_SCHEMA_VERSION,
+        "generation_id": generation_id,
         # The dataset default is heterogeneous (2026-07-16): {v}_graph.pt is a
         # torch_geometric HeteroData re-view of the verified homogeneous Data.
         # 'homo' restores the legacy format; 'both' ships both. verify_graph_dataset.py
@@ -651,51 +710,71 @@ def main():
         "status": ("ok" if all(h["status"] == "ok" for h in health.values())
                    else "ok_with_label_gaps"),
     }
-    for v in variants:
-        # The homogeneous Data is ALWAYS built first — it is the verified source of
-        # truth (every filter/sort/label-join happens here). The hetero output is a
-        # pure value-preserving re-view (graph_lib.homo_to_hetero).
-        data = BUILDERS[v](views7, label_dfs, args.design, args.design, args.graph_id, args.features, rc=rc)
-        stats = dict(_variant_stats(v, data))
-        paths = {}
-        if args.kind in ("hetero", "both"):
-            hetero = gl.homo_to_hetero(data)
-            het_pt = os.path.join(args.out_dir, f"{v}_graph.pt")
-            torch.save(hetero, het_pt)
-            paths["hetero"] = os.path.abspath(het_pt)
-            written_pt.add(os.path.abspath(het_pt))
-            stats["hetero"] = _hetero_stats(hetero)
-        if args.kind in ("homo", "both"):
-            # In 'both' mode the canonical {v}_graph.pt is the hetero default; the
-            # homo lands beside it as {v}_graph_homo.pt.
-            homo_pt = os.path.join(args.out_dir,
-                                   f"{v}_graph.pt" if args.kind == "homo" else f"{v}_graph_homo.pt")
-            torch.save(data, homo_pt)
-            paths["homo"] = os.path.abspath(homo_pt)
-            written_pt.add(os.path.abspath(homo_pt))
-        stats["path"] = paths.get("hetero", paths.get("homo"))
-        stats["paths"] = paths
-        manifest["variants"][v] = stats
-        print(f"{v}_graph[{args.kind}]: nodes={data.x.shape[0]} edges={data.edge_index.shape[1]} "
-              f"-> {stats['path']}")
+    def _stage(obj, name):
+        """Write one graph into staging; record where it will be published."""
+        staged = os.path.join(staging, name)
+        live = os.path.abspath(os.path.join(args.out_dir, name))
+        torch.save(obj, staged)
+        staged_pt[staged] = live
+        written_pt.add(live)
+        return live
 
-    # Remove stale graph files so the manifest commit-point describes EXACTLY what is
-    # on disk (full-pipeline #6, 2026-07-16): a rebuild with fewer variants/kinds must
-    # not leave prior {v}_graph*.pt behind (rebuild -v b over bcdef; a hetero-only build
-    # after --kind both left the {v}_graph_homo.pt siblings). ONLY the [b-f]_graph*.pt
-    # family is ours — netlist_graph.pt is owned by the netlist stage. Order: write the
-    # new .pt (above) -> delete stale (here) -> atomic manifest (below).
-    for stale in sorted(glob.glob(os.path.join(args.out_dir, "[b-f]_graph*.pt"))):
-        if os.path.abspath(stale) not in written_pt:
-            os.remove(stale)
-            print(f"removed stale graph file: {stale}")
+    try:
+        for v in variants:
+            # The homogeneous Data is ALWAYS built first — it is the verified source of
+            # truth (every filter/sort/label-join happens here). The hetero output is a
+            # pure value-preserving re-view (graph_lib.homo_to_hetero).
+            data = BUILDERS[v](views7, label_dfs, args.design, args.design, args.graph_id,
+                               args.features, rc=rc)
+            stats = dict(_variant_stats(v, data))
+            paths = {}
+            if args.kind in ("hetero", "both"):
+                hetero = gl.homo_to_hetero(data)
+                # The manifest records the LIVE path, never the staging path — a
+                # staging path leaking into a published manifest would point at a
+                # directory that no longer exists after the commit.
+                paths["hetero"] = _stage(hetero, f"{v}_graph.pt")
+                stats["hetero"] = _hetero_stats(hetero)
+            if args.kind in ("homo", "both"):
+                # In 'both' mode the canonical {v}_graph.pt is the hetero default; the
+                # homo lands beside it as {v}_graph_homo.pt.
+                paths["homo"] = _stage(
+                    data, f"{v}_graph.pt" if args.kind == "homo" else f"{v}_graph_homo.pt")
+            stats["path"] = paths.get("hetero", paths.get("homo"))
+            stats["paths"] = paths
+            manifest["variants"][v] = stats
+            print(f"{v}_graph[{args.kind}]: nodes={data.x.shape[0]} "
+                  f"edges={data.edge_index.shape[1]} -> {stats['path']}")
 
-    man_path = os.path.join(args.out_dir, "graph_manifest.json")
-    tmp = man_path + ".tmp"
-    with open(tmp, "w") as f:
-        json.dump(manifest, f, indent=1)
-    os.replace(tmp, man_path)
-    print("manifest:", man_path)
+        # --- Commit ---------------------------------------------------------
+        # Everything above succeeded, so every file this generation publishes now
+        # exists in staging. Publish in one tight loop, then clean stale, then the
+        # manifest last (it remains the thing consumers read as authoritative).
+        for staged, live in sorted(staged_pt.items()):
+            os.replace(staged, live)
+
+        # Remove stale graph files so the manifest commit-point describes EXACTLY what
+        # is on disk (full-pipeline #6, 2026-07-16): a rebuild with fewer variants/kinds
+        # must not leave prior {v}_graph*.pt behind (rebuild -v b over bcdef; a
+        # hetero-only build after --kind both left the {v}_graph_homo.pt siblings).
+        # ONLY the [b-f]_graph*.pt family is ours — netlist_graph.pt is owned by the
+        # netlist stage.
+        for stale in sorted(glob.glob(os.path.join(args.out_dir, "[b-f]_graph*.pt"))):
+            if os.path.abspath(stale) not in written_pt:
+                os.remove(stale)
+                print(f"removed stale graph file: {stale}")
+
+        man_path = os.path.join(args.out_dir, "graph_manifest.json")
+        tmp = man_path + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(manifest, f, indent=1)
+        os.replace(tmp, man_path)
+        print("manifest:", man_path)
+    finally:
+        # A failed build must leave NO residue: the live dataset keeps its previous
+        # generation byte-identical, and the dataset dir does not accumulate a litter
+        # of half-generations across retries.
+        shutil.rmtree(staging, ignore_errors=True)
 
 
 if __name__ == "__main__":

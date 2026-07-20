@@ -88,6 +88,46 @@ RESULTS = []
 SKIPPED = []
 SIGNOFF_RECHECK = False   # set by --signoff-recheck: enable OpenROAD PDNSim re-run
 
+# --- Published tensor contract (P0-N7, failure-patterns.md #52) ------------
+# The ONE graph schema version this verifier understands. Must track
+# build_graphs.GRAPH_SCHEMA_VERSION — bump both together, and record the
+# migration in def-graph/references/graph-dataset.md.
+SUPPORTED_GRAPH_SCHEMA = 1
+
+
+def check_graph_schema_version(manifest):
+    """Is this generation's tensor contract one we can verify? -> (ok, detail).
+
+    Pure (no RESULTS side effect) so the test suite can exercise every branch
+    without a built dataset.
+
+    An UNVERSIONED manifest is rejected, not grandfathered. That is deliberate
+    and is the whole point of the finding: the audit's real picorv32 manifest
+    read `status: ok` while failing 15 checks that belonged to a newer contract
+    (the y_raw twins + LEF-geometry HPWL). Fifteen scattered tensor-field
+    mismatches are a puzzle; one "rebuild this generation" is an instruction.
+    Verifying an old generation against new expectations cannot produce a
+    trustworthy verdict either way, so refusing is the honest answer.
+    """
+    v = manifest.get("graph_schema_version")
+    if v is None:
+        return False, (
+            "manifest declares no graph_schema_version — this generation predates "
+            f"the versioned contract (v{SUPPORTED_GRAPH_SCHEMA}) and cannot be verified "
+            "against it; rebuild the dataset (run_graphs.sh) rather than trusting it")
+    if not isinstance(v, int):
+        return False, f"graph_schema_version={v!r} is not an int"
+    if v > SUPPORTED_GRAPH_SCHEMA:
+        return False, (
+            f"graph_schema_version={v} is NEWER than this verifier supports "
+            f"(v{SUPPORTED_GRAPH_SCHEMA}) — update tools/verify_graph_dataset.py")
+    if v < SUPPORTED_GRAPH_SCHEMA:
+        return False, (
+            f"graph_schema_version={v} is older than the current contract "
+            f"(v{SUPPORTED_GRAPH_SCHEMA}) — rebuild the dataset or run a versioned "
+            "converter; do not mix generations in one training corpus")
+    return True, f"v{v}"
+
 
 def check(name, ok, detail=""):
     RESULTS.append({"check": name, "ok": bool(ok), "detail": str(detail)[:300]})
@@ -2099,11 +2139,20 @@ def signoff_report_checks(case, design, feat, labs, tensors):
     # step (portless design / no platform deck), unlike a missing report.
     man_p = os.path.join(case, "dataset", "graph_manifest.json")
     sh = {}
+    _man = {}
     if os.path.isfile(man_p):
         try:
-            sh = json.load(open(man_p)).get("signoff_health") or {}
+            _man = json.load(open(man_p)) or {}
+            sh = _man.get("signoff_health") or {}
         except Exception:
-            sh = {}
+            _man, sh = {}, {}
+        # --- Published tensor contract (P0-N7) ------------------------------
+        # Checked here, next to the sign-off provenance gate, because it is the
+        # same class of question: does this generation declare what it IS, or
+        # are we inferring it from the files that happen to be present?
+        _ok, _detail = check_graph_schema_version(_man)
+        check("graph.schema_version supported (generation matches the tensor contract)",
+              _ok, _detail)
     seen = 0
     for tool, fn, ok_states in (("drc", "drc.json", {"clean", "clean_beol"}),
                                 ("lvs", "lvs.json", {"clean", "skipped"})):

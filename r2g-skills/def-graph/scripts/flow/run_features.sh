@@ -195,5 +195,13 @@ done
 python3 "$FEATURES_SRC/compute_feature_stats.py" "$FEATURES_DIR" \
   "$REPORTS_DIR/features_stats.json" "$DESIGN_NAME" "$PLATFORM" "$SPEF_PRESENT"
 
+# --- Stage provenance (P0-R8) ----------------------------------------------
+# Record WHICH DEF these features were extracted from (full sha256, plus the
+# backend run/variant), so the graph stage can reuse this dir only when the DEF
+# is byte-identical. Mtimes are not identity — see _stage_provenance.py.
+python3 "$(dirname "${BASH_SOURCE[0]}")/_stage_provenance.py" stamp \
+  --stats "$REPORTS_DIR/features_stats.json" --def "$DEF" --stage features \
+  --run-dir "${RUN_DIR:-}" --flow-variant "${FLOW_VARIANT_ARG:-}" --platform "$PLATFORM"
+
 echo "Features: $FEATURES_DIR"
 echo "Stats:    $REPORTS_DIR/features_stats.json"

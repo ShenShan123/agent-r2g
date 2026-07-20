@@ -240,6 +240,11 @@ def main():
                 pass
             result['magic_advisory'] = adv
 
+    # Which backend run's layout this verdict judges (P0-R7): a project-level
+    # report must be attributable, or a clean bundle from one run can certify
+    # another run's DEF in the def-graph signoff gate.
+    report_io.stamp_run_provenance(result, project_root)
+
     out_path.parent.mkdir(parents=True, exist_ok=True)
     report_io.write_json_atomic(out_path, result)
     print(out_path)

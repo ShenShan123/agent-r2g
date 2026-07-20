@@ -143,11 +143,18 @@ class PromoteTests(PromoteFixture):
         self.assertFalse((self.base / "bad").exists())
 
     def test_missing_rtl_is_refused(self) -> None:
+        # Status refined from the generic "failed" to a specific
+        # `rtl_files_unresolved` (2026-07-19 audit P1-N6), matching the
+        # established per-cause convention (rtl_bytes_changed_since_synth,
+        # source_manifest_incomplete, rejected_unconstrained_clock). Unreachable
+        # RTL is now reported as unresolved AFTER the vendored-rtl fallback has
+        # also been tried, so this candidate has genuinely nowhere left to look.
         self._mk_candidate("gone", RTL_CLK, top="toy_top")
         (self.root / "downloads" / "gone" / "top.v").unlink()
         res = self._promote("gone")
-        self.assertEqual(res["status"], "failed")
-        self.assertIn("missing on disk", res["reason"])
+        self.assertEqual(res["status"], "rtl_files_unresolved")
+        self.assertIn("could not be resolved", res["reason"])
+        self.assertFalse((self.base / "gone").exists())
 
     def test_combinational_gets_virtual_clock(self) -> None:
         self._mk_candidate("comb", RTL_COMB, top="comb_top")

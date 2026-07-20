@@ -167,6 +167,88 @@ def detect_clock_port(top: str, rtl_files: list[Path]) -> str:
     return ""
 
 
+def _readable_file(p: Path) -> bool:
+    """`p.is_file()` that treats an unreadable mount as absent, not fatal.
+
+    P1-N6 (failure-patterns.md #52): Path.is_file() swallows only ENOENT,
+    ENOTDIR, EBADF and ELOOP — EACCES propagates. A corpus relocated from another
+    user's home therefore raised an uncaught PermissionError out of promote_one,
+    and because main() loops over candidates without a guard, ONE unreadable
+    entry aborted an entire `--all` campaign.
+    """
+    try:
+        return p.is_file()
+    except OSError:
+        return False
+
+
+def resolve_candidate_rtl(rtl_files: list[str], candidate_dir: Path) -> list[dict]:
+    """Locate each synth-proven RTL file, preferring the corpus's OWN copy.
+
+    P1-N6: candidate metadata records acquisition-time ABSOLUTE paths and treats
+    them as authoritative forever. Every one of the 708 `design_meta.json` in
+    this checkout points at `/home/yuany/...`, which does not exist here — while
+    every one of those 708 candidates has a complete local `rtl/` beside it. A
+    self-contained corpus was unusable purely because it remembered where its
+    bytes used to live.
+
+    Resolution order per file:
+      1. the recorded path, if readable (unrelocated corpus — unchanged behavior);
+      2. `<candidate_dir>/rtl/<basename>` — the flat vendored layout;
+      3. the LONGEST tail of the recorded path that exists under `rtl/` — some
+         candidates vendor a nested tree (`rtl/peripherals_part/pkt_part/X.sv`),
+         and matching the longest suffix picks the right one when several files
+         share a basename;
+      4. a unique recursive basename match, as a last resort. AMBIGUOUS matches
+         (same basename in more than one subdirectory) are deliberately left
+         unresolved rather than guessed — picking one at random is exactly the
+         silent-wrong-value failure this skill exists to avoid.
+
+    The ORIGINAL path string is preserved as `key` because that is what the
+    source_manifest is keyed on — resolution changes where bytes are READ from,
+    never which digest they are checked against. Relocation must not become a
+    way to launder a byte change.
+    """
+    vendored_dir = candidate_dir / "rtl"
+    out: list[dict] = []
+    for raw in rtl_files:
+        recorded = Path(os.path.expandvars(os.path.expanduser(raw)))
+        entry = {"key": raw, "recorded": recorded, "path": None, "source": "missing"}
+        if _readable_file(recorded):
+            entry.update(path=recorded, source="recorded")
+            out.append(entry)
+            continue
+
+        local = vendored_dir / recorded.name
+        if _readable_file(local):
+            entry.update(path=local, source="vendored")
+            out.append(entry)
+            continue
+
+        parts = recorded.parts
+        hit = None
+        for k in range(min(len(parts), 8), 0, -1):        # longest tail first
+            cand = vendored_dir.joinpath(*parts[-k:])
+            if _readable_file(cand):
+                hit = cand
+                break
+        if hit is None:
+            try:
+                matches = [p for p in vendored_dir.rglob(recorded.name)
+                           if _readable_file(p)]
+            except OSError:
+                matches = []
+            if len(matches) == 1:
+                hit = matches[0]
+            elif len(matches) > 1:
+                entry["source"] = "ambiguous"
+                entry["candidates"] = [str(p) for p in matches[:4]]
+        if hit is not None:
+            entry.update(path=hit, source="vendored")
+        out.append(entry)
+    return out
+
+
 def vendor_rtl(rtl_files: list[Path], rtl_dir: Path) -> list[Path]:
     """Copy the proven RTL into <project>/rtl/, keeping basenames unique."""
     rtl_dir.mkdir(parents=True, exist_ok=True)
@@ -184,6 +266,53 @@ def vendor_rtl(rtl_files: list[Path], rtl_dir: Path) -> list[Path]:
         shutil.copyfile(src, dst)
         vendored.append(dst)
     return vendored
+
+
+def vendor_headers(header_manifest: list[dict], candidate_dir: Path,
+                   rtl_dir: Path) -> tuple[list[Path], list[str]]:
+    """Copy the frozen header closure into <project>/rtl/ so the project is
+    self-contained. Returns (vendored, unresolved_keys).
+
+    P0-R5: `vendor_rtl` copied `rtl_files` only, and promotion appended the synth
+    project's EXTERNAL VERILOG_INCLUDE_DIRS to the promoted config — so a header
+    living outside the corpus could change after the synth proof and silently
+    alter the elaborated circuit. Headers keep their EXACT basename (an `include`
+    resolves by name, so the uniquifying rename vendor_rtl applies would break
+    them); a genuine basename collision is reported as unresolved rather than
+    silently resolved to whichever copy happened to be written last.
+    """
+    rtl_dir.mkdir(parents=True, exist_ok=True)
+    vendored: list[Path] = []
+    unresolved: list[str] = []
+    placed: dict[str, Path] = {}
+    for entry in header_manifest or []:
+        key = str(entry.get("path") or "")
+        if not key:
+            continue
+        src = Path(os.path.expandvars(os.path.expanduser(key)))
+        if not _readable_file(src):
+            src = candidate_dir / "rtl" / Path(key).name       # relocated corpus
+        if not _readable_file(src):
+            unresolved.append(key)
+            continue
+        name = Path(key).name
+        prior = placed.get(name)
+        if prior is not None:
+            try:
+                if prior.read_bytes() != src.read_bytes():
+                    unresolved.append(f"{key} (basename collision with {prior})")
+            except OSError:
+                unresolved.append(key)
+            continue
+        dst = rtl_dir / name
+        try:
+            shutil.copyfile(src, dst)
+        except OSError:
+            unresolved.append(key)
+            continue
+        placed[name] = dst
+        vendored.append(dst)
+    return vendored, unresolved
 
 
 def render_config_mk(template: str, *, design: str, platform: str,
@@ -224,12 +353,25 @@ def promote_one(design: str, *, out_root: Path, base_dir: Path, args,
         return result
     meta = json.loads(meta_path.read_text(encoding="utf-8"))
     top = str(meta.get("top") or design)
-    rtl_files = [Path(os.path.expandvars(os.path.expanduser(p)))
-                 for p in meta.get("rtl_files") or []]
-    missing = [str(p) for p in rtl_files if not p.is_file()]
-    if not rtl_files or missing:
-        result["reason"] = f"rtl_files missing on disk: {missing or 'none listed'}"
+    # Resolve against the corpus's own vendored rtl/ when the recorded
+    # acquisition-time absolute path is gone or unreadable (P1-N6). The manifest
+    # key stays the RECORDED path — relocation changes where bytes are read
+    # from, never which digest they are verified against.
+    resolved = resolve_candidate_rtl(list(meta.get("rtl_files") or []),
+                                     out_root / design)
+    rtl_files = [e["path"] for e in resolved if e["path"] is not None]
+    missing = [e["key"] for e in resolved if e["path"] is None]
+    if not resolved or missing:
+        result["status"] = "rtl_files_unresolved"
+        result["reason"] = (f"rtl_files could not be resolved from the recorded path "
+                            f"or the corpus's vendored rtl/: {missing or 'none listed'}")
         return result
+    relocated = [e["key"] for e in resolved if e["source"] == "vendored"]
+    if relocated:
+        result["source_relocated"] = len(relocated)
+        print(f"NOTE: {design}: {len(relocated)} of {len(resolved)} rtl_files resolved "
+              f"from the corpus's vendored rtl/ (recorded paths unreachable — "
+              f"relocated corpus)", file=sys.stderr)
     # Byte provenance (2026-07-16 full-pipeline issue 1): the promoted project must
     # vendor the EXACT bytes that earned the synth-only success. rtl_signature is
     # path-based (a dedup key), so nothing else binds them — re-digest each file
@@ -247,23 +389,23 @@ def promote_one(design: str, *, out_root: Path, base_dir: Path, args,
         # files free to change while the result positively claimed full
         # verification. A partial proof is not a proof: require an entry for
         # EVERY rtl_file before any per-file comparison is meaningful.
-        uncovered = [str(p) for p in rtl_files if str(p) not in manifest]
+        uncovered = [e["key"] for e in resolved if e["key"] not in manifest]
         if uncovered:
             result["status"] = "source_manifest_incomplete"
             result["reason"] = (
-                f"source_manifest_incomplete: {len(uncovered)} of {len(rtl_files)} "
+                f"source_manifest_incomplete: {len(uncovered)} of {len(resolved)} "
                 f"rtl_files have no manifest digest (e.g. {uncovered[:2]}); "
                 f"re-expand to regenerate a complete manifest before promoting")
             return result
         changed = []
-        for p in rtl_files:
-            want = manifest[str(p)]
+        for e in resolved:
+            want = manifest[e["key"]]
             try:
-                got = hashlib.sha256(p.read_bytes()).hexdigest()
+                got = hashlib.sha256(e["path"].read_bytes()).hexdigest()
             except OSError:
                 got = None
             if got != want:
-                changed.append(str(p))
+                changed.append(e["key"])
         if changed:
             result["status"] = "rtl_bytes_changed_since_synth"
             result["reason"] = (f"rtl_bytes_changed_since_synth: {len(changed)} file(s) "
@@ -294,6 +436,49 @@ def promote_one(design: str, *, out_root: Path, base_dir: Path, args,
               f"(no synth-time manifest) per --allow-unverified-source; "
               f"source_bytes_verified=false is retained downstream", file=sys.stderr)
     synth_cfg = parse_synth_config(Path(str(meta.get("design_config") or "")))
+    # --- Frozen compilation inputs (P0-N2, failure-patterns.md #52) ---------
+    # RTL bytes were never the whole compilation input. Top parameters, defines,
+    # the frontend and the include ORDER decide what gets elaborated, and all of
+    # them were re-read from the synth project's MUTABLE config.mk at this point.
+    # The audit qualified a design at `WIDTH 8`, edited config.mk to `WIDTH 16`
+    # without touching an RTL byte, and promotion carried WIDTH=16 into the full
+    # flow while reporting source_bytes_verified=true.
+    #
+    # When a candidate carries a frozen compile_manifest, it WINS over the live
+    # config.mk, and a disagreement blocks: the live file is round state, the
+    # manifest is the proof. Legacy candidates without one keep the old
+    # config.mk path — they already require --allow-unverified-source above, so
+    # this adds no new hole.
+    compile_man = meta.get("compile_manifest") if isinstance(
+        meta.get("compile_manifest"), dict) else None
+    if compile_man:
+        drift = []
+        for cfg_key, man_key in (("VERILOG_TOP_PARAMS", "top_parameters"),
+                                 ("SYNTH_HDL_FRONTEND", "synth_frontend"),
+                                 ("SYNTH_MEMORY_MAX_BITS", "synth_memory_max_bits")):
+            live = synth_cfg.get(cfg_key)
+            if live is None:
+                continue
+            frozen = compile_man.get(man_key)
+            if man_key == "top_parameters":
+                # config.mk renders params as `NAME VALUE` pairs; compare as a map.
+                toks = str(live).split()
+                live_map = {toks[i]: toks[i + 1] for i in range(0, len(toks) - 1, 2)}
+                if live_map != {str(k): str(v) for k, v in (frozen or {}).items()}:
+                    drift.append(f"{cfg_key}: config.mk={live_map} != proven={frozen}")
+            elif frozen is not None and str(live) != str(frozen):
+                drift.append(f"{cfg_key}: config.mk={live!r} != proven={frozen!r}")
+        if drift:
+            result["status"] = "compile_inputs_changed_since_synth"
+            result["reason"] = (
+                "compile_inputs_changed_since_synth: the synth project's config.mk no "
+                "longer matches the frozen compilation inputs that earned the proof "
+                f"({'; '.join(drift)}); re-expand before promoting")
+            return result
+        result["compile_inputs_verified"] = True
+        result["compile_config_digest"] = compile_man.get("config_digest")
+    else:
+        result["compile_inputs_verified"] = False
     # Unconstrained-clock gate (2026-07-16 full-pipeline issue 5): a SEQUENTIAL
     # design falling back to a virtual clock has meaningless setup/hold labels
     # downstream (ethmac: 119 unclocked registers, STA-0450, silently promoted).
@@ -337,22 +522,60 @@ def promote_one(design: str, *, out_root: Path, base_dir: Path, args,
     # 2. vendor the proven RTL (self-contained project; the synth workspace's
     #    _tmp_cfg conversions are cleanable scratch)
     vendored = vendor_rtl(rtl_files, project / "rtl")
+    # Vendor the frozen header closure too (P0-R5): a promoted project that still
+    # reads headers from an external tree can elaborate a different circuit the
+    # moment that tree changes, and does not survive being moved or archived.
+    header_manifest = (compile_man or {}).get("header_manifest") or []
+    vendored_headers, unresolved_headers = vendor_headers(
+        header_manifest, out_root / design, project / "rtl")
+    if unresolved_headers:
+        result["status"] = "header_closure_unresolved"
+        result["reason"] = (
+            f"header_closure_unresolved: {len(unresolved_headers)} synth-proven "
+            f"header(s) could not be vendored (e.g. {unresolved_headers[:2]}); the "
+            f"promoted project would depend on an external tree — re-expand")
+        return result
+    if vendored_headers:
+        result["vendored_header_count"] = len(vendored_headers)
 
     # 3. config.mk from the signoff-loop template + carried synth knobs
     assets = signoff_loop_dir() / "assets"
     sdc_path = project / "constraints" / "constraint.sdc"
     extra: dict[str, str] = {}
-    for key in ("SYNTH_MEMORY_MAX_BITS", "SYNTH_HDL_FRONTEND", "VERILOG_TOP_PARAMS"):
-        if synth_cfg.get(key):
-            extra[key] = synth_cfg[key]
+    # Compilation knobs come from the FROZEN manifest when there is one (P0-N2);
+    # the live config.mk is only the legacy fallback (and has already been checked
+    # for drift against the manifest above).
+    if compile_man:
+        if compile_man.get("top_parameters"):
+            extra["VERILOG_TOP_PARAMS"] = " ".join(
+                f"{k} {v}" for k, v in sorted(compile_man["top_parameters"].items()))
+        if compile_man.get("synth_memory_max_bits"):
+            extra["SYNTH_MEMORY_MAX_BITS"] = str(compile_man["synth_memory_max_bits"])
+        if compile_man.get("synth_frontend"):
+            extra["SYNTH_HDL_FRONTEND"] = str(compile_man["synth_frontend"])
+    else:
+        for key in ("SYNTH_MEMORY_MAX_BITS", "SYNTH_HDL_FRONTEND", "VERILOG_TOP_PARAMS"):
+            if synth_cfg.get(key):
+                extra[key] = synth_cfg[key]
     if meta.get("synth_memory_max_bits") and "SYNTH_MEMORY_MAX_BITS" not in extra:
         extra["SYNTH_MEMORY_MAX_BITS"] = str(meta["synth_memory_max_bits"])
     if meta.get("synth_frontend") and "SYNTH_HDL_FRONTEND" not in extra:
         extra["SYNTH_HDL_FRONTEND"] = str(meta["synth_frontend"])
+    # SELF-CONTAINED include path (P0-R5): the vendored rtl/ only. Carrying the
+    # synth-time EXTERNAL dirs made the promoted project depend on a tree that can
+    # change under it — the audit's acceptance test is that the project must
+    # synthesize with external source access disabled. A candidate whose headers
+    # could not be vendored has already been rejected above, so nothing is lost.
     include_dirs = [str((project / "rtl").resolve())]
-    for d in (synth_cfg.get("VERILOG_INCLUDE_DIRS") or "").split():
-        if d not in include_dirs and Path(d).is_dir():
-            include_dirs.append(d)
+    if not compile_man:
+        # Legacy candidate (no frozen header closure to vendor): keep the old
+        # behavior rather than break a promotion that used to work, and record
+        # that the project is NOT self-contained.
+        for d in (synth_cfg.get("VERILOG_INCLUDE_DIRS") or "").split():
+            if d not in include_dirs and Path(d).is_dir():
+                include_dirs.append(d)
+        if len(include_dirs) > 1:
+            result["external_include_dirs"] = include_dirs[1:]
     extra["VERILOG_INCLUDE_DIRS"] = " ".join(include_dirs)
     # ABC_AREA: same derivation write_project used for the proven synth run
     variant = str(meta.get("synth_variant") or synth_cfg.get("SYNTH_VARIANT") or "")
@@ -500,8 +723,16 @@ def main() -> int:
 
     results = []
     for design in names:
-        res = promote_one(design, out_root=out_root, base_dir=base_dir,
-                          args=args, index_row=index.get(design))
+        # One unpromotable candidate must never abort the campaign (P1-N6): an
+        # unreadable relocated source used to raise PermissionError straight out
+        # of promote_one, killing an entire `--all` run. Every failure is a
+        # structured per-candidate outcome, exactly like the gate rejections.
+        try:
+            res = promote_one(design, out_root=out_root, base_dir=base_dir,
+                              args=args, index_row=index.get(design))
+        except Exception as e:  # noqa: BLE001
+            res = {"design": design, "promoted_at": now_iso(), "status": "failed",
+                   "reason": f"unhandled promotion error: {type(e).__name__}: {e}"}
         results.append(res)
         tag = res["status"].upper()
         print(f"  {tag:22s} {design}"

@@ -30,3 +30,85 @@ for _sub in (
 @pytest.fixture
 def fixtures_dir() -> Path:
     return Path(__file__).resolve().parent / "fixtures"
+
+
+def write_csv(path, header, rows):
+    """Tiny CSV writer shared by the mini-design fixture and its consumers."""
+    import csv
+    with open(path, "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(header)
+        w.writerows(rows)
+
+
+@pytest.fixture()
+def mini_csvs(tmp_path):
+    """A minimal but complete feature+label CSV pair for the graph stage.
+
+    Lives here (not in one test module) because more than one suite builds real
+    graphs from it — test_graph_stage.py for tensor/view semantics and
+    test_graph_generation_identity.py for publication atomicity. Same one-copy
+    rule the techlib parser follows.
+
+    Deliberate gaps the consumers assert on: g2 has no congestion label, f1 is a
+    FILLCELL (filtered), nclk is a clock net (filtered), ir_drop has a duplicate
+    Cell row (max-reduced).
+    """
+    import graph_lib as gl
+
+    feat = tmp_path / "features"
+    lab = tmp_path / "labels"
+    feat.mkdir()
+    lab.mkdir()
+    g = "mini"
+
+    write_csv(feat / "nodes_gate.csv",
+              ["graph_id", "inst_name", "master", *gl.GATE_SCHEMA],
+              [[g, "g1", "INV_X1", 0, 1.0, 2.0, 10.0, 20.0, 0, 0],
+               [g, "g2", "INV_X2", 1, 1.5, 2.5, 30.0, 40.0, 0, 0],
+               [g, "f1", "FILLCELL_X1", 86, 1.0, 0.0, 50.0, 60.0, 0, 0]])
+    write_csv(feat / "nodes_net.csv",
+              ["graph_id", "net_name", *gl.NET_SCHEMA],
+              [[g, "n1", 0, 2, 3, 1, 2, 0, 2, 12.5],
+               [g, "nclk", 3, 5, 6, 1, 5, 0, 3, 99.0]])
+    write_csv(feat / "nodes_iopin.csv",
+              ["graph_id", "iopin_name", "net_name", "net_type_id", *gl.IOPIN_SCHEMA],
+              [[g, "in_port", "n1", 0, 0.0, 5.0, 1.0, 0],
+               [g, "clk", "nclk", 3, 0.0, 9.0, 1.0, 0]])
+    write_csv(feat / "nodes_pin.csv",
+              ["graph_id", "inst_name", "pin_name", *gl.PIN_SCHEMA],
+              [[g, "g1", "A", 0, 1.5],
+               [g, "g1", "ZN", 4, 1.5],
+               [g, "g2", "A", 0, 1.5],
+               [g, "g2", "CK", 5, 0.5]])
+    write_csv(feat / "edges_gate_pin.csv",
+              ["graph_id", "inst_name", "pin_name"],
+              [[g, "g1", "A"], [g, "g1", "ZN"], [g, "g2", "A"], [g, "g2", "CK"]])
+    write_csv(feat / "edges_pin_net.csv",
+              ["graph_id", "inst_name", "pin_name", "net_name", "net_type_id"],
+              [[g, "g1", "ZN", "n1", 0], [g, "g2", "A", "n1", 0],
+               [g, "g1", "A", "n1", 0],
+               [g, "g2", "CK", "nclk", 3]])
+    write_csv(feat / "edges_iopin_net.csv",
+              ["graph_id", "iopin_name", "net_name", "net_type_id"],
+              [[g, "in_port", "n1", 0], [g, "clk", "nclk", 3]])
+    write_csv(feat / "metadata.csv",
+              ["graph_id", *gl.METADATA_SCHEMA],
+              [[g, 3, 2, 2, 1.5, 100.0, 100.0, 10000.0, 1000, 0.55, 40, 0, 5.0,
+                "met1:100", 1.8, 100000000]])
+
+    write_csv(lab / "cell_congestion.csv",
+              ["Design", "Cell", "cell_type", "cell_congestion", "label"],
+              [[g, "g1", "INV_X1", 0.04, 0.2]])  # g2 missing -> NaN
+    write_csv(lab / "ir_drop.csv",
+              ["Design", "Cell", "X", "Y", "Voltage_V", "IR_Drop_mV", "P95_mV",
+               "label", "has_irdrop"],
+              [[g, "g1", 1, 2, 1.79, 10.0, 9.0, 0.7, "true"],
+               [g, "g1", 1, 2, 1.78, 20.0, 9.0, 0.9, "true"]])  # dup Cell -> max
+    write_csv(lab / "timing_features.csv",
+              ["Design", "Cell", "Cell_Slack_ns", "Path_Delay_ns", "label", "in_sta_path"],
+              [[g, "g1", 5.0, 5.0, 1.79, "true"], [g, "g2", 8.0, 2.0, 1.10, "true"]])
+    write_csv(lab / "wirelength.csv",
+              ["Design", "Net", "NetType", "WireLength_um", "label", "mask_wl"],
+              [[g, "n1", "SIGNAL", 12.5, 2.6, "true"]])
+    return str(feat), str(lab)

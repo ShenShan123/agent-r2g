@@ -4,6 +4,44 @@ Notable changes to the `r2g-skills` collection. Earlier history lives in the
 git log (the commit messages are the long-term record — see CLAUDE.md "When
 You Fix a Bug").
 
+## 2026-07-20 — the identity chain (all three skills)
+
+Closed the ten claims the 2026-07-19 post-consolidation audit left parked as "architectural"
+(failure-patterns.md #52 continued), plus the P0-R3 operator ruling. They shared one root:
+**identity was inferred from mutable paths, filenames, timestamps and file presence instead of
+carried**. Each fix is a call site of a small shared recorder rather than another bespoke guard.
+Tests 1485 → 1534 (signoff-loop 969, def-graph 461, rtl-acquire 104); honesty gates green;
+`check_db_integrity` unchanged (`0 alarm, 1 warn, 15 pass`); committed `knowledge.sqlite` and
+`heuristics.json` unchanged.
+
+- **def-graph** — new `scripts/flow/_stage_provenance.py` stamps the DEF's sha256 + run tag +
+  X/Y schema version into each stage marker, so `run_graphs.sh` reuses features/labels only on a
+  content match (P0-R8; mtimes never were identity). `build_graphs.py` builds into a staging
+  generation and publishes only when every view exists, so a failed rebuild leaves the previous
+  generation byte-identical (P0-R9). Every manifest now declares `graph_schema_version` +
+  `generation_id`, and `verify_graph_dataset.py` rejects an unversioned generation with a rebuild
+  hint (P0-N7). `signoff_gate` gained `report_binding`: a DRC/LVS report naming a different backend
+  run now BLOCKS, while unattributed reports stay a caveat and single-run projects stay clean
+  (P0-R7).
+- **rtl-acquire** — expansion freezes a typed `compile_manifest` (top params, defines, frontend,
+  include order, transitive header closure, `config_digest`); promotion reads that instead of
+  re-parsing the mutable synth `config.mk`, and blocks on drift (P0-N2). The header closure is
+  vendored into the promoted project, which no longer inherits external include dirs (P0-R5).
+  `resolve_candidate_rtl` falls back to the corpus's own vendored `rtl/` by longest path tail —
+  **708/708 local candidates now resolve** where 0 did — and EACCES became a structured failure
+  instead of aborting an entire `--all` run (P1-N6).
+- **signoff-loop** — a no-PPA ingest now derives run identity from the backend RUN tag + stage
+  ledger digest instead of a constant, so distinct attempts stop overwriting each other (P1-R1;
+  the with-ppa derivation is byte-identical, test-pinned). `build_diagnosis` lets a terminal-clean
+  stage ledger veto a superseded intermediate timing message (P1-R3). Per the 2026-07-20 operator
+  ruling, untraceable legacy A/B evidence is **quarantined forward only** — it can no longer drive
+  a promotion, but nothing is demoted: re-judging all 114 real trial keys changed 0 statuses and
+  left promoted at 25 (P0-R3).
+
+Two deliberate, test-pinned contract changes: `promote_candidates` returns `rtl_files_unresolved`
+rather than a generic `failed` for unreachable RTL, and an unversioned graph manifest now fails
+`verify_graph_dataset.py`.
+
 ## 2026-07-18 — learning-loop module consolidation (signoff-loop knowledge/)
 
 Merged the small single-purpose modules into their subsystem homes so each memory system is

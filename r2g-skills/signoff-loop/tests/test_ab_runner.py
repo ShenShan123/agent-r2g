@@ -598,11 +598,16 @@ def test_stamped_true_provenance_is_reverified_at_judge(tmp_path):
     conn.commit()
     assert ab_runner.judge_recipe(conn, **KEY) is None               # excluded
     assert recipe_lifecycle.get_status(conn, **KEY) == "candidate"
-    # legacy row with NO provenance key still counts (committed-store grandfather)
+    # A legacy row with NO provenance key and NULL run_ids no longer counts
+    # either (P0-R3, 2026-07-20 operator ruling: quarantine forward only). It
+    # used to be grandfathered as countable, which let untraceable evidence
+    # drive a NEW promotion. It stays visible in ab_trials; it just cannot move
+    # a lifecycle state. Nothing is demoted — the key simply stays put.
     conn.execute(
         "INSERT INTO ab_trials (symptom_id, design_class, platform, strategy, "
         "verdict, metrics_json, ts) VALUES (?,?,?,?,?,?,?)",
         (KEY["symptom_id"], KEY["design_class"], KEY["platform"], KEY["strategy"],
          "win", json.dumps({}), "t"))
     conn.commit()
-    assert ab_runner.judge_recipe(conn, **KEY) == "promoted"
+    assert ab_runner.judge_recipe(conn, **KEY) is None
+    assert recipe_lifecycle.get_status(conn, **KEY) == "candidate"

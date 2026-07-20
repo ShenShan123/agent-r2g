@@ -296,6 +296,78 @@ def _check_binding(def_path, run_dir):
                       "the report bundle belongs to a DIFFERENT run than this layout"}
 
 
+def _check_report_binding(reports_dir, run_dir):
+    """Bind the signoff REPORTS to the run whose DEF is being graphed (P0-R7).
+
+    `_check_binding` above answers "does this DEF belong to this run dir?" — but
+    in the normal flow the DEF is DISCOVERED under the run dir, so that check is
+    close to tautological. Its real blind spot is the other direction: the
+    verdicts themselves are read from <project>/reports/, which is project-level
+    while a project accumulates many RUN_* dirs. Two real wbuart32 runs with
+    different DEF digests (R1 d6426fae…, R2 cc2da796…) let R1's clean bundle
+    certify R2's layout, and the gate said pass_with_caveats.
+
+    Each report now carries report_io's `provenance` envelope naming the run it
+    judged. Rules:
+      * any report naming a DIFFERENT run than the one selected -> `foreign`
+        (a hard blocker: clean results from one run must never certify another);
+      * no report carrying provenance, in a project with MORE THAN ONE backend
+        run -> `unknown` (a recorded caveat, not a block: every pre-2026-07-20
+        report is unstamped, and re-running DRC/LVS across a corpus purely to
+        acquire attribution costs hours per design. They self-heal on the next
+        signoff run);
+      * a report attributed by the weakest source ('latest_run' — a guess, not
+        the restage marker) -> `weak`, also a caveat.
+
+    A single-run project is `bound` even with unattributed reports: there is no
+    OTHER run the verdicts could have come from, so there is nothing to warn
+    about. Flagging it would put every existing clean single-run design into
+    pass_with_caveats — noise that would mask the caveats that mean something.
+    """
+    if not run_dir or not os.path.isdir(run_dir):
+        return {"status": "unknown", "detail": "no backend run dir to bind reports to"}
+    want = os.path.basename(os.path.realpath(run_dir))
+    backend = os.path.dirname(os.path.realpath(run_dir))
+    try:
+        n_runs = len([d for d in os.listdir(backend) if d.startswith("RUN_")])
+    except OSError:
+        n_runs = 1
+    seen, foreign, weak = {}, [], []
+    for fn in ("drc.json", "lvs.json", "route.json", "ppa.json"):
+        doc = _load_json(os.path.join(reports_dir, fn))
+        if not isinstance(doc, dict):
+            continue
+        prov = doc.get("provenance")
+        tag = (prov or {}).get("run_tag") if isinstance(prov, dict) else None
+        # route.json has recorded `backend_run` since before the envelope existed;
+        # honor it so pre-envelope route reports still bind.
+        if not tag and isinstance(doc.get("backend_run"), str):
+            tag = doc["backend_run"]
+            prov = {"source": "backend_run"}
+        if not tag:
+            continue
+        seen[fn] = tag
+        if tag != want:
+            foreign.append(f"{fn}={tag}")
+        elif (prov or {}).get("source") == "latest_run":
+            weak.append(fn)
+    if foreign:
+        return {"status": "foreign", "expected_run": want, "reports": seen,
+                "detail": f"signoff reports belong to a DIFFERENT backend run than the "
+                          f"selected layout ({want}): {', '.join(sorted(foreign))}"}
+    if not seen:
+        if n_runs <= 1:
+            return {"status": "bound", "expected_run": want, "reports": {},
+                    "detail": "reports unattributed, but the project has a single "
+                              "backend run — no other run they could describe"}
+        return {"status": "unknown", "expected_run": want, "runs": n_runs,
+                "detail": f"no signoff report records which run it judged, and this "
+                          f"project has {n_runs} backend runs (pre-P0-R7 reports); "
+                          "re-run signoff to attribute them"}
+    return {"status": "bound", "expected_run": want, "reports": seen,
+            **({"weak": weak} if weak else {})}
+
+
 def evaluate(project_dir, run_dir, def_path=None):
     reports_dir = os.path.join(project_dir, "reports")
     checks = {
@@ -306,6 +378,7 @@ def evaluate(project_dir, run_dir, def_path=None):
         "antenna": _check_antenna(reports_dir),
         "timing": _check_timing(reports_dir),
         "binding": _check_binding(def_path, run_dir),
+        "report_binding": _check_report_binding(reports_dir, run_dir),
     }
     blockers = []
     if checks["drc"]["status"] not in DRC_OK:
@@ -321,12 +394,21 @@ def evaluate(project_dir, run_dir, def_path=None):
     # / override) is a caveat, not a block.
     if checks["binding"]["status"] == "unbound":
         blockers.append("binding")
+    # Reports that positively name a DIFFERENT run are a hard block (P0-R7) — this
+    # is the direction _check_binding cannot see. Unattributed reports are only a
+    # caveat (see _check_report_binding for why).
+    if checks["report_binding"]["status"] == "foreign":
+        blockers.append("report_binding")
 
     caveats = []
     # Only a SUPPLIED-but-unverifiable DEF is a recorded caveat; a caller that passes no
     # DEF (legacy 2-arg evaluate) makes no binding claim, so it stays a clean pass.
     if def_path and checks["binding"]["status"] == "unknown":
         caveats.append("binding=unknown")
+    if checks["report_binding"]["status"] == "unknown":
+        caveats.append("report_binding=unknown")
+    elif checks["report_binding"].get("weak"):
+        caveats.append("report_binding=weak")
     fp = _def_fingerprint(def_path)
     if fp:
         checks["binding"]["def_fingerprint"] = fp

@@ -610,23 +610,42 @@ def judge_recipe(conn, *, symptom_id: str, design_class: str, platform: str,
     # filter at the consumer" — but the judge excludes it HERE. An ABSENT
     # provenance_complete key is a legacy pre-#45 trial, grandfathered as countable so
     # the committed corpus's verdicts stay stable (0 rows are explicitly False today).
+    # P0-R3 (2026-07-19 audit, failure-patterns #52) — QUARANTINE FORWARD ONLY,
+    # per the 2026-07-20 operator ruling. An ABSENT provenance_complete used to be
+    # grandfathered as countable, so 77 decisive legacy trials with NULL arm
+    # run_ids — evidence nobody can trace to two distinct real runs — could still
+    # drive a NEW promotion. They no longer count for any transition.
+    #
+    # This does NOT demote anything. A key whose only decisive evidence is legacy
+    # simply nets 0w0l, and judge_recipe's `return None` leaves its lifecycle
+    # state exactly as it stands — so the 21 keys currently promoted on legacy
+    # evidence stay promoted (the standing 0-flips discipline) while no legacy row
+    # can move a key from here on. New verified evidence still governs normally,
+    # including demoting a legacy-promoted key that now loses.
+    #
+    # An absent-provenance row that DOES carry both arm run_ids is reconstructible,
+    # so it gets the same live re-derivation as a True-stamped row rather than
+    # being written off.
+    excluded_legacy = 0
+
     def _verifiable(mj, a_rid, b_rid) -> bool:
+        nonlocal excluded_legacy
         try:
             m = json.loads(mj) if mj else {}
         except (TypeError, ValueError):
-            return True
+            m = {}
         pc = m.get("provenance_complete")
         if pc is False:
             return False
-        if pc is True:
-            # Defense-in-depth (2026-07-16 issue 1): a stamped-True flag is
-            # RE-DERIVED against the LOCAL store at judge time — a merged bundle's
-            # (or rerouted caller's) self-certified stamp whose runs don't resolve
-            # locally as this trial's own arms must not drive a transition here.
-            # ABSENT-key legacy rows below stay grandfathered exactly as before.
-            return (_runs_exist(conn, a_rid, b_rid)
-                    and _arms_owned(conn, dict(key), a_rid, b_rid))
-        return True                            # legacy pre-#45 row: grandfathered
+        if pc is None and (a_rid is None or b_rid is None):
+            excluded_legacy += 1               # legacy_unverified: visible, not countable
+            return False
+        # Defense-in-depth (2026-07-16 issue 1): a stamped-True flag is RE-DERIVED
+        # against the LOCAL store at judge time — a merged bundle's (or rerouted
+        # caller's) self-certified stamp whose runs don't resolve locally as this
+        # trial's own arms must not drive a transition here.
+        return (_runs_exist(conn, a_rid, b_rid)
+                and _arms_owned(conn, dict(key), a_rid, b_rid))
     # Collapse the decisive corpus to INDEPENDENT SUBJECTS before counting (P1-11,
     # 2026-07-15): N pseudo-replicated trials on ONE base design are ONE vote, not N,
     # so a reused subject cannot masquerade as N-fold corroboration. Each subject nets
@@ -642,6 +661,16 @@ def judge_recipe(conn, *, symptom_id: str, design_class: str, platform: str,
         net[subj] = net.get(subj, 0) + (1 if v == "win" else -1)
     wins = sum(1 for bal in net.values() if bal > 0)
     losses = sum(1 for bal in net.values() if bal < 0)
+    if excluded_legacy and not (wins or losses) and os.environ.get("R2G_AB_VERBOSE"):
+        # Silence here would look identical to "no evidence exists", which is the
+        # state the quarantine exists to make visible — but a full re-judge walks
+        # ~114 keys, so this is opt-in rather than default stderr noise. The
+        # durable, always-available view is observe.solution_origin, which reports
+        # these rows under transfer_evidence/legacy_unverified.
+        print(f"NOTE: {excluded_legacy} decisive legacy trial(s) with untraceable arm "
+              f"run_ids not counted for {key['symptom_id'][:8]}/{key['design_class']}/"
+              f"{key['platform']}/{key['strategy']}; state unchanged (legacy_promoted). "
+              f"Re-validate via `engineer_loop ab-enqueue`.", file=sys.stderr)
     if wins > losses:
         recipe_lifecycle.promote(conn, evidence=f"ab_corpus:{wins}w{losses}l", **key)
         return "promoted"
