@@ -1,11 +1,11 @@
 {
-  "schema_version": "1.1",
+  "schema_version": "1.2",
   "registry_id": "r2g-v1-validation-registry",
   "protocol": {
     "source": "docs/superpowers/plans/V1_ASSURANCE_SPECIFICATION_AND_VALIDATION_PROTOCOL.md",
-    "version": "0.6",
+    "version": "0.7",
     "status": "Proposed",
-    "sha256": "0e37b532725e232ff613006b7712a9d4016f051ac4c2784b5f1c1bc04ed53cf2"
+    "sha256": "155a96f4c33583b461dbb8ed9042c825e66f3886f2645749d6c789196a8f56a7"
   },
   "format_note": "This is JSON-compatible YAML 1.2 and is parsed with Python's standard json module.",
   "formal_execution_policy": {
@@ -31,6 +31,141 @@
     "GRAPH-GATE": {"owner": "def-graph", "requirements": ["DATA-001", "DATA-002", "DATA-003", "DATA-004", "DATA-005", "DATA-006"]},
     "PUBLISH-GATE": {"owner": "def-graph", "requirements": ["DATA-007", "DATA-008"]},
     "OPS-GATE": {"owner": "cross-cutting", "requirements": ["OPS-*"]}
+  },
+  "gate_conditions": {
+    "ENV-GATE": [
+      {"id": "GC-ENV-01", "title": "Comprehensive toolchain verification", "requirements": ["ENV-001"],
+       "kind": "command", "command": ["bash", "r2g-skills/signoff-loop/scripts/flow/check_env.sh"], "timeout_s": 300,
+       "evidence": "verifier transcript (tools resolved + per-platform ok lines)"},
+      {"id": "GC-ENV-02", "title": "Shared environment-layer parity", "requirements": ["ENV-003"],
+       "kind": "builtin", "builtin": "env_sh_parity",
+       "evidence": "per-file sha256 table of the four _env.sh copies"},
+      {"id": "GC-ENV-03", "title": "Canonical skill deployment (symlinks, not copies)", "requirements": ["ENV-003"],
+       "kind": "builtin", "builtin": "skills_symlinked",
+       "evidence": "link-target table for .claude/skills/*"},
+      {"id": "GC-ENV-04", "title": "Graph/validation interpreter readiness", "requirements": ["ENV-001"],
+       "kind": "command", "command": ["{python}", "-c", "import pytest, torch, torch_geometric, pandas"], "timeout_s": 120,
+       "evidence": "import-probe status"},
+      {"id": "GC-ENV-05", "title": "Provisioning unit surface", "requirements": ["ENV-001", "ENV-002"],
+       "kind": "suite", "suite": "DIAG-EDA-INSTALL",
+       "evidence": "pytest transcript"},
+      {"id": "GC-ENV-06", "title": "Snapshot identity, conflict, and isolation certification", "requirements": ["ENV-001", "ENV-002", "ENV-003", "ENV-004"],
+       "kind": "formal", "cases": ["VAL-ENV-001", "VAL-ENV-002", "VAL-ENV-003", "VAL-ENV-004"],
+       "evidence": "frozen-campaign verdicts"}
+    ],
+    "ACQ-GATE": [
+      {"id": "GC-ACQ-01", "title": "Versioned policy layer parseable", "requirements": ["ACQ-003"],
+       "kind": "builtin", "builtin": "policies_parse",
+       "evidence": "per-file parse table for rtl-acquire/references/*.json"},
+      {"id": "GC-ACQ-02", "title": "Acquisition/screening unit surface", "requirements": ["ACQ-001", "ACQ-002", "ACQ-003"],
+       "kind": "suite", "suite": "DIAG-RTL-ACQUIRE",
+       "evidence": "pytest transcript"},
+      {"id": "GC-ACQ-03", "title": "Discovery, closure, and screening certification", "requirements": ["ACQ-001", "ACQ-002", "ACQ-003"],
+       "kind": "formal", "cases": ["VAL-ACQ-001", "VAL-ACQ-002", "VAL-ACQ-003"],
+       "evidence": "frozen-campaign verdicts"}
+    ],
+    "SYNTH-GATE": [
+      {"id": "GC-SYNTH-01", "title": "Scope and event parity (synth_only projection)", "requirements": ["ACQ-004"],
+       "kind": "suite", "suite": "DIAG-SYNTH-PROJECTION",
+       "evidence": "parity counts; empty projection is honest-empty, not proof"},
+      {"id": "GC-SYNTH-02", "title": "Shared-store honesty over committed knowledge", "requirements": ["ACQ-004"],
+       "kind": "suite", "suite": "DIAG-KNOWLEDGE-HONESTY",
+       "evidence": "honesty gate listing"},
+      {"id": "GC-SYNTH-03", "title": "Qualification, dedup, and retry certification", "requirements": ["ACQ-004", "ACQ-005", "ACQ-006"],
+       "kind": "formal", "cases": ["VAL-ACQ-004", "VAL-ACQ-005", "VAL-ACQ-006"],
+       "evidence": "frozen-campaign verdicts"}
+    ],
+    "RTL2FLOW-GATE": [
+      {"id": "GC-R2F-01", "title": "Promotion unit surface", "requirements": ["ACQ-007"],
+       "kind": "suite", "suite": "DIAG-RTL-ACQUIRE",
+       "evidence": "pytest transcript (promote path)"},
+      {"id": "GC-R2F-02", "title": "Closure byte-verification and configuration preservation certification", "requirements": ["ACQ-007", "FLOW-001"],
+       "kind": "formal", "cases": ["VAL-ACQ-007", "VAL-FLOW-001"],
+       "evidence": "frozen-campaign verdicts"}
+    ],
+    "CONSTRAINT-GATE": [
+      {"id": "GC-CON-01", "title": "Timing/Fmax unit surface", "requirements": ["FLOW-008", "FLOW-009"],
+       "kind": "suite", "suite": "DIAG-SIGNOFF-LOOP",
+       "evidence": "pytest transcript (check_timing, fmax_search, SDC)"},
+      {"id": "GC-CON-02", "title": "Clock, constraint-integrity, and Fmax-objective certification", "requirements": ["FLOW-007", "FLOW-008", "FLOW-009"],
+       "kind": "formal", "cases": ["VAL-FLOW-007", "VAL-FLOW-008", "VAL-FLOW-009"],
+       "evidence": "frozen-campaign verdicts"}
+    ],
+    "SIGNOFF-GATE": [
+      {"id": "GC-SIG-01", "title": "Flow/extractor unit surface", "requirements": ["FLOW-002", "FLOW-003", "FLOW-004"],
+       "kind": "suite", "suite": "DIAG-SIGNOFF-LOOP",
+       "evidence": "pytest transcript"},
+      {"id": "GC-SIG-02", "title": "Downstream signoff gate fails closed on missing reports", "requirements": ["FLOW-004"],
+       "kind": "suite", "suite": "DIAG-DEF-GRAPH",
+       "evidence": "pytest transcript (signoff_gate fail-closed tests; failure-patterns #34)"},
+      {"id": "GC-SIG-03", "title": "Dependency, completion, strict-clean, and recovery certification", "requirements": ["FLOW-002", "FLOW-003", "FLOW-004", "FLOW-006"],
+       "kind": "formal", "cases": ["VAL-FLOW-002", "VAL-FLOW-003", "VAL-FLOW-004", "VAL-FLOW-006"],
+       "evidence": "frozen-campaign verdicts"},
+      {"id": "GC-SIG-04", "title": "Hang-alarm sweep (a hang writes no run)", "requirements": ["FLOW-006"],
+       "kind": "operator",
+       "procedure": "ps -eo pid,ppid,etimes,args | grep -E 'openroad|yosys'; reconcile any PPID=1 process older than ORFS_TIMEOUT against live stage ledgers; kill -9 -<pgid> the stage group, then ingest the interrupted run",
+       "evidence": "sweep transcript"}
+    ],
+    "LEARNING-GATE": [
+      {"id": "GC-LRN-01", "title": "Committed-store honesty gates", "requirements": ["AGENT-006", "AGENT-009"],
+       "kind": "suite", "suite": "DIAG-KNOWLEDGE-HONESTY",
+       "evidence": "fail/event parity, no event on non-fail run, ab_trials non-empty once failures exist"},
+      {"id": "GC-LRN-02", "title": "Dual-DB write honesty (journal vs knowledge)", "requirements": ["AGENT-001", "AGENT-009"],
+       "kind": "suite", "suite": "DIAG-DB-INTEGRITY",
+       "evidence": "J/L probe verdicts (ab_launch/promote/escalate journaling)"},
+      {"id": "GC-LRN-03", "title": "Learner and A/B lifecycle unit surface", "requirements": ["AGENT-004", "AGENT-006", "AGENT-007", "AGENT-008"],
+       "kind": "suite", "suite": "DIAG-SIGNOFF-LOOP",
+       "evidence": "pytest transcript"},
+      {"id": "GC-LRN-04", "title": "Per-platform promotion liveness (2026-06-24 arms-identical alarm)", "requirements": ["AGENT-006", "AGENT-008"],
+       "kind": "operator",
+       "procedure": "each campaign wave, review per-platform recipe_status/ab_trials counts; a platform whose ab_trials grow while promoted stays flat is the arms-identical alarm — verify trial metrics_json shows diverging arms",
+       "evidence": "per-platform trial/promotion counts"},
+      {"id": "GC-LRN-05", "title": "Evidence, lifecycle, and causal A/B certification", "requirements": ["AGENT-001", "AGENT-002", "AGENT-003", "AGENT-004", "AGENT-005", "AGENT-006", "AGENT-007", "AGENT-008", "AGENT-009", "AGENT-010", "AGENT-011"],
+       "kind": "formal", "cases": ["VAL-AGENT-001", "VAL-AGENT-002", "VAL-AGENT-003", "VAL-AGENT-004", "VAL-AGENT-005", "VAL-AGENT-006", "VAL-AGENT-007", "VAL-AGENT-008", "VAL-AGENT-009", "VAL-AGENT-010", "VAL-AGENT-011"],
+       "evidence": "frozen-campaign verdicts"}
+    ],
+    "FLOW2GRAPH-GATE": [
+      {"id": "GC-F2G-01", "title": "Provenance/staleness unit surface", "requirements": ["FLOW-005"],
+       "kind": "suite", "suite": "DIAG-DEF-GRAPH",
+       "evidence": "pytest transcript (stage-completion markers written LAST)"},
+      {"id": "GC-F2G-02", "title": "Same-run provenance certification", "requirements": ["FLOW-005"],
+       "kind": "formal", "cases": ["VAL-FLOW-005"],
+       "evidence": "frozen-campaign verdicts"}
+    ],
+    "GRAPH-GATE": [
+      {"id": "GC-GRA-01", "title": "Extractor, view, and verifier unit surface", "requirements": ["DATA-002", "DATA-003", "DATA-005"],
+       "kind": "suite", "suite": "DIAG-DEF-GRAPH",
+       "evidence": "pytest transcript incl. corner-case pipeline + verifier negative controls"},
+      {"id": "GC-GRA-02", "title": "Independent corpus verification before declaring good", "requirements": ["DATA-005"],
+       "kind": "operator",
+       "procedure": "$R2G_GRAPH_PYTHON tools/verify_graph_dataset.py --batch <corpus-root> after any extractor fix or corpus regeneration; nonzero exit blocks the clean tier",
+       "evidence": "batch verifier report"},
+      {"id": "GC-GRA-03", "title": "Input, five-view, identity, semantic, and manifest certification", "requirements": ["DATA-001", "DATA-002", "DATA-003", "DATA-004", "DATA-005", "DATA-006"],
+       "kind": "formal", "cases": ["VAL-DATA-001", "VAL-DATA-002", "VAL-DATA-003", "VAL-DATA-004", "VAL-DATA-005", "VAL-DATA-006"],
+       "evidence": "frozen-campaign verdicts"}
+    ],
+    "PUBLISH-GATE": [
+      {"id": "GC-PUB-01", "title": "Corpus publish-gating unit surface", "requirements": ["DATA-007"],
+       "kind": "suite", "suite": "DIAG-RTL-ACQUIRE",
+       "evidence": "pytest transcript (publish gates)"},
+      {"id": "GC-PUB-02", "title": "Manifest/status honesty unit surface", "requirements": ["DATA-007", "DATA-008"],
+       "kind": "suite", "suite": "DIAG-DEF-GRAPH",
+       "evidence": "pytest transcript (degraded column must read invalid/skipped, never ok)"},
+      {"id": "GC-PUB-03", "title": "Transactional publication and consumer certification", "requirements": ["DATA-007", "DATA-008"],
+       "kind": "formal", "cases": ["VAL-DATA-007", "VAL-DATA-008"],
+       "evidence": "frozen-campaign verdicts"}
+    ],
+    "OPS-GATE": [
+      {"id": "GC-OPS-01", "title": "Registry traceability lint", "requirements": ["OPS-003"],
+       "kind": "builtin", "builtin": "registry_self_lint",
+       "evidence": "lint output (digest pin, 45 REQ/VAL pairs, GC + formal coverage)"},
+      {"id": "GC-OPS-02", "title": "Evidence isolation from the tracked tree", "requirements": ["OPS-002"],
+       "kind": "builtin", "builtin": "reports_gitignored",
+       "evidence": "git check-ignore verdict for validation-reports/"},
+      {"id": "GC-OPS-03", "title": "Ledger, isolation, reproducibility, resource, and continuity certification", "requirements": ["OPS-001", "OPS-002", "OPS-003", "OPS-004", "OPS-005", "OPS-006"],
+       "kind": "formal", "cases": ["VAL-OPS-001", "VAL-OPS-002", "VAL-OPS-003", "VAL-OPS-004", "VAL-OPS-005", "VAL-OPS-006"],
+       "evidence": "frozen-campaign verdicts"}
+    ]
   },
   "phase_order": [
     "environment",

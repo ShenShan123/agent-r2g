@@ -1,9 +1,9 @@
 # R2G Agent V1 Execution Specification and Validation Protocol
 
 - Status: **Proposed**
-- Version: **0.6**
+- Version: **0.7**
 - Date: **2026-07-20**
-- Repository reference: `3117f0e3c00ba528f6029fd9a7d569e37ac3b9dd`
+- Repository reference: `47c611b3feec6a5854dc353d49e71f5048977096`
 - Target platforms: `nangate45`, `sky130hd`, `sky130hs`
 - Machine registry: `docs/superpowers/plans/v1_validation_registry.yaml`
 - Registry runner: `docs/superpowers/plans/run_v1_validation_registry.py`
@@ -15,15 +15,18 @@ This is the execution contract for V1 debug and release validation. Read it in t
 order:
 
 1. identify the failing subskill or handoff gate;
-2. locate the corresponding `REQ-*` requirement;
-3. execute its paired `VAL-*` case through the registry;
+2. locate the gate's `GC-*` conditions (Section 2) and the corresponding `REQ-*`
+   requirement;
+3. execute the gate's executable conditions (`gates` command), then its paired
+   `VAL-*` case through the registry;
 4. preserve the required evidence and fix the implementation, not the oracle;
 5. rerun the same case and all historical regressions mapped to that requirement.
 
 The English requirement text is normative. The registry defines executable case
-parameters, evaluator readiness, and the diagnostics inventory. The companion
-quality contract defines convergence exit criteria but does not award `VAL-*`
-verdicts. Historical bug reports are regression inputs, not V1 scope.
+parameters, evaluator readiness, the diagnostics inventory, and the machine binding
+of every Section 2 gate condition (`gate_conditions`). The companion quality
+contract defines convergence exit criteria but does not award `VAL-*` verdicts.
+Historical bug reports are regression inputs, not V1 scope.
 
 `MUST`, `MUST NOT`, `SHALL`, and `SHALL NOT` are mandatory. Missing, stale,
 contradictory, unbound, or unreadable safety evidence fails closed.
@@ -89,7 +92,7 @@ raw artifacts and independently recomputed facts
 
 An Agent statement cannot override a deterministic gate failure.
 
-## 2. Gate Map
+## 2. Gate Map and Detailed Gate Conditions
 
 | Subskill or boundary | Gate | Required output |
 | --- | --- | --- |
@@ -103,10 +106,246 @@ An Agent statement cannot override a deterministic gate failure.
 | flow to graph | `FLOW2GRAPH-GATE` | One same-run physical/signoff artifact bundle. |
 | `def-graph` | `GRAPH-GATE` | Verified b/c/d/e/f generation and manifest. |
 | `def-graph` | `PUBLISH-GATE` | Atomic clean-index publication or explicit non-clean state. |
+| cross-cutting | `OPS-GATE` | Ledgered, isolated, reproducible, resource-accounted campaign operation. |
 
 Every gate records `pass`, `fail`, `inconclusive`, or predeclared `not_applicable`,
 plus input and output generation identities. A local pass cannot override a failed
 handoff or downstream gate.
+
+### 2.1 Gate-Condition Classes
+
+Each gate decomposes into numbered conditions `GC-<GATE>-<NN>`. The registry block
+`gate_conditions` is the machine binding of every condition below; `lint` enforces
+spec/registry `GC-*` traceability, and the `gates` command executes every
+executable condition fail-closed. Five binding classes exist:
+
+```text
+suite    -> executable now: a registry diagnostic suite must exit 0
+builtin  -> executable now: a named deterministic probe inside the runner
+command  -> executable now: a direct command must exit 0
+formal   -> deferred: certified only by the listed frozen VAL-* cases
+operator -> documented per-generation/per-machine procedure; command is normative
+```
+
+Rules:
+
+1. A gate is **executably ready** when every `suite`/`builtin`/`command` condition
+   passes. It is **certified** only when its `formal` conditions pass in a frozen
+   campaign. Executable readiness never substitutes for certification.
+2. Any failed executable condition fails the gate immediately (fail closed).
+3. Deferred `formal` and `operator` conditions are always reported with counts and
+   identities — never silently skipped (Runtime Rule 8).
+4. Every `VAL-*` case MUST be referenced by a `formal` condition of the gate that
+   owns it, so no formal scope can drop out of the gate map (lint-enforced).
+5. `operator` conditions bind machine-local or per-generation evidence the
+   repository cannot carry; their documented commands are normative.
+
+### 2.2 `ENV-GATE` — toolchain truth before any expensive work
+
+**GC-ENV-01: Comprehensive toolchain verification.** The verifier
+`r2g-skills/signoff-loop/scripts/flow/check_env.sh` MUST exit 0 on the campaign
+machine: python3/yosys/openroad/ORFS resolve, and every target platform reports
+present. Binding: `command`. Evidence: verifier transcript.
+
+**GC-ENV-02: Shared environment-layer parity.** The four `<skill>/scripts/flow/_env.sh`
+copies MUST be byte-identical so all subskills resolve one toolchain (ENV-003); a
+diverged copy silently splits the environment between stages. Binding: `builtin`
+`env_sh_parity`. Evidence: per-file sha256 table.
+
+**GC-ENV-03: Canonical skill deployment.** Every deployed skill under
+`.claude/skills/` MUST be a symlink resolving inside the canonical `r2g-skills/`
+tree — a copied install goes silently stale while the canonical skill evolves
+(2026-06-08 stale-skill defect). Binding: `builtin` `skills_symlinked`. Evidence:
+link-target table.
+
+**GC-ENV-04: Graph/validation interpreter readiness.** The resolved validation
+Python MUST import `pytest`, `torch`, `torch_geometric`, and `pandas` — the graph
+stage and the independent dataset verifier depend on all four. Binding: `command`.
+Evidence: import-probe status.
+
+**GC-ENV-05: Provisioning unit surface.** The `eda-install`
+detect → plan → install → pin → verify contract tests MUST pass. Binding: `suite`
+`DIAG-EDA-INSTALL`. Evidence: pytest transcript.
+
+**GC-ENV-06: Snapshot identity, conflict, and isolation certification.** Frozen
+fault-injection proof that provisioning is honest, snapshots are sensitive,
+resolution conflicts fail early, and out-of-domain evidence is excluded. Binding:
+`formal` `VAL-ENV-001..004`.
+
+### 2.3 `ACQ-GATE` — traceable, policy-screened candidates
+
+**GC-ACQ-01: Versioned policy layer parseable.** Every screening/repair/publish
+policy JSON under `r2g-skills/rtl-acquire/references/*.json` MUST parse as a
+non-empty JSON document — screening decisions must be replayable from versioned
+policy, never from free text (ACQ-003). Binding: `builtin` `policies_parse`.
+Evidence: per-file parse table.
+
+**GC-ACQ-02: Acquisition/screening unit surface.** The `rtl-acquire` tests
+(discovery ledger, screening, dedup, expansion, publish gating) MUST pass.
+Binding: `suite` `DIAG-RTL-ACQUIRE`. Evidence: pytest transcript.
+
+**GC-ACQ-03: Discovery, closure, and screening certification.** Frozen proof of
+traceable discovery fields, compilation-closure completeness, and metamorphic
+screening stability. Binding: `formal` `VAL-ACQ-001..003`.
+
+### 2.4 `SYNTH-GATE` — honest synth-only qualification
+
+**GC-SYNTH-01: Scope and event parity.** `project_frontend_diagnosis.py --check`
+MUST exit 0: every synth-only run stamped `flow_scope='synth_only'` and every
+frontend abort paired with a `synth-frontend-*` failure event. An empty projection
+is honest-empty, not proof — corpus machines MUST add `--require-nonempty`.
+Binding: `suite` `DIAG-SYNTH-PROJECTION`. Evidence: parity counts.
+
+**GC-SYNTH-02: Shared-store honesty.** The committed knowledge store MUST pass
+`knowledge/honesty.py` (fail-run/event parity spans synth-only rows; no event on a
+non-fail run). Binding: `suite` `DIAG-KNOWLEDGE-HONESTY`. Evidence: gate listing.
+
+**GC-SYNTH-03: Qualification, dedup, and retry certification.** Frozen per-platform
+proof that empty netlists, nonzero synthesis, mislabeled scope, or missing frontend
+events cannot qualify, duplicates collapse, and retries are idempotent. Binding:
+`formal` `VAL-ACQ-004..006`.
+
+### 2.5 `RTL2FLOW-GATE` — promotion without drift
+
+**GC-R2F-01: Promotion unit surface.** The promote path
+(`scripts/promote/promote_candidates.py`) MUST be covered green by the
+`rtl-acquire` suite. Binding: `suite` `DIAG-RTL-ACQUIRE` (shared, deduplicated).
+Evidence: pytest transcript.
+
+**GC-R2F-02: Closure byte-verification and configuration preservation
+certification.** Frozen proof that changed source, missing manifests, unvendored
+headers, profile mismatches, and clock-intent drift block automatic promotion.
+Binding: `formal` `VAL-ACQ-007`, `VAL-FLOW-001`.
+
+### 2.6 `CONSTRAINT-GATE` — qualified clocks and Fmax objectives
+
+**GC-CON-01: Timing/Fmax unit surface.** The `signoff-loop` timing and Fmax-search
+units (`check_timing`, `fmax_search`, SDC handling) MUST pass. Binding: `suite`
+`DIAG-SIGNOFF-LOOP`. Evidence: pytest transcript.
+
+**GC-CON-02: Clock, constraint-integrity, and Fmax-objective certification.**
+Frozen proof that clock qualification classifies correctly, silent relaxation
+cannot certify the original task, and Fmax objectives bind probe/model/policy/SDC/
+confirming-run identities. Binding: `formal` `VAL-FLOW-007..009`.
+
+### 2.7 `SIGNOFF-GATE` — strict, complete, bounded signoff
+
+**GC-SIG-01: Flow/extractor unit surface.** The `signoff-loop` stage-runner,
+extractor, and report tests MUST pass. Binding: `suite` `DIAG-SIGNOFF-LOOP`
+(shared, deduplicated). Evidence: pytest transcript.
+
+**GC-SIG-02: Downstream signoff gate fails closed.** The shared `signoff_gate.py`
+consumed by `def-graph` MUST fail closed on MISSING DRC/LVS/route reports
+(failure-patterns #34) — proven by the `def-graph` suite's gate tests. Binding:
+`suite` `DIAG-DEF-GRAPH`. Evidence: pytest transcript.
+
+**GC-SIG-03: Dependency, completion, strict-clean, and recovery certification.**
+Frozen proof that stale/cross-run inputs block clean, absent stages stay non-clean,
+every strict-signoff fault class is excluded from clean, and bounds/interruption
+are honest. Binding: `formal` `VAL-FLOW-002..004`, `VAL-FLOW-006`.
+
+**GC-SIG-04: Hang-alarm sweep.** A tool process older than `ORFS_TIMEOUT` with
+`PPID=1` beside a frozen stage ledger is a hang the honesty DBs cannot see — a
+hang writes no run. Before trusting campaign quiet, the operator MUST sweep:
+`ps -eo pid,ppid,etimes,args | grep -E 'openroad|yosys'` and reconcile survivors
+against live ledgers (kill `-9 -<pgid>` the stage group, then ingest). Binding:
+`operator`. Evidence: sweep transcript.
+
+### 2.8 `LEARNING-GATE` — a loop that cannot silently lie
+
+**GC-LRN-01: Committed-store honesty gates.** `knowledge/honesty.py` over the
+shipped `knowledge.sqlite` MUST be green: every `fail` run carries an
+`orfs-fail-%` event, no event lands on a non-fail run, `ab_trials` is non-empty
+once fail/partial rows exist, and failure events stay derivable from run columns.
+Binding: `suite` `DIAG-KNOWLEDGE-HONESTY` (shared, deduplicated). Evidence: gate
+listing with counts.
+
+**GC-LRN-02: Dual-DB write honesty.** `tools/check_db_integrity.py` MUST exit 0:
+journal actions carry run ids, A/B symptoms have `ab_launch` actions, promotions
+have `promote` actions, escalations are journaled (requires the machine-local
+journal). Binding: `suite` `DIAG-DB-INTEGRITY`. Evidence: J/L probe verdicts.
+
+**GC-LRN-03: Learner and A/B unit surface.** The `signoff-loop` knowledge/learner/
+A-B lifecycle tests MUST pass. Binding: `suite` `DIAG-SIGNOFF-LOOP` (shared,
+deduplicated). Evidence: pytest transcript.
+
+**GC-LRN-04: Per-platform promotion liveness.** Once a platform accumulates A/B
+trials, `promoted` MUST eventually grow for that platform — trials-grow-but-
+promoted-flat per platform is the 2026-06-24 arms-identical alarm (subtler than
+empty `ab_trials`). The operator MUST review per-platform
+`recipe_status`/`ab_trials` counts each campaign wave. Binding: `operator`.
+Evidence: per-platform trial/promotion counts.
+
+**GC-LRN-05: Evidence, lifecycle, and causal A/B certification.** Frozen proof of
+evidence precedence, bounded actions, domain separation, lifecycle enforcement,
+scope authority, A/B provenance with the staleness handshake, global judgment,
+promotion sufficiency, idempotency, non-convergence, and safety monotonicity.
+Binding: `formal` `VAL-AGENT-001..011`.
+
+### 2.9 `FLOW2GRAPH-GATE` — one physical truth per bundle
+
+**GC-F2G-01: Provenance/staleness unit surface.** The `def-graph` staleness-marker
+and provenance tests MUST pass (stage-completion markers written LAST; the
+2026-07-05 half-finish incident). Binding: `suite` `DIAG-DEF-GRAPH` (shared,
+deduplicated). Evidence: pytest transcript.
+
+**GC-F2G-02: Same-run provenance certification.** Frozen proof that same-name
+cross-run or cross-platform mixtures are rejected and only one physical run's
+artifact bundle passes. Binding: `formal` `VAL-FLOW-005`.
+
+### 2.10 `GRAPH-GATE` — datasets that cannot silently lie
+
+**GC-GRA-01: Extractor, view, and verifier unit surface.** The `def-graph` suite —
+including the synthetic corner-case pipeline and the verifier's clean+negative
+controls (every check proven to FAIL on a deliberate corruption) — MUST pass.
+Binding: `suite` `DIAG-DEF-GRAPH` (shared, deduplicated). Evidence: pytest
+transcript.
+
+**GC-GRA-02: Independent corpus verification.** NEVER declare a regenerated corpus
+good without `tools/verify_graph_dataset.py --batch <corpus>` under
+`$R2G_GRAPH_PYTHON` — it re-derives topology, features, and labels from raw
+DEF/LEF/liberty/SPEF with independent code; silent-value defects are invisible in
+manifest row counts. Binding: `operator` (per generation). Evidence: batch
+verifier report.
+
+**GC-GRA-03: Input, five-view, identity, semantic, and manifest certification.**
+Frozen proof that unqualified inputs are blocked, all five views survive
+corruption tests, identity mismatches are rejected end-to-end, semantic
+verification catches planted value corruption, and manifests are truthful.
+Binding: `formal` `VAL-DATA-001..006`.
+
+### 2.11 `PUBLISH-GATE` — atomic, honest publication
+
+**GC-PUB-01: Corpus publish-gating unit surface.** The `rtl-acquire` publish-gate
+tests MUST pass. Binding: `suite` `DIAG-RTL-ACQUIRE` (shared, deduplicated).
+Evidence: pytest transcript.
+
+**GC-PUB-02: Manifest/status honesty unit surface.** The `def-graph` manifest and
+stats-gate tests MUST pass — a degraded column MUST read `invalid`/`skipped`,
+never `ok`. Binding: `suite` `DIAG-DEF-GRAPH` (shared, deduplicated). Evidence:
+pytest transcript.
+
+**GC-PUB-03: Transactional publication and consumer certification.** Frozen
+interruption proof that no partial generation becomes active, recovery commits
+exactly once, and published files load in the declared consumer environment.
+Binding: `formal` `VAL-DATA-007..008`.
+
+### 2.12 `OPS-GATE` — campaign operation that stays auditable
+
+**GC-OPS-01: Registry traceability lint.** `run_v1_validation_registry.py lint`
+MUST pass: protocol digest+version pin, 45 REQ↔VAL pairs, gate coverage,
+`GC-*` traceability, formal coverage, phase order, dependency acyclicity.
+Binding: `builtin` `registry_self_lint`. Evidence: lint output.
+
+**GC-OPS-02: Evidence isolation from the tracked tree.** Formal and diagnostic
+evidence MUST land in the gitignored `docs/superpowers/plans/validation-reports/`
+so a scored campaign never mutates tracked repository state. Binding: `builtin`
+`reports_gitignored`. Evidence: `git check-ignore` verdict.
+
+**GC-OPS-03: Ledger, isolation, reproducibility, resource, and continuity
+certification.** Frozen proof of terminal-state ledgers, evaluation-state
+isolation, declared reproducibility, resource accounting, and campaign resume.
+Binding: `formal` `VAL-OPS-001..006`.
 
 ## 3. Subskill Contracts, Requirements, and Validation
 
@@ -663,8 +902,19 @@ python3 docs/superpowers/plans/run_v1_validation_registry.py lint
 python3 docs/superpowers/plans/run_v1_validation_registry.py list
 python3 docs/superpowers/plans/run_v1_validation_registry.py plan --case VAL-FLOW-009
 python3 docs/superpowers/plans/run_v1_validation_registry.py plan --platform sky130hs --gate CONSTRAINT-GATE
+python3 docs/superpowers/plans/run_v1_validation_registry.py gates --dry-run
+python3 docs/superpowers/plans/run_v1_validation_registry.py gates
+python3 docs/superpowers/plans/run_v1_validation_registry.py gates --gate SIGNOFF-GATE
 python3 docs/superpowers/plans/run_v1_validation_registry.py diagnostics --dry-run
 ```
+
+`gates` executes every executable (`suite`/`builtin`/`command`) Section 2 gate
+condition fail-closed, deduplicating suites shared across gates, and reports every
+deferred `formal`/`operator` condition with counts — never silently skipped. It
+writes `validation-reports/gate-conditions.json` and exits nonzero if any
+executable condition fails. Like `diagnostics`, it never awards an official
+`VAL-*` verdict: executable readiness is a prerequisite for, not a substitute for,
+the frozen formal campaign.
 
 `diagnostics` executes current component and adversarial suites but never awards an
 official `VAL-*` verdict. The inventory is executable today and MUST stay green:
@@ -707,7 +957,7 @@ a case pass or system-under-test failure.
 ### 6.3 Formal Order
 
 ```text
-1. registry/freeze/evaluator self-check
+1. registry lint, executable gate-condition sweep (gates), freeze/evaluator self-check
 2. ENV
 3. ACQ and SYNTH
 4. RTL2FLOW and CONSTRAINT/Fmax
@@ -729,7 +979,7 @@ V1 acceptance requires:
 1. this specification, registry, toolchain, fixtures, schema, policies, limits, and
    thresholds are Frozen and content-addressed;
 2. all 45 requirements and every mandatory expanded subcase pass with no required
-   skip;
+   skip, and every executable gate condition passes on the release machine;
 3. all source, platform, constraint, signoff, graph, learning, and publication
    zero-tolerance false-positive counts are zero;
 4. validator mutations prove that critical checks fail when their protected

@@ -7,6 +7,12 @@ fixture, or pending evaluator cannot produce a pass verdict — such subcases ar
 recorded as `not_scheduled`, never silently skipped and never fabricated into a
 pass or a system-under-test failure.
 
+`gates` executes the machine binding of the protocol's Section 2 gate conditions
+(`gate_conditions` in the registry): `suite`/`builtin`/`command` conditions run
+fail-closed with shared suites deduplicated, while `formal`/`operator` conditions
+are reported as deferred with counts — never silently skipped. An executable pass
+is a prerequisite for, never a substitute for, the frozen formal campaign.
+
 The script is location-independent: the repo root is discovered by walking up to
 the nearest `.git`, and the registry defaults to the sibling
 `v1_validation_registry.yaml` (both previously assumed a `tools/` location — the
@@ -43,10 +49,17 @@ DEFAULT_REGISTRY = HERE / "v1_validation_registry.yaml"
 REPORTS_DIR = HERE / "validation-reports"
 REQ_RE = re.compile(r"^\*\*((?:ENV|ACQ|FLOW|DATA|AGENT|OPS)-\d{3}):", re.MULTILINE)
 VAL_RE = re.compile(r"^\*\*(VAL-(?:ENV|ACQ|FLOW|DATA|AGENT|OPS)-\d{3}):", re.MULTILINE)
+GC_TAGS = r"(?:ENV|ACQ|SYNTH|R2F|CON|SIG|LRN|F2G|GRA|PUB|OPS)"
+GC_RE = re.compile(rf"^\*\*(GC-{GC_TAGS}-\d{{2}}):", re.MULTILINE)
+GC_ID_RE = re.compile(rf"GC-{GC_TAGS}-\d{{2}}")
 SPEC_VERSION_RE = re.compile(r"^- Version: \*\*([0-9]+\.[0-9]+)\*\*", re.MULTILINE)
 TARGET_PLATFORMS = ["nangate45", "sky130hd", "sky130hs"]
 OUTPUT_TAIL_CHARS = 20000
 DEFAULT_SUITE_TIMEOUT_S = 1800
+DEFAULT_CONDITION_TIMEOUT_S = 300
+GATE_CONDITION_KINDS = {"suite", "builtin", "command", "formal", "operator"}
+EXECUTABLE_KINDS = {"suite", "builtin", "command"}
+SKILLS = ("eda-install", "signoff-loop", "def-graph", "rtl-acquire")
 
 
 class RegistryError(RuntimeError):
@@ -111,6 +124,88 @@ def _gate_covers(gate_requirements: list[str], requirement: str) -> bool:
         if entry.endswith("-*") and requirement.startswith(entry[:-1]):
             return True
     return False
+
+
+def _builtin_env_sh_parity(context: dict[str, Any]) -> tuple[bool, str]:
+    """GC-ENV-02: the four <skill>/scripts/flow/_env.sh copies must be byte-identical."""
+    repo: Path = context["repo"]
+    digests: dict[str, str] = {}
+    for skill in SKILLS:
+        path = repo / "r2g-skills" / skill / "scripts" / "flow" / "_env.sh"
+        if not path.is_file():
+            return False, f"missing {path}"
+        digests[skill] = sha256(path)
+    return len(set(digests.values())) == 1, json.dumps(digests, indent=2)
+
+
+def _builtin_skills_symlinked(context: dict[str, Any]) -> tuple[bool, str]:
+    """GC-ENV-03: deployed skills must be symlinks into the canonical tree (2026-06-08 defect)."""
+    repo: Path = context["repo"]
+    canonical = (repo / "r2g-skills").resolve()
+    problems: list[str] = []
+    targets: dict[str, str] = {}
+    for skill in SKILLS:
+        link = repo / ".claude" / "skills" / skill
+        if not link.is_symlink():
+            problems.append(f"{link} is not a symlink (stale copy or missing deploy)")
+            continue
+        resolved = link.resolve()
+        targets[skill] = str(resolved)
+        if canonical not in resolved.parents:
+            problems.append(f"{link} resolves outside the canonical tree: {resolved}")
+    return (not problems), json.dumps({"targets": targets, "problems": problems}, indent=2)
+
+
+def _builtin_policies_parse(context: dict[str, Any]) -> tuple[bool, str]:
+    """GC-ACQ-01: every rtl-acquire policy JSON must parse as a non-empty document."""
+    repo: Path = context["repo"]
+    policy_dir = repo / "r2g-skills" / "rtl-acquire" / "references"
+    files = sorted(policy_dir.glob("*.json"))
+    if not files:
+        return False, f"no policy JSON files under {policy_dir}"
+    results: dict[str, str] = {}
+    ok = True
+    for path in files:
+        try:
+            value = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            results[path.name] = f"error: {exc}"
+            ok = False
+            continue
+        if isinstance(value, (dict, list)) and value:
+            results[path.name] = "ok"
+        else:
+            results[path.name] = "empty"
+            ok = False
+    return ok, json.dumps(results, indent=2)
+
+
+def _builtin_reports_gitignored(context: dict[str, Any]) -> tuple[bool, str]:
+    """GC-OPS-02: evidence output must be gitignored (probe a path INSIDE the dir —
+    the dir-only pattern does not match the bare, possibly nonexistent dir path)."""
+    repo: Path = context["repo"]
+    probe_path = "docs/superpowers/plans/validation-reports/gate-conditions.json"
+    probe = subprocess.run(
+        ["git", "check-ignore", "-q", probe_path],
+        cwd=repo, text=True, capture_output=True, check=False,
+    )
+    return probe.returncode == 0, f"git check-ignore {probe_path} -> rc={probe.returncode}"
+
+
+def _builtin_registry_self_lint(context: dict[str, Any]) -> tuple[bool, str]:
+    """GC-OPS-01: full traceability lint over the loaded registry."""
+    warnings: list[str] = []
+    errors = lint_registry(context["registry_path"], context["registry"], warnings)
+    return (not errors), json.dumps({"errors": errors, "warnings": warnings}, indent=2)
+
+
+BUILTIN_CHECKS = {
+    "env_sh_parity": _builtin_env_sh_parity,
+    "skills_symlinked": _builtin_skills_symlinked,
+    "policies_parse": _builtin_policies_parse,
+    "reports_gitignored": _builtin_reports_gitignored,
+    "registry_self_lint": _builtin_registry_self_lint,
+}
 
 
 def lint_registry(
@@ -243,6 +338,103 @@ def lint_registry(
         timeout_s = suite.get("timeout_s", DEFAULT_SUITE_TIMEOUT_S)
         if not isinstance(timeout_s, int) or timeout_s <= 0:
             errors.append(f"{suite.get('id')}: timeout_s must be a positive integer")
+
+    # Gate conditions: the machine binding of the spec's Section 2 GC-* conditions.
+    suite_ids = {str(suite.get("id")) for suite in registry.get("diagnostic_suites", [])}
+    spec_conditions = set(GC_RE.findall(spec_text)) if spec_path.is_file() else set()
+    gate_conditions = registry.get("gate_conditions")
+    if not isinstance(gate_conditions, dict):
+        errors.append("gate_conditions must be an object keyed by gate")
+    else:
+        condition_ids: list[str] = []
+        formal_case_refs: dict[str, set[str]] = {}
+        for gate_name in gates:
+            if not gate_conditions.get(gate_name):
+                errors.append(f"gate {gate_name} has no gate_conditions entry")
+        for gate_name, conditions in gate_conditions.items():
+            if gate_name not in gates:
+                errors.append(f"gate_conditions references unknown gate {gate_name}")
+                continue
+            if not isinstance(conditions, list):
+                errors.append(f"gate_conditions[{gate_name}] must be a list")
+                continue
+            gate_requirements = list(gates[gate_name].get("requirements", []))
+            for condition in conditions:
+                if not isinstance(condition, dict):
+                    errors.append(f"gate_conditions[{gate_name}] entry is not an object")
+                    continue
+                condition_id = str(condition.get("id", "<missing-id>"))
+                condition_ids.append(condition_id)
+                if not GC_ID_RE.fullmatch(condition_id):
+                    errors.append(f"{condition_id}: invalid gate-condition id")
+                if not condition.get("title"):
+                    errors.append(f"{condition_id}: title missing")
+                if not condition.get("evidence"):
+                    errors.append(f"{condition_id}: evidence missing")
+                requirements = condition.get("requirements")
+                if not isinstance(requirements, list) or not requirements:
+                    errors.append(f"{condition_id}: non-empty requirements list required")
+                else:
+                    for requirement in requirements:
+                        if not _gate_covers(gate_requirements, str(requirement)):
+                            errors.append(
+                                f"{condition_id}: requirement {requirement} "
+                                f"not covered by {gate_name}"
+                            )
+                kind = condition.get("kind")
+                if kind == "suite":
+                    if condition.get("suite") not in suite_ids:
+                        errors.append(f"{condition_id}: unknown suite {condition.get('suite')!r}")
+                elif kind == "builtin":
+                    if condition.get("builtin") not in BUILTIN_CHECKS:
+                        errors.append(
+                            f"{condition_id}: unknown builtin {condition.get('builtin')!r}"
+                        )
+                elif kind == "command":
+                    command = condition.get("command")
+                    if not isinstance(command, list) or not command:
+                        errors.append(f"{condition_id}: command must be a non-empty list")
+                    timeout_s = condition.get("timeout_s", DEFAULT_CONDITION_TIMEOUT_S)
+                    if not isinstance(timeout_s, int) or timeout_s <= 0:
+                        errors.append(f"{condition_id}: timeout_s must be a positive integer")
+                elif kind == "formal":
+                    refs = condition.get("cases")
+                    if not isinstance(refs, list) or not refs:
+                        errors.append(f"{condition_id}: formal condition requires a cases list")
+                    else:
+                        for ref in refs:
+                            target = cases.get(str(ref))
+                            if target is None:
+                                errors.append(f"{condition_id}: unknown formal case {ref}")
+                            elif target.get("gate") != gate_name:
+                                errors.append(
+                                    f"{condition_id}: case {ref} belongs to gate "
+                                    f"{target.get('gate')}, not {gate_name}"
+                                )
+                        formal_case_refs.setdefault(gate_name, set()).update(
+                            str(ref) for ref in refs
+                        )
+                elif kind == "operator":
+                    if not condition.get("procedure"):
+                        errors.append(f"{condition_id}: operator condition requires a procedure")
+                else:
+                    errors.append(f"{condition_id}: invalid kind {kind!r}")
+        for duplicate in _duplicates(condition_ids):
+            errors.append(f"duplicate gate-condition id: {duplicate}")
+        if spec_path.is_file() and set(condition_ids) != spec_conditions:
+            errors.append(
+                "registry/spec GC mismatch: missing="
+                f"{sorted(spec_conditions - set(condition_ids))} "
+                f"extra={sorted(set(condition_ids) - spec_conditions)}"
+            )
+        # Formal coverage: every VAL case is wired into a formal condition of its own
+        # gate, so no formal scope can silently drop out of the gate map.
+        for case_id, case in cases.items():
+            if case_id not in formal_case_refs.get(str(case.get("gate")), set()):
+                errors.append(
+                    f"{case_id}: not referenced by any formal gate condition "
+                    f"of {case.get('gate')}"
+                )
     return errors
 
 
@@ -320,10 +512,11 @@ def command_lint(args: argparse.Namespace) -> int:
         print(f"registry lint: FAIL ({len(errors)} error(s), {len(warnings)} warning(s))")
         return 1
     expanded = sum(len(expand_case(registry, case)) for case in registry["cases"])
+    conditions = sum(len(v) for v in (registry.get("gate_conditions") or {}).values())
     print(
         f"registry lint: PASS cases={len(registry['cases'])} "
-        f"expanded_subcases={expanded} protocol={registry['protocol']['version']} "
-        f"warnings={len(warnings)}"
+        f"expanded_subcases={expanded} gate_conditions={conditions} "
+        f"protocol={registry['protocol']['version']} warnings={len(warnings)}"
     )
     return 0
 
@@ -506,6 +699,232 @@ def command_run(args: argparse.Namespace) -> int:
     return 0 if all(item.get("verdict") == "pass" for item in results) else 1
 
 
+def command_gates(args: argparse.Namespace) -> int:
+    """Execute every executable gate condition fail-closed; report deferred ones.
+
+    `suite` conditions shared across gates run once (deduplicated); `formal` and
+    `operator` conditions are never silently skipped — they are reported as
+    deferred with counts. Executable readiness is a prerequisite for, not a
+    substitute for, the frozen formal campaign.
+    """
+    registry_path = args.registry.resolve()
+    registry = load_registry(registry_path)
+    errors = lint_registry(registry_path, registry)
+    if errors:
+        raise RegistryError("registry lint failed before gates: " + "; ".join(errors))
+    gate_conditions: dict[str, Any] = registry["gate_conditions"]
+    selected = list(gate_conditions)
+    if args.gate:
+        unknown = set(args.gate) - set(selected)
+        if unknown:
+            raise RegistryError(f"unknown gate(s): {sorted(unknown)}")
+        selected = [gate for gate in selected if gate in set(args.gate)]
+    suites = {suite["id"]: suite for suite in registry.get("diagnostic_suites", [])}
+    needs_python = any(
+        condition.get("kind") == "suite"
+        or (
+            condition.get("kind") == "command"
+            and any("{python}" in str(part) for part in condition.get("command", []))
+        )
+        for gate in selected
+        for condition in gate_conditions[gate]
+    )
+    python = "{python}"
+    if not args.dry_run and needs_python:
+        python = resolve_validation_python(args.python)
+    replacements = {"python": python, "repo": str(REPO)}
+    context = {"repo": REPO, "registry_path": registry_path, "registry": registry}
+    env = os.environ.copy()
+    env.pop("PYTHONHOME", None)
+    suite_results: dict[str, dict[str, Any]] = {}
+
+    def execute(command: list[str], timeout_s: int) -> dict[str, Any]:
+        started = time.time()
+        try:
+            process = subprocess.run(
+                command, cwd=REPO, text=True, capture_output=True,
+                env=env, check=False, timeout=timeout_s,
+            )
+            return {
+                "execution_status": "completed",
+                "returncode": process.returncode,
+                "ok": process.returncode == 0,
+                "elapsed_s": round(time.time() - started, 3),
+                "command": command,
+                "stdout": _tail(process.stdout),
+                "stderr": _tail(process.stderr),
+            }
+        except subprocess.TimeoutExpired as exc:
+            return {
+                "execution_status": "timeout",
+                "returncode": None,
+                "ok": False,
+                "elapsed_s": round(time.time() - started, 3),
+                "command": command,
+                "stdout": _tail(exc.stdout if isinstance(exc.stdout, str) else ""),
+                "stderr": _tail(exc.stderr if isinstance(exc.stderr, str) else ""),
+            }
+
+    records: list[dict[str, Any]] = []
+    gate_summaries: dict[str, dict[str, Any]] = {}
+    any_failed = False
+    for gate in selected:
+        executable_total = executable_passed = 0
+        deferred_formal_conditions = deferred_formal_cases = deferred_operator = 0
+        gate_failed = False
+        for condition in gate_conditions[gate]:
+            kind = condition["kind"]
+            record: dict[str, Any] = {
+                "id": condition["id"],
+                "gate": gate,
+                "kind": kind,
+                "title": condition.get("title"),
+                "requirements": condition.get("requirements", []),
+            }
+            if kind in EXECUTABLE_KINDS:
+                executable_total += 1
+                if args.dry_run:
+                    record.update(execution_status="not_scheduled", ok=None)
+                    if kind == "suite":
+                        record["suite"] = condition["suite"]
+                    elif kind == "builtin":
+                        record["builtin"] = condition["builtin"]
+                    else:
+                        record["command"] = [
+                            str(part).format(**replacements) for part in condition["command"]
+                        ]
+                    records.append(record)
+                    continue
+                if kind == "suite":
+                    suite_id = condition["suite"]
+                    if suite_id not in suite_results:
+                        suite = suites[suite_id]
+                        command = [
+                            str(part).format(**replacements) for part in suite["command"]
+                        ]
+                        print(f"[suite] {suite_id}: {' '.join(command)}", flush=True)
+                        outcome = execute(
+                            command, int(suite.get("timeout_s", DEFAULT_SUITE_TIMEOUT_S))
+                        )
+                        suite_results[suite_id] = outcome
+                        state = "PASS" if outcome["ok"] else "FAIL"
+                        print(
+                            f"[suite] {suite_id}: {state} ({outcome['elapsed_s']}s)",
+                            flush=True,
+                        )
+                    outcome = suite_results[suite_id]
+                    record.update(
+                        suite=suite_id,
+                        execution_status=outcome["execution_status"],
+                        returncode=outcome["returncode"],
+                        ok=outcome["ok"],
+                        elapsed_s=outcome["elapsed_s"],
+                    )
+                elif kind == "command":
+                    command = [
+                        str(part).format(**replacements) for part in condition["command"]
+                    ]
+                    print(f"[cmd  ] {condition['id']}: {' '.join(command)}", flush=True)
+                    record.update(
+                        execute(
+                            command,
+                            int(condition.get("timeout_s", DEFAULT_CONDITION_TIMEOUT_S)),
+                        )
+                    )
+                else:  # builtin
+                    started = time.time()
+                    record["builtin"] = condition["builtin"]
+                    try:
+                        ok, detail = BUILTIN_CHECKS[condition["builtin"]](context)
+                        record.update(
+                            execution_status="completed",
+                            ok=ok,
+                            detail=_tail(detail),
+                            elapsed_s=round(time.time() - started, 3),
+                        )
+                    except Exception as exc:  # probe failures are not Agent failures
+                        record.update(
+                            execution_status="harness_error",
+                            ok=False,
+                            error=f"{type(exc).__name__}: {exc}",
+                            elapsed_s=round(time.time() - started, 3),
+                        )
+                if record.get("ok"):
+                    executable_passed += 1
+                else:
+                    any_failed = True
+                    gate_failed = True
+                print(f"{condition['id']:<12} {'PASS' if record.get('ok') else 'FAIL'}", flush=True)
+            elif kind == "formal":
+                deferred_formal_conditions += 1
+                deferred_formal_cases += len(condition.get("cases", []))
+                record.update(
+                    execution_status="deferred_formal",
+                    ok=None,
+                    cases=condition.get("cases", []),
+                )
+            else:  # operator
+                deferred_operator += 1
+                record.update(
+                    execution_status="deferred_operator",
+                    ok=None,
+                    procedure=condition.get("procedure"),
+                )
+            records.append(record)
+        if args.dry_run:
+            verdict = "dry_run"
+        elif gate_failed:
+            verdict = "fail"
+        elif executable_total:
+            verdict = "executable_pass"
+        else:
+            verdict = "deferred_only"
+        gate_summaries[gate] = {
+            "executable_total": executable_total,
+            "executable_passed": executable_passed,
+            "deferred_formal_conditions": deferred_formal_conditions,
+            "deferred_formal_cases": deferred_formal_cases,
+            "deferred_operator_conditions": deferred_operator,
+            "verdict": verdict,
+        }
+    report = {
+        "registry_id": registry["registry_id"],
+        "protocol": registry["protocol"],
+        "repository_commit": subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=REPO, text=True,
+            capture_output=True, check=False,
+        ).stdout.strip(),
+        "formal": False,
+        "dry_run": bool(args.dry_run),
+        "gate_summaries": gate_summaries,
+        "suite_results": suite_results,
+        "conditions": records,
+    }
+    args.out.parent.mkdir(parents=True, exist_ok=True)
+    args.out.write_text(json.dumps(report, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
+    for gate in selected:
+        summary = gate_summaries[gate]
+        print(
+            f"{gate:<16} executable {summary['executable_passed']}/{summary['executable_total']}"
+            f"  deferred_formal={summary['deferred_formal_conditions']}"
+            f"({summary['deferred_formal_cases']} cases)"
+            f" operator={summary['deferred_operator_conditions']}"
+            f" -> {summary['verdict']}"
+        )
+    print(f"gate-conditions report: {args.out}")
+    if args.dry_run:
+        print("gate conditions: DRY RUN (nothing executed)")
+        return 0
+    if any_failed:
+        print("gate conditions: FAIL (fail-closed; fix the implementation, not the probe)")
+        return 1
+    print(
+        "gate conditions: EXECUTABLE PASS — deferred formal/operator conditions remain; "
+        "certification still requires the frozen formal campaign"
+    )
+    return 0
+
+
 def command_diagnostics(args: argparse.Namespace) -> int:
     registry = load_registry(args.registry.resolve())
     suites = registry.get("diagnostic_suites", [])
@@ -600,6 +1019,17 @@ def build_parser() -> argparse.ArgumentParser:
     plan.add_argument("--details", action="store_true", help="include every expanded subcase")
     plan.add_argument("--json", action="store_true")
     plan.set_defaults(func=command_plan)
+
+    gates_cmd = subparsers.add_parser(
+        "gates", help="execute executable gate conditions fail-closed; report deferred ones"
+    )
+    gates_cmd.add_argument("--gate", action="append", help="select a gate; repeatable")
+    gates_cmd.add_argument(
+        "--python", help="Python with pytest, torch, torch_geometric, and pandas"
+    )
+    gates_cmd.add_argument("--dry-run", action="store_true")
+    gates_cmd.add_argument("--out", type=Path, default=REPORTS_DIR / "gate-conditions.json")
+    gates_cmd.set_defaults(func=command_gates)
 
     run = subparsers.add_parser("run", help="run ready formal evaluators; fail closed otherwise")
     add_filters(run)
