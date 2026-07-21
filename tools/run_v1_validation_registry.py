@@ -15,8 +15,11 @@ is a prerequisite for, never a substitute for, the frozen formal campaign.
 
 The script is location-independent: the repo root is discovered by walking up to
 the nearest `.git`, and the registry defaults to the sibling
-`v1_validation_registry.yaml` (both previously assumed a `tools/` location — the
-2026-07-20 relocation defect).
+`v1_validation_registry.yaml`. The canonical home for both is `tools/` (repo-level
+operator tooling, beside `verify_graph_dataset.py` and `check_db_integrity.py`);
+the protocol document stays in `docs/superpowers/plans/`, and run evidence lands
+in the gitignored `docs/superpowers/plans/validation-reports/` regardless of where
+the script lives (GC-OPS-02).
 """
 
 from __future__ import annotations
@@ -46,7 +49,9 @@ def _find_repo_root(start: Path) -> Path:
 HERE = Path(__file__).resolve().parent
 REPO = _find_repo_root(HERE)
 DEFAULT_REGISTRY = HERE / "v1_validation_registry.yaml"
-REPORTS_DIR = HERE / "validation-reports"
+# Evidence stays at the spec-documented, gitignored location even though the
+# runner lives in tools/ — GC-OPS-02 guards exactly this path.
+REPORTS_DIR = REPO / "docs" / "superpowers" / "plans" / "validation-reports"
 REQ_RE = re.compile(r"^\*\*((?:ENV|ACQ|FLOW|DATA|AGENT|OPS)-\d{3}):", re.MULTILINE)
 VAL_RE = re.compile(r"^\*\*(VAL-(?:ENV|ACQ|FLOW|DATA|AGENT|OPS)-\d{3}):", re.MULTILINE)
 GC_TAGS = r"(?:ENV|ACQ|SYNTH|R2F|CON|SIG|LRN|F2G|GRA|PUB|OPS)"

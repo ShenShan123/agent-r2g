@@ -3,9 +3,9 @@
   "registry_id": "r2g-v1-validation-registry",
   "protocol": {
     "source": "docs/superpowers/plans/V1_ASSURANCE_SPECIFICATION_AND_VALIDATION_PROTOCOL.md",
-    "version": "0.7",
+    "version": "0.8",
     "status": "Proposed",
-    "sha256": "155a96f4c33583b461dbb8ed9042c825e66f3886f2645749d6c789196a8f56a7"
+    "sha256": "595ef1e6b5e3a61dab3b1019f5c65a13b6e83bb084e68efacecf26ec868c0f06"
   },
   "format_note": "This is JSON-compatible YAML 1.2 and is parsed with Python's standard json module.",
   "formal_execution_policy": {

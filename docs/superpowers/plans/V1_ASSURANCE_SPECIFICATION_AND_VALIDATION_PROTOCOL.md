@@ -1,12 +1,12 @@
 # R2G Agent V1 Execution Specification and Validation Protocol
 
 - Status: **Proposed**
-- Version: **0.7**
+- Version: **0.8**
 - Date: **2026-07-20**
-- Repository reference: `47c611b3feec6a5854dc353d49e71f5048977096`
+- Repository reference: `265556c` (v0.7 gate-condition baseline)
 - Target platforms: `nangate45`, `sky130hd`, `sky130hs`
-- Machine registry: `docs/superpowers/plans/v1_validation_registry.yaml`
-- Registry runner: `docs/superpowers/plans/run_v1_validation_registry.py`
+- Machine registry: `tools/v1_validation_registry.yaml`
+- Registry runner: `tools/run_v1_validation_registry.py`
 - Quality contract companion: `docs/superpowers/plans/V1_QUALITY_GATE_AND_CONVERGENCE_CRITERIA.md`
 
 ## 0. How to Use This Document
@@ -898,14 +898,14 @@ staging, verification, atomic pointer/index update, and exactly-once recovery.
 ```bash
 cd /proj/workarea/user5/r2g-skills   # repo root
 
-python3 docs/superpowers/plans/run_v1_validation_registry.py lint
-python3 docs/superpowers/plans/run_v1_validation_registry.py list
-python3 docs/superpowers/plans/run_v1_validation_registry.py plan --case VAL-FLOW-009
-python3 docs/superpowers/plans/run_v1_validation_registry.py plan --platform sky130hs --gate CONSTRAINT-GATE
-python3 docs/superpowers/plans/run_v1_validation_registry.py gates --dry-run
-python3 docs/superpowers/plans/run_v1_validation_registry.py gates
-python3 docs/superpowers/plans/run_v1_validation_registry.py gates --gate SIGNOFF-GATE
-python3 docs/superpowers/plans/run_v1_validation_registry.py diagnostics --dry-run
+python3 tools/run_v1_validation_registry.py lint
+python3 tools/run_v1_validation_registry.py list
+python3 tools/run_v1_validation_registry.py plan --case VAL-FLOW-009
+python3 tools/run_v1_validation_registry.py plan --platform sky130hs --gate CONSTRAINT-GATE
+python3 tools/run_v1_validation_registry.py gates --dry-run
+python3 tools/run_v1_validation_registry.py gates
+python3 tools/run_v1_validation_registry.py gates --gate SIGNOFF-GATE
+python3 tools/run_v1_validation_registry.py diagnostics --dry-run
 ```
 
 `gates` executes every executable (`suite`/`builtin`/`command`) Section 2 gate
@@ -933,7 +933,7 @@ Formal `run` schedules only frozen cases whose fixtures are
 bound and evaluators are ready:
 
 ```bash
-python3 docs/superpowers/plans/run_v1_validation_registry.py run \
+python3 tools/run_v1_validation_registry.py run \
   --platform nangate45 \
   --out docs/superpowers/plans/validation-reports/validation-report.json \
   --evidence-dir docs/superpowers/plans/validation-reports/validation-evidence
