@@ -10,7 +10,9 @@
 # usage: run_sky130_design.sh <source_project_dir>
 set -uo pipefail
 
-REPO="/proj/workarea/user5/agent-r2g"
+# Repo root: this script lives in <repo>/tools/, so ../ is the tree root. Was a
+# hardcoded /proj/workarea/user5/agent-r2g, dead after the agent-r2g -> r2g-skills rename.
+REPO="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 SKILL="$REPO/r2g-skills/signoff-loop"
 SRC="${1:-}"
 [[ -z "$SRC" ]] && { echo 'RESULT_JSON: {"error":"no source dir"}'; exit 1; }

@@ -22,7 +22,10 @@ import subprocess
 import sys
 from pathlib import Path
 
-BASE = Path('/proj/workarea/user5/agent-r2g')
+# Repo root: this file lives in <repo>/tools/, so parents[1] is the tree root.
+# Was hardcoded /proj/workarea/user5/agent-r2g, which broke when the repo was
+# renamed agent-r2g -> r2g-skills (the old path no longer exists).
+BASE = Path(__file__).resolve().parents[1]
 CASES = BASE / 'design_cases'
 RTL_DIR = BASE / 'rtl_designs'
 TOOLS = BASE / 'tools'

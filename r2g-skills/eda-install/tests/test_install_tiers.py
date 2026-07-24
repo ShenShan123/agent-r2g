@@ -13,9 +13,24 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
+
+
+def _has_graph_trio() -> bool:
+    """True when THIS interpreter imports the torch/torch_geometric/pandas trio.
+
+    The graph-idempotency test pins R2G_GRAPH_PYTHON=sys.executable, so it can only
+    observe the "already satisfied" short-circuit when the running interpreter has
+    the trio (i.e. the suite is run under the graph venv). Run under a plain python3
+    the precondition is absent — guard it rather than emit a spurious failure, exactly
+    as test_idempotent_when_present guards on the pinned env.local.sh."""
+    return subprocess.run(
+        [sys.executable, "-c", "import torch, torch_geometric, pandas"],
+        capture_output=True,
+    ).returncode == 0
 
 EDA_ROOT = Path(__file__).resolve().parents[1]
 SKILLS_ROOT = EDA_ROOT.parent
@@ -132,9 +147,12 @@ def test_idempotent_when_present(tier):
     assert "+ " not in out.stdout, f"{tier}: emitted an install command despite being present"
 
 
+@pytest.mark.skipif(not _has_graph_trio(),
+                    reason="this interpreter lacks torch/torch_geometric/pandas, so "
+                           "R2G_GRAPH_PYTHON=sys.executable cannot short-circuit; run the "
+                           "suite under the graph venv (as the V1 gates runner does)")
 def test_graph_idempotent_when_python_pinned():
     # Point R2G_GRAPH_PYTHON at this interpreter (it has torch/pyg/pandas in the suite venv).
-    import sys
     out = _run("install_graph.sh", "--dry-run", env={"R2G_GRAPH_PYTHON": sys.executable})
     assert out.returncode == 0
     assert "already satisfied" in out.stderr

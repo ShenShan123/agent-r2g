@@ -29,7 +29,10 @@
 # the ledger has 0 pending. To stop: kill -9 the process GROUP (run_orfs.sh wraps
 # stages in `setsid timeout`, so killing the driver alone orphans the ORFS tree).
 set -u
-cd /proj/workarea/user5/agent-r2g
+# Repo root: this script lives in <repo>/tools/, so ../ is the tree root. Was a
+# hardcoded /proj/workarea/user5/agent-r2g -- dead after the agent-r2g -> r2g-skills
+# rename; under `set -u` (no -e) the failed cd silently left the driver in the wrong CWD.
+cd -- "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)" || { echo "campaign_resume_waves: cannot resolve repo root" >&2; exit 1; }
 
 PLATFORM=${PLATFORM:-sky130hd}
 # Per-platform ledger so each round's history stays immutable. The original
