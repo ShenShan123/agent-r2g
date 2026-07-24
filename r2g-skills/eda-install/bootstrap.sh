@@ -33,7 +33,7 @@ GRAPH_VENV_SUBPATH="pyenvs/r2g-graph"
 
 # ---- args --------------------------------------------------------------------
 do_dry=0; do_yes=0; prefix=""; graph_python=""; plan_from=""; tiers_arg=""
-do_deploy=0; deploy_link=0; min_free=""
+do_deploy=0; deploy_link=0; min_free=""; strict_platforms="${R2G_STRICT_PLATFORMS:-}"
 
 print_help() {
   cat <<EOF
@@ -51,6 +51,13 @@ Options:
   --prefix DIR       Big-volume root for the conda install, PDK, and torch venv
                      (default: first writable dir with >= min-free-gb, preferring /proj).
   --tiers LIST       Comma-separated subset to act on (core,frontend,sky130,klayout,pdk,graph).
+  --strict-platforms LIST
+                     Comma-separated platforms that MUST come out strict-signoff
+                     capable (e.g. nangate45,sky130hd,sky130hs). Makes the
+                     platform_rules tier REQUIRED and FAIL-CLOSED: a missing rule
+                     installer, failed postcondition/canary, or failed
+                     platform_capability --strict check fails the bootstrap
+                     (RMD2-P1-01). Unselected platforms stay best-effort.
   --graph-python P   A python that already has torch+torch_geometric+pandas (pins R2G_GRAPH_PYTHON).
   --min-free-gb N    Free-space threshold for the big-volume picker (default 15).
   --plan-from FILE   Use a saved 'detect_env.sh' KEY=VALUE dump instead of probing (for review/tests).
@@ -65,6 +72,7 @@ while [[ $# -gt 0 ]]; do
     --yes|-y)       do_yes=1; shift ;;
     --prefix)       prefix="${2:-}"; shift 2 ;;
     --tiers)        tiers_arg="${2:-}"; shift 2 ;;
+    --strict-platforms) strict_platforms="${2:-}"; shift 2 ;;
     --graph-python) graph_python="${2:-}"; shift 2 ;;
     --min-free-gb)  min_free="${2:-}"; shift 2 ;;
     --plan-from)    plan_from="${2:-}"; do_dry=1; shift 2 ;;
@@ -79,6 +87,10 @@ done
 [[ -n "$prefix" ]]       && export R2G_PREFIX="$prefix"
 [[ -n "$graph_python" ]] && export R2G_GRAPH_PYTHON="$graph_python"
 [[ -n "$min_free" ]]     && export R2G_MIN_FREE_GB="$min_free"
+# Normalize commas → spaces; exported so install_platform_rules.sh fail-closes
+# on exactly the selected strict platforms (RMD2-P1-01).
+strict_platforms="${strict_platforms//,/ }"
+[[ -n "$strict_platforms" ]] && export R2G_STRICT_PLATFORMS="$strict_platforms"
 
 if [[ -n "$plan_from" ]]; then
   [[ -f "$plan_from" ]] || { echo "error: --plan-from file not found: $plan_from" >&2; exit 2; }
@@ -165,19 +177,41 @@ eval_tier() {
       # flows. Probe via the sibling skill's platform_capability.py; the
       # installer materializes the repo's bundled DRC/LVS/antenna decks.
       local _cap="$COLLECTION_DIR/signoff-loop/scripts/flow/platform_capability.py"
+      # Probe the SELECTED strict platforms (RMD2-P1-01), defaulting to the
+      # default full-flow platform when none were named.
+      local _plats="${strict_platforms:-nangate45}" _p
+      local _pargs=()
+      for _p in $_plats; do _pargs+=(--platform "$_p"); done
+      local _need_status="OPT"
+      [[ -n "$strict_platforms" ]] && _need_status="MISS"
+      # Probe with the DETECTED tool environment (PDK/magic/netgen) — the
+      # sky130 LVS capability check needs it, and probing bare would misreport
+      # a provisioned host as MISS.
+      local _pdk="${PDK_ROOT:-}"
+      [[ -z "$_pdk" && -n "$(d SKY130A_DIR)" ]] && _pdk="$(dirname "$(d SKY130A_DIR)")"
       if [[ -z "$(d ORFS_ROOT)" || ! -f "$_cap" ]]; then
-        TIER_STATUS="OPT"; TIER_ACTION="bundled nangate45 DRC/LVS/antenna decks -> ORFS (install ORFS core first)"
-      elif python3 "$_cap" --flow-dir "$(d ORFS_ROOT)/flow" --platform nangate45 --strict >/dev/null 2>&1; then
-        TIER_STATUS="OK"; TIER_ACTION="nangate45 strict-signoff capable (DRC/LVS decks + usable antenna model)"
+        TIER_STATUS="$_need_status"; TIER_ACTION="bundled platform DRC/LVS/antenna decks -> ORFS (install ORFS core first)"
+      elif PDK_ROOT="$_pdk" MAGIC_EXE="$(d MAGIC_EXE)" NETGEN_EXE="$(d NETGEN_EXE)" \
+           python3 "$_cap" --flow-dir "$(d ORFS_ROOT)/flow" "${_pargs[@]}" --strict >/dev/null 2>&1; then
+        TIER_STATUS="OK"; TIER_ACTION="strict-signoff capable: $_plats (DRC/LVS decks + usable antenna model)"
       else
-        TIER_STATUS="OPT"; TIER_ACTION="install bundled nangate45 DRC/LVS/antenna decks (install_platform_rules.sh) — strict signoff impossible until then"
+        TIER_STATUS="$_need_status"; TIER_ACTION="install bundled platform rule decks (install_platform_rules.sh: $_plats) — strict signoff impossible until then"
       fi ;;
     *) TIER_STATUS="?"; TIER_ACTION="unknown tier" ;;
   esac
 }
 
 ALL_TIERS=(core frontend sky130 klayout pdk platform_rules graph)
-tier_need() { case "$1" in core|frontend) echo req ;; *) echo opt ;; esac; }
+tier_need() {
+  case "$1" in
+    core|frontend) echo req ;;
+    # Explicitly selected strict platforms make the rules tier REQUIRED — a
+    # requested strict platform cannot complete installation best-effort
+    # (RMD2-P1-01).
+    platform_rules) [[ -n "$strict_platforms" ]] && echo req || echo opt ;;
+    *) echo opt ;;
+  esac
+}
 
 # Restrict to --tiers if given.
 SELECTED=("${ALL_TIERS[@]}")

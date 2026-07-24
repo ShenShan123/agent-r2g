@@ -43,6 +43,14 @@ fi
 # Auto-detect ORFS + tools (honors ORFS_ROOT / *_EXE env overrides)
 # shellcheck source=/dev/null
 source "$(dirname "${BASH_SOURCE[0]}")/_env.sh"
+# Bounded process-group checker supervisor (RMD2-P0-01)
+# shellcheck source=/dev/null
+source "$(dirname "${BASH_SOURCE[0]}")/_bounded_run.sh"
+# Cancellation must never orphan the checker: reap the whole checker session on
+# any exit path (RMD2-P0-01 acceptance: no descendant survives run_drc.sh).
+trap 'r2g_bounded_cleanup' EXIT
+trap 'r2g_bounded_cleanup; exit 130' INT
+trap 'r2g_bounded_cleanup; exit 143' TERM
 
 if [[ -z "${ORFS_ROOT:-}" || ! -d "$FLOW_DIR" ]]; then
   echo "ERROR: ORFS not found. Set ORFS_ROOT to your OpenROAD-flow-scripts checkout." >&2
@@ -199,10 +207,14 @@ echo "Timeout: ${DRC_TIMEOUT}s"
 # policy handed it a stale-looking chain (clock_period.txt stamped newer than
 # the restored Yosys outputs; numbered logs older than their stage results) —
 # ALL 12 pilot DRC invocations rebuilt synth→finish before KLayout. KLayout
-# needs only the GDS and the deck, so invoke ORFS scripts/klayout.sh DIRECTLY
-# with absolute paths: physical-stage dependency evaluation cannot run at all.
-# Plain `timeout`, never `setsid timeout` (failure-patterns #40: setsid made
-# timeout a group leader and silently disabled its tree-kill).
+# needs only the GDS and the deck, so invoke KLAYOUT_CMD DIRECTLY with absolute
+# paths: physical-stage dependency evaluation cannot run at all. The checker
+# runs under r2g_bounded_run (_bounded_run.sh, RMD2-P0-01 / failure-patterns
+# #55): its own session/process group, output straight to the run-local log,
+# TERM→grace→KILL delivered to the whole group at timeout — GNU timeout around
+# the non-exec ORFS klayout.sh wrapper supervised the WRAPPER and orphaned
+# KLayout at PPID=1 while `tee` held the pipe open (never `setsid timeout`
+# either, #40: that disables timeout's own tree-kill).
 
 # Select the frozen layout: the preserved backend run's GDS (the artifact this
 # verdict will be attributed to), falling back to the restaged workspace copy.
@@ -254,21 +266,38 @@ LYRDB="$OUT_DIR/6_drc.lyrdb"
 DRC_LOG="$OUT_DIR/6_drc.log"
 rm -f "$LYRDB" "$OUT_DIR/6_drc_count.rpt" 2>/dev/null || true
 
+# Design size for the run manifest (RMD2-LIM-01: full-deck DRC cost is
+# super-linear in design size — 22s GCD → >7200s SHA-256 on nangate45 — so the
+# verdict must preserve size + wall time for scale-stratified throughput
+# reporting). Best-effort, mirrors run_lvs.sh's 6_report.json source.
+_DRC_REPORT_JSON=$(find "${ORFS_LOGS_DIR:-/nonexistent}" -name "6_report.json" 2>/dev/null | head -1 || true)
+[[ -z "$_DRC_REPORT_JSON" ]] && _DRC_REPORT_JSON=$(find "$PROJECT_DIR/backend" -name "6_report.json" 2>/dev/null | sort | tail -1 || true)
+DRC_CELL_COUNT=0
+if [[ -n "$_DRC_REPORT_JSON" ]]; then
+  DRC_CELL_COUNT=$(python3 -c "import json,sys; d=json.load(open(sys.argv[1])); print(int(d.get('finish__design__instance__count',0)))" "$_DRC_REPORT_JSON" 2>/dev/null || echo 0)
+fi
+
 DRC_STARTED_AT="$(date -Iseconds)"
-_KLAYOUT_WRAPPER="$FLOW_DIR/scripts/klayout.sh"
+DRC_STARTED_EPOCH="$(date +%s)"
 DRC_STATUS=0
 set +e +o pipefail
-if [[ -f "$_KLAYOUT_WRAPPER" ]]; then
-  timeout --signal=TERM --kill-after=60 "$DRC_TIMEOUT" \
-    bash "$_KLAYOUT_WRAPPER" -zz -rd in_gds="$DRC_GDS" \
-    -rd report_file="$LYRDB" -r "$DRC_DECK" 2>&1 | tee "$DRC_LOG"
-else
-  timeout --signal=TERM --kill-after=60 "$DRC_TIMEOUT" \
-    "$KLAYOUT_CMD" -zz -rd in_gds="$DRC_GDS" \
-    -rd report_file="$LYRDB" -r "$DRC_DECK" 2>&1 | tee "$DRC_LOG"
-fi
-DRC_STATUS=${PIPESTATUS[0]}
+# RMD2-P0-01 (three-platform pilot 2026-07-24): the old
+# `timeout … bash klayout.sh … | tee` supervised the WRAPPER, not the checker —
+# at expiry timeout+wrapper exited while KLayout survived with PPID=1 at ~99%
+# CPU, and tee held the output pipe open so run_drc.sh (and the whole
+# single-worker campaign behind it) never returned. Now: invoke KLAYOUT_CMD
+# DIRECTLY (the ORFS wrapper only version-checks, which we already record
+# ourselves) inside a dedicated session/process group, output written straight
+# to the run-local log, TERM→grace→KILL delivered to the ENTIRE group on
+# timeout, and no descendant may survive before the verdict is written.
+r2g_bounded_run "$DRC_TIMEOUT" "${DRC_KILL_GRACE:-60}" "$DRC_LOG" \
+  "$KLAYOUT_CMD" -zz -rd in_gds="$DRC_GDS" \
+  -rd report_file="$LYRDB" -r "$DRC_DECK"
+DRC_STATUS=$?
 set -e -o pipefail
+# Output no longer streams to the console (it goes straight to the log so no
+# pipe reader can outlive the checker) — surface the tail for the operator.
+tail -n 40 "$DRC_LOG" 2>/dev/null || true
 DRC_ENDED_AT="$(date -Iseconds)"
 if [[ $DRC_STATUS -eq 124 ]]; then
   echo "ERROR: DRC timed out after ${DRC_TIMEOUT}s" >&2
@@ -396,10 +425,11 @@ fi
 # it publishes.
 python3 - "$DRC_DIR/drc_result.json" "$DRC_RUN_TAG" "$DRC_GDS" "$GDS_SHA_PRE" \
   "$DRC_DECK" "$DECK_SHA" "$KLAYOUT_VERSION" "$DRC_STARTED_AT" "$DRC_ENDED_AT" \
-  "$DRC_TIMEOUT" "$DRC_STATUS" <<'PYEOF' || true
-import json, sys
+  "$DRC_TIMEOUT" "$DRC_STATUS" "$DRC_CELL_COUNT" "$DRC_STARTED_EPOCH" <<'PYEOF' || true
+import json, sys, time
 (path, run_tag, gds, gds_sha, deck, deck_sha,
- klayout_version, started, ended, timeout_s, exit_code) = sys.argv[1:12]
+ klayout_version, started, ended, timeout_s, exit_code,
+ cell_count, started_epoch) = sys.argv[1:14]
 try:
     d = json.load(open(path))
 except Exception:
@@ -410,7 +440,11 @@ d.update(checker="klayout_direct",
          deck_path=deck, deck_sha256=deck_sha or None,
          klayout_version=klayout_version or None,
          started_at=started, ended_at=ended,
-         timeout_s=int(timeout_s), exit_code=int(exit_code))
+         timeout_s=int(timeout_s), exit_code=int(exit_code),
+         # RMD2-LIM-01: design size + checker wall time preserved so full-deck
+         # DRC throughput can be reported scale-stratified.
+         cell_count=int(cell_count or 0) or None,
+         wall_s=max(0, int(time.time()) - int(started_epoch)))
 with open(path, "w") as f:
     json.dump(d, f, indent=2)
     f.write("\n")

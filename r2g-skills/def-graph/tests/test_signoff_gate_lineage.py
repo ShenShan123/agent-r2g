@@ -91,14 +91,31 @@ def test_repair_only_run_reconstructed_from_sibling(tmp_path):
 
 def test_repair_only_run_with_recorded_parent_chain(tmp_path):
     """A post-P0-4 resume records parent_lineage in resume_meta.json: the chain
-    is strong (consumed-artifact digests + named parent) — complete, no caveat."""
+    is strong (consumed-artifact digests + named parent) — complete, no caveat.
+
+    Hardened by RMD2-P0-02: 'recorded' now requires the CANONICAL artifact
+    name, a real sha256, a same-identity parent whose stage manifest carries
+    the matching digest, and preserved bytes that still hash to it — so this
+    fixture builds all of that instead of the old fake 'ab'*32 digests (which
+    the gate now rejects; see test_signoff_gate_lineage_digest.py)."""
+    import hashlib
     proj, run = _proj(tmp_path, stage_log=REPAIR_STAGES,
                       ppa={"summary": {"timing": {"setup_wns": 0.05}}})
     parent = "RUN_2026-06-30_00-00-00"
-    _add_run(proj, parent, CLEAN_STAGES)
-    lineage = {s: {"artifact": a, "sha256": "ab" * 32, "parent_run": parent}
-               for s, a in (("synth", "1_synth.v"), ("floorplan", "2_floorplan.odb"),
-                            ("place", "3_place.odb"), ("cts", "4_cts.odb"))}
+    parent_dir = _add_run(proj, parent, CLEAN_STAGES)
+    os.makedirs(os.path.join(run, "results"), exist_ok=True)
+    lineage = {}
+    with open(os.path.join(parent_dir, "stage_artifact_manifest.jsonl"), "w") as mf:
+        for s, a in (("synth", "1_synth.odb"), ("floorplan", "2_floorplan.odb"),
+                     ("place", "3_place.odb"), ("cts", "4_cts.odb")):
+            payload = f"bytes-of-{a}".encode()
+            with open(os.path.join(run, "results", a), "wb") as f:
+                f.write(payload)
+            digest = hashlib.sha256(payload).hexdigest()
+            mf.write(json.dumps({"stage": s, "status": 0, "run_tag": parent,
+                                 "artifact": a, "sha256": digest}) + "\n")
+            lineage[s] = {"artifact": a, "sha256": digest, "parent_run": parent,
+                          "source": "recorded", "verified": True}
     json.dump({"from_stage": "route", "reused_stages": list(lineage),
                "parent_lineage": lineage},
               open(os.path.join(run, "resume_meta.json"), "w"))

@@ -128,6 +128,9 @@ _r2g_acquire_workspace_lock() {  # platform design variant -> holds an fd-scoped
 # shellcheck source=/dev/null
 source "$(dirname "${BASH_SOURCE[0]}")/_env.sh"
 
+# Absolute path to this script dir BEFORE any cd (resume_lineage.py lives here).
+FLOW_SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 if [[ -z "${ORFS_ROOT:-}" || ! -d "$FLOW_DIR" ]]; then
   echo "ERROR: ORFS not found. Set ORFS_ROOT to your OpenROAD-flow-scripts checkout." >&2
   exit 1
@@ -333,102 +336,54 @@ fi
 # and cheaper than the clean_all full rebuild. Opt out with
 # R2G_RESUME_NO_CLEAN=1 (pure crash-resume of an interrupted flow, unchanged
 # config — e.g. the finish-stage GDS resume).
-# Resume provenance (failure-patterns.md #38 / codex #3): make the rerun decision
-# auditable. The reused/rerun choice used to be a bare stdout echo (invisible in
-# the persisted backend/RUN_*/flow.log). Now the decision is tee'd to flow.log
-# with its concrete REASON (R2G_RERUN_REASON, supplied by fix_signoff.sh), and a
-# structured resume_meta.json records which stages were REUSED and why.
-_write_resume_meta() {  # reason no_clean
-  local reason="$1" no_clean="$2" reused="" s
-  for s in $ORFS_STAGES_LIST; do
-    [[ "$s" == "$FROM_STAGE" ]] && break
-    reused="${reused:+$reused }$s"
-  done
-  # Content-addressed parent chain for the REUSED stages (pilot P0-4, 2026-07-21):
-  # a resumed run's own stage_log.jsonl only records the stages it reran, so its
-  # RUN dir looked like a complete flow to signoff_gate.py while synth..cts were
-  # actually consumed from an EARLIER run. Record, per reused stage, the sha256 of
-  # the canonical artifact being consumed from the ORFS results dir RIGHT NOW plus
-  # the newest sibling RUN whose ledger shows a clean row for that stage — so
-  # completion can later be judged as a reconstructable six-stage lineage instead
-  # of merely a successful finish row.
-  local rdir="$FLOW_DIR/results/$PLATFORM/$DESIGN_NAME/$FLOW_VARIANT"
-  [[ -d "$rdir" ]] || rdir="$FLOW_DIR/results/$PLATFORM/$DESIGN_NAME"
-  python3 - "$BACKEND_DIR/resume_meta.json" "$FROM_STAGE" "$reason" "$no_clean" "$reused" \
-            "$rdir" "$PROJECT_DIR/backend" "$(basename "$BACKEND_DIR")" <<'PY' 2>/dev/null || true
-import hashlib, json, os, sys, time
-path, from_stage, reason, no_clean, reused, rdir, backend, self_run = sys.argv[1:9]
-STAGE_ARTIFACT = {"synth": "1_synth.v", "floorplan": "2_floorplan.odb",
-                  "place": "3_place.odb", "cts": "4_cts.odb",
-                  "route": "5_route.odb", "finish": "6_final.odb"}
-
-def _sha256(p):
-    try:
-        h = hashlib.sha256()
-        with open(p, "rb") as f:
-            for chunk in iter(lambda: f.read(1 << 20), b""):
-                h.update(chunk)
-        return h.hexdigest()
-    except OSError:
-        return None
-
-def _clean_stage_runs(stage):
-    """Sibling RUN dirs (newest first, excluding this run) whose stage_log has a
-    clean row for `stage`."""
-    try:
-        runs = sorted((d for d in os.listdir(backend)
-                       if d.startswith("RUN_") and d != self_run),
-                      key=lambda d: os.path.getmtime(os.path.join(backend, d)),
-                      reverse=True)
-    except OSError:
-        return []
-    out = []
-    for d in runs:
-        slog = os.path.join(backend, d, "stage_log.jsonl")
-        try:
-            with open(slog, encoding="utf-8") as f:
-                for line in f:
-                    try:
-                        rec = json.loads(line)
-                    except ValueError:
-                        continue
-                    if rec.get("stage") == stage and rec.get("status") in (0, "0"):
-                        out.append(d)
-                        break
-        except OSError:
-            continue
-    return out
-
-lineage = {}
-for stage in (reused.split() if reused else []):
-    art = STAGE_ARTIFACT.get(stage)
-    apath = os.path.join(rdir, art) if art else None
-    parents = _clean_stage_runs(stage)
-    lineage[stage] = {
-        "artifact": art,
-        "sha256": _sha256(apath) if apath and os.path.isfile(apath) else None,
-        "parent_run": parents[0] if parents else None,
-    }
-json.dump({"from_stage": from_stage, "reason": reason, "no_clean": no_clean == "1",
-           "reused_stages": reused.split() if reused else [],
-           "parent_lineage": lineage, "ts": int(time.time())},
-          open(path, "w"), indent=1)
-PY
-}
+# Resume provenance (failure-patterns.md #38 / codex #3, hardened RMD2-P0-02):
+# make the rerun decision auditable AND digest-complete. The old inline recorder
+# fingerprinted a NONEXISTENT canonical synth artifact (1_synth.v) so every
+# repair run carried synth.sha256=null, and it silently attributed reused stages
+# to the newest clean-looking sibling. Now resume_lineage.py (one versioned
+# stage→artifact contract, stage_artifacts.py) verifies — BEFORE anything is
+# cleaned or rerun — that every reused stage's workspace artifact exists, hashes
+# it, and matches it against a parent run's recorded stage digest; a missing,
+# unhashable, or unattributable artifact STOPS the resume (exit 4). The decision
+# + per-stage {artifact, sha256, parent_run, verified} land in resume_meta.json.
 if [[ -n "$FROM_STAGE" ]]; then
   RERUN_REASON="${R2G_RERUN_REASON:-stage-scoped resume: config edit forces clean_$FROM_STAGE; earlier stages reused}"
-  if [[ "${R2G_RESUME_NO_CLEAN:-0}" != "1" ]]; then
+  _RESUME_RDIR="$FLOW_DIR/results/$PLATFORM/$DESIGN_NAME/$FLOW_VARIANT"
+  [[ -d "$_RESUME_RDIR" ]] || _RESUME_RDIR="$FLOW_DIR/results/$PLATFORM/$DESIGN_NAME"
+  _RESUME_NO_CLEAN=0
+  [[ "${R2G_RESUME_NO_CLEAN:-0}" == "1" ]] && _RESUME_NO_CLEAN=1
+  set +e +o pipefail
+  python3 "$FLOW_SCRIPTS_DIR/resume_lineage.py" verify \
+    --backend "$PROJECT_DIR/backend" --run-dir "$BACKEND_DIR" \
+    --from-stage "$FROM_STAGE" --stages "$ORFS_STAGES_LIST" \
+    --results-dir "$_RESUME_RDIR" --reason "$RERUN_REASON" \
+    --no-clean "$_RESUME_NO_CLEAN" --platform "$PLATFORM" \
+    --design "$DESIGN_NAME" --flow-variant "$FLOW_VARIANT" \
+    2>&1 | tee -a "$BACKEND_DIR/flow.log"
+  _RESUME_RC=${PIPESTATUS[0]}
+  set -e -o pipefail
+  if [[ $_RESUME_RC -ne 0 ]]; then
+    echo "ERROR: resume lineage verification failed (rc=$_RESUME_RC) — stopping BEFORE" \
+      | tee -a "$BACKEND_DIR/flow.log"
+    echo "  clean_$FROM_STAGE / rerun so no downstream artifact is mutated (RMD2-P0-02)." \
+      | tee -a "$BACKEND_DIR/flow.log"
+    exit "$_RESUME_RC"
+  fi
+  if [[ "$_RESUME_NO_CLEAN" != "1" ]]; then
     echo "Invalidating resumed stage: make clean_$FROM_STAGE — reason: $RERUN_REASON (earlier stages reused)" \
       | tee -a "$BACKEND_DIR/flow.log"
     make DESIGN_CONFIG="$ORFS_DESIGN_DIR/config.mk" FLOW_VARIANT="$FLOW_VARIANT" "clean_$FROM_STAGE" 2>&1 | tail -3 \
       || echo "WARNING: clean_$FROM_STAGE returned non-zero (stage may have no artifacts yet)" >&2
-    _write_resume_meta "$RERUN_REASON" 0
   else
     echo "Resuming FROM_STAGE=$FROM_STAGE (R2G_RESUME_NO_CLEAN=1: pure crash-resume, no clean) — reason: $RERUN_REASON" \
       | tee -a "$BACKEND_DIR/flow.log"
-    _write_resume_meta "$RERUN_REASON" 1
   fi
 fi
+
+# Toolchain fingerprint for the stage-artifact manifest (RMD2-P0-02 §5.2):
+# ORFS commit + resolved tool paths. Best-effort, computed once.
+_R2G_ORFS_COMMIT="$(git -C "$ORFS_ROOT" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+_R2G_TOOLCHAIN_FP="orfs=$ORFS_ROOT@$_R2G_ORFS_COMMIT openroad=${OPENROAD_EXE:-} yosys=${YOSYS_EXE:-}"
 
 run_stage() {
   local stage="$1"
@@ -477,6 +432,19 @@ run_stage() {
   fi
   echo "{\"stage\": \"$stage\", \"status\": $STAGE_STATUS, \"elapsed_s\": $stage_elapsed, $_extra}" >> "$BACKEND_DIR/stage_log.jsonl"
   _journal_stage "$stage" "$([[ "$STAGE_STATUS" -eq 0 ]] && echo pass || echo fail)" "$stage_elapsed" "$BACKEND_DIR/flow.log"
+
+  # Stage-artifact evidence row (RMD2-P0-02 §5.2): canonical artifact path,
+  # size + sha256, identity, toolchain. The PRODUCER is fail-soft (a recording
+  # miss must not fail a good stage) but loud — the CONSUMERS (resume
+  # verification + the def-graph gate) are fail-closed on the missing evidence.
+  if [[ $STAGE_STATUS -eq 0 ]]; then
+    python3 "$FLOW_SCRIPTS_DIR/resume_lineage.py" record \
+      --run-dir "$BACKEND_DIR" --run-tag "$RUN_TAG" --stage "$stage" \
+      --status "$STAGE_STATUS" --results-dir "$_rdir" --platform "$PLATFORM" \
+      --design "$DESIGN_NAME" --flow-variant "$FLOW_VARIANT" \
+      --toolchain "$_R2G_TOOLCHAIN_FP" \
+      || echo "WARNING: stage-artifact manifest row not recorded for '$stage' — a future resume over this run will degrade to legacy lineage (RMD2-P0-02)" >&2
+  fi
 
   if [[ $STAGE_STATUS -ne 0 ]]; then
     echo "ERROR: Stage '$stage' failed (exit code $STAGE_STATUS) after ${stage_elapsed}s" | tee -a "$BACKEND_DIR/flow.log"

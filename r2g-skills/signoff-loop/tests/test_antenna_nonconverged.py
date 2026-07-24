@@ -229,8 +229,11 @@ def test_run_orfs_records_stage_provenance():
     # the resume decision is tee'd to flow.log with its concrete reason
     assert "R2G_RERUN_REASON" in src
     assert 'tee -a "$BACKEND_DIR/flow.log"' in src
-    # a structured resume rationale file records which stages were reused
-    assert "resume_meta.json" in src and "reused_stages" in src
+    # a structured resume rationale file records which stages were reused —
+    # written by resume_lineage.py since RMD2-P0-02 (digest-verified lineage)
+    assert "resume_meta.json" in src and "resume_lineage.py" in src
+    rl_src = (RUN_ORFS.parent / "resume_lineage.py").read_text(encoding="utf-8")
+    assert "reused_stages" in rl_src and "parent_lineage" in rl_src
 
 
 def test_run_orfs_invalidates_resumed_stage():

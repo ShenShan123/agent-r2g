@@ -774,7 +774,7 @@ These rules are enforced in all 6 execution scripts (`run_orfs.sh`, `run_lvs.sh`
 1. **PIPESTATUS capture** — When piping `timeout ... | tee`, temporarily disable `set -e` and `pipefail` to capture the correct exit code:
    ```bash
    set +e +o pipefail
-   setsid timeout ... make ... 2>&1 | tee logfile
+   timeout ... make ... 2>&1 | tee logfile
    STATUS=${PIPESTATUS[0]}
    set -e -o pipefail
    ```
@@ -782,7 +782,14 @@ These rules are enforced in all 6 execution scripts (`run_orfs.sh`, `run_lvs.sh`
 
 2. **Environment isolation** — Always `unset SCRIPTS_DIR` before calling ORFS make. ORFS Makefile uses this variable internally; an external value causes "No rule to make target synth.sh" errors.
 
-3. **Process group kills** — Use `setsid timeout` (not bare `timeout`) so the entire process tree is killed on timeout. Without `setsid`, grandchild processes (klayout, openroad) survive as zombies, consuming memory and holding file locks.
+3. **Process group kills** — NEVER `setsid timeout` (failure-patterns #40: making timeout a
+   process-group leader silently DISABLES its tree-kill and orphans the deep tool child). For
+   ORFS stages, plain `timeout` group-reaps the stage tree. For a long-running checker whose
+   wrapper doesn't `exec` (the KLayout DRC shape), even plain `timeout` supervises the wrong
+   process — use `r2g_bounded_run` (`scripts/flow/_bounded_run.sh`, RMD2-P0-01,
+   failure-patterns #55): it starts the checker in its own session, logs directly to a file (no
+   `| tee` pipe whose reader can outlive the run), TERM→grace→KILLs the whole group on expiry,
+   and verifies no descendant survives.
 
 4. **LVS timeout scaling** — Default `LVS_TIMEOUT=3600` works for designs <100K cells. For swerv-class (~145K), use 4200s. For bp_multi_top-class (~200K), use 7200s. ORFS and RCX always complete within default timeouts.
 
@@ -790,7 +797,8 @@ These rules are enforced in all 6 execution scripts (`run_orfs.sh`, `run_lvs.sh`
 
 After a successful ORFS run, the signoff scripts operate on the ORFS results in-place:
 
-- `run_drc.sh` — runs `make DESIGN_CONFIG=<config.mk> drc` in ORFS flow directory (KLayout)
+- `run_drc.sh` — CHECKER-ONLY KLayout DRC on the preserved backend GDS (invokes `KLAYOUT_CMD`
+  directly under the `r2g_bounded_run` process-group supervisor — never `make drc`, RMD-P0-01/RMD2-P0-01)
 - `run_magic_drc.sh` — runs Magic DRC with sky130A tech file (sky130 only)
 - `run_lvs.sh` — runs `make DESIGN_CONFIG=<config.mk> lvs` in ORFS flow directory (KLayout)
 - `run_netgen_lvs.sh` — extracts SPICE via Magic, compares with Netgen (sky130 only)

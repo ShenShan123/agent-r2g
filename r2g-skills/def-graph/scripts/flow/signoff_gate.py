@@ -103,6 +103,80 @@ def _check_lvs(reports_dir):
 CANONICAL_STAGES = ("synth", "floorplan", "place", "cts", "route", "finish")
 
 
+def _stage_contract():
+    """The versioned stage→artifact contract (RMD2-P0-02).
+
+    ONE definition lives in the signoff-loop sibling skill
+    (scripts/flow/stage_artifacts.py — the recorder side); import it when
+    reachable so recorder and gate can never diverge silently. The pinned
+    fallback below covers a standalone def-graph deployment; a sync test
+    asserts fallback == module."""
+    here = os.path.dirname(os.path.realpath(os.path.abspath(__file__)))
+    cand = os.path.normpath(os.path.join(
+        here, "..", "..", "..", "signoff-loop", "scripts", "flow", "stage_artifacts.py"))
+    if os.path.isfile(cand):
+        import importlib.util
+        try:
+            spec = importlib.util.spec_from_file_location("r2g_stage_artifacts", cand)
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            return mod.STAGE_ARTIFACT, mod.STAGE_CONTRACT_VERSION
+        except Exception:
+            pass
+    return _FALLBACK_STAGE_ARTIFACT, _FALLBACK_STAGE_CONTRACT_VERSION
+
+
+# Pinned fallback copy of the signoff-loop contract (kept in sync by
+# def-graph/tests/test_signoff_gate_lineage_digest.py::test_stage_contract_synced).
+_FALLBACK_STAGE_CONTRACT_VERSION = 2
+_FALLBACK_STAGE_ARTIFACT = {
+    "synth": "1_synth.odb",
+    "floorplan": "2_floorplan.odb",
+    "place": "3_place.odb",
+    "cts": "4_cts.odb",
+    "route": "5_route.odb",
+    "finish": "6_final.odb",
+}
+
+STAGE_ARTIFACT, STAGE_CONTRACT_VERSION = _stage_contract()
+
+
+def _is_sha256(value):
+    return (isinstance(value, str) and len(value) == 64
+            and all(c in "0123456789abcdef" for c in value))
+
+
+def _load_stage_manifest(run_dir):
+    """{stage: last row} from a run's stage_artifact_manifest.jsonl ({} legacy)."""
+    rows = {}
+    path = os.path.join(run_dir, "stage_artifact_manifest.jsonl")
+    try:
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                except ValueError:
+                    continue
+                if rec.get("stage"):
+                    rows[str(rec["stage"])] = rec
+    except OSError:
+        return {}
+    return rows
+
+
+def _run_identity(run_dir):
+    """(design, platform, flow_variant) from a run's run-meta.json /
+    resume_meta.json, best-effort (None where unrecorded)."""
+    meta = _load_json(os.path.join(run_dir, "run-meta.json")) or {}
+    resume = _load_json(os.path.join(run_dir, "resume_meta.json")) or {}
+    return (meta.get("design_name") or resume.get("design"),
+            meta.get("platform") or resume.get("platform"),
+            meta.get("flow_variant") or resume.get("flow_variant"))
+
+
 def _stage_statuses(run_dir):
     """{stage: status} from a run dir's stage_log.jsonl, or None when absent."""
     slog = os.path.join(run_dir, "stage_log.jsonl")
@@ -125,21 +199,120 @@ def _stage_statuses(run_dir):
     return stages
 
 
+def _artifact_in_run(run_dir, artifact):
+    """Path of a preserved canonical artifact under a run dir, or None."""
+    for sub in ("results", "final"):
+        p = os.path.join(run_dir, sub, artifact)
+        if os.path.isfile(p):
+            return p
+    return None
+
+
+def _verify_recorded_entry(backend, run_dir, self_run, stage, rec, self_identity):
+    """Independently verify ONE recorded parent_lineage entry (RMD2-P0-02 §5.4).
+
+    Returns (entry_dict, None) on success or (None, violation_string). The gate
+    trusts NOTHING the recorder wrote: artifact name is checked against the
+    canonical contract, the digest must be a real sha256, the parent must exist
+    with a successful matching stage record and the same design/platform/
+    variant, the chain must be acyclic, and the preserved artifact bytes must
+    still hash to the recorded digest."""
+    artifact = rec.get("artifact")
+    want_art = STAGE_ARTIFACT.get(stage)
+    if artifact != want_art:
+        return None, (f"{stage}: recorded artifact {artifact!r} is not the canonical "
+                      f"{want_art!r} (stage contract v{STAGE_CONTRACT_VERSION}) — "
+                      "recorded by a defective or foreign contract")
+    sha = rec.get("sha256")
+    if not _is_sha256(sha):
+        return None, (f"{stage}: recorded sha256={sha!r} is not a valid digest — "
+                      "digest-incomplete lineage must not gate-pass (RMD2-P0-02)")
+    parent = rec.get("parent_run")
+    if (not parent or not isinstance(parent, str) or os.sep in parent
+            or ".." in parent or not parent.startswith("RUN_")):
+        return None, f"{stage}: recorded parent_run={parent!r} is not a valid sibling run tag"
+    if parent == self_run:
+        return None, f"{stage}: parent_run is the run itself — lineage cycle"
+    parent_dir = os.path.join(backend, parent)
+    if not os.path.isdir(parent_dir):
+        return None, f"{stage}: parent run {parent} does not exist under {backend}"
+    # Acyclic chain: follow this stage's parent attribution upward.
+    seen, cur = {self_run}, parent
+    for _ in range(32):
+        if cur in seen:
+            return None, f"{stage}: lineage cycle through {cur}"
+        seen.add(cur)
+        nxt = ((_load_json(os.path.join(backend, cur, "resume_meta.json")) or {})
+               .get("parent_lineage") or {}).get(stage, {}).get("parent_run")
+        if not nxt:
+            break
+        cur = nxt
+    else:
+        return None, f"{stage}: parent chain exceeds 32 hops — ambiguous lineage"
+    # Identity: the parent must be the same design/platform/flow-variant.
+    pid = _run_identity(parent_dir)
+    for label, mine, theirs in zip(("design", "platform", "flow_variant"),
+                                   self_identity, pid):
+        if mine and theirs and mine != theirs:
+            return None, (f"{stage}: parent {parent} is a DIFFERENT {label} "
+                          f"({theirs!r} != {mine!r}) — foreign lineage rejected")
+    # Parent-side evidence: its stage manifest digest must equal the recorded
+    # one; a manifest-less parent (legacy) can at best be non-clean lineage.
+    pmani = _load_stage_manifest(parent_dir)
+    prow = pmani.get(stage) or {}
+    verified = False
+    if _is_sha256(prow.get("sha256")):
+        if prow["sha256"] != sha:
+            return None, (f"{stage}: parent {parent} recorded a DIFFERENT digest for "
+                          f"its {want_art} ({prow['sha256'][:12]}… != {sha[:12]}…)")
+        verified = True
+    else:
+        pstages = _stage_statuses(parent_dir) or {}
+        if pstages.get(stage) not in (0, "0"):
+            return None, (f"{stage}: parent {parent} has neither a stage-manifest "
+                          "digest nor a clean ledger row for this stage")
+    # Byte check: the artifact this run preserved must still match the digest.
+    apath = _artifact_in_run(run_dir, want_art)
+    if not apath:
+        return None, (f"{stage}: consumed artifact {want_art} is not preserved under "
+                      "the run dir (results/ or final/) — bytes unverifiable, "
+                      "fail closed (RMD2-P0-02)")
+    actual = _sha256_file(apath)
+    if actual != sha:
+        return None, (f"{stage}: preserved artifact {want_art} hashes "
+                      f"{(actual or 'unreadable')[:12]}… but lineage recorded "
+                      f"{sha[:12]}… — the reused bytes were mutated after recording")
+    entry = {"source": "recorded" if verified else "recorded_legacy_parent",
+             "parent_run": parent, "sha256": sha, "artifact": want_art,
+             "verified": verified}
+    return entry, None
+
+
 def _resolve_lineage(run_dir, missing):
     """Attribute stages absent from this run's own ledger to earlier runs.
 
     A repair/resume generation (run_orfs.sh FROM_STAGE) reruns only the fixed
     stages, so its RUN dir ledger holds e.g. only route+finish while synth..cts
     were consumed from an earlier run's artifacts. Sources, strongest first:
-      * 'recorded'      — resume_meta.json parent_lineage (written at resume time
-                          with the consumed artifact's sha256; 2026-07-21)
+      * 'recorded'      — resume_meta.json parent_lineage, INDEPENDENTLY
+                          verified here (RMD2-P0-02): valid sha256, existing
+                          same-identity parent with a matching stage-manifest
+                          digest, acyclic chain, and preserved artifact bytes
+                          that still hash to the recorded digest;
+      * 'recorded_legacy_parent' — a verified recording whose parent predates
+                          the stage manifest (digest recorded, parent evidence
+                          weaker) — completes the lineage but is NOT clean;
       * 'reconstructed' — newest sibling RUN whose own ledger shows a clean row
-                          for the stage (pre-P0-4 resumes carry no recording)
-    Returns ({stage: {source, parent_run, sha256}}, [unresolved stages])."""
+                          for the stage (pre-P0-4 resumes carry no recording).
+    A MALFORMED recording (null digest, wrong artifact, foreign/absent parent,
+    cycle, mutated bytes) is a hard VIOLATION — never silently downgraded to
+    reconstruction (that would let broken provenance pass as a caveat).
+    Returns ({stage: entry}, [unresolved stages], [violations])."""
     meta = _load_json(os.path.join(run_dir, "resume_meta.json"))
     recorded = (meta or {}).get("parent_lineage") or {}
     backend = os.path.dirname(os.path.realpath(run_dir))
     self_run = os.path.basename(os.path.realpath(run_dir))
+    self_identity = _run_identity(run_dir)
     try:
         siblings = sorted(
             (d for d in os.listdir(backend)
@@ -148,15 +321,21 @@ def _resolve_lineage(run_dir, missing):
             key=lambda d: os.path.getmtime(os.path.join(backend, d)), reverse=True)
     except OSError:
         siblings = []
-    lineage, unresolved = {}, []
+    lineage, unresolved, violations = {}, [], []
     for stage in missing:
         rec = recorded.get(stage) or {}
-        parent = rec.get("parent_run")
-        if parent and os.path.isdir(os.path.join(backend, parent)):
-            pstages = _stage_statuses(os.path.join(backend, parent)) or {}
-            if pstages.get(stage) in (0, "0"):
-                lineage[stage] = {"source": "recorded", "parent_run": parent,
-                                  "sha256": rec.get("sha256")}
+        if rec:
+            if rec.get("source") == "legacy_stage_log" and not rec.get("sha256"):
+                # The resume recorder itself could not attribute this stage
+                # (legacy corpus) — fall through to reconstruction below.
+                pass
+            else:
+                entry, violation = _verify_recorded_entry(
+                    backend, run_dir, self_run, stage, rec, self_identity)
+                if violation:
+                    violations.append(violation)
+                    continue
+                lineage[stage] = entry
                 continue
         for sib in siblings:
             pstages = _stage_statuses(os.path.join(backend, sib)) or {}
@@ -165,7 +344,7 @@ def _resolve_lineage(run_dir, missing):
                 break
         else:
             unresolved.append(stage)
-    return lineage, unresolved
+    return lineage, unresolved, violations
 
 
 def _check_orfs(run_dir):
@@ -194,17 +373,31 @@ def _check_orfs(run_dir):
             missing = [s for s in CANONICAL_STAGES if s not in clean]
             if not missing:
                 return {"status": "complete", "stages": stages}
-            lineage, unresolved = _resolve_lineage(run_dir, missing)
+            lineage, unresolved, violations = _resolve_lineage(run_dir, missing)
+            # The manifest-facing root digest binds the exact verified lineage
+            # into signoff_gate.json → graph_manifest.signoff_health, so a
+            # dataset records which implementation generation produced it
+            # (RMD2-P0-02 §5.4).
+            root = hashlib.sha256(
+                json.dumps(lineage, sort_keys=True).encode()).hexdigest()
+            common = {"stages": stages, "lineage": lineage,
+                      "lineage_root_digest": root,
+                      "stage_contract_version": STAGE_CONTRACT_VERSION}
+            if violations:
+                return {"status": "incomplete", **common,
+                        "lineage_violations": violations,
+                        "detail": "repair/resume generation with BROKEN recorded "
+                                  "lineage (RMD2-P0-02 — null/mismatched digest, "
+                                  "foreign or cyclic parent, or mutated bytes): "
+                                  + "; ".join(violations)}
             if not unresolved:
                 quality = ("recorded"
                            if all(v.get("source") == "recorded" for v in lineage.values())
                            else "reconstructed")
-                return {"status": "complete", "stages": stages,
-                        "lineage": lineage, "lineage_quality": quality,
+                return {"status": "complete", **common, "lineage_quality": quality,
                         "detail": f"repair/resume generation; reused stages attributed "
                                   f"via {quality} parent lineage"}
-            return {"status": "incomplete", "stages": stages,
-                    "lineage": lineage,
+            return {"status": "incomplete", **common,
                     "detail": "repair-only generation without a reconstructable "
                               f"six-stage lineage: unattributed stage(s) {unresolved} "
                               "(pilot P0-4 — a clean 'finish' row alone is not completion)"}

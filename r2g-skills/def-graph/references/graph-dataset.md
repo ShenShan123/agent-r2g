@@ -48,6 +48,14 @@ Round-2 pilot additions (2026-07-21, failure-patterns #53): `--mode strict`
 completion requires a reconstructable six-stage lineage — recorded
 `resume_meta.json` `parent_lineage` or sibling-ledger reconstruction (the
 `orfs_lineage=reconstructed` caveat) — never a bare clean `finish` row (P0-4).
+Hardened 2026-07-24 (RMD2-P0-02, failure-patterns #55): a RECORDED lineage is
+now independently re-verified — every reused stage needs a valid non-null
+sha256 of the canonical artifact (`stage_artifacts.py` contract v2, synth =
+`1_synth.odb`), an existing same-design/platform/variant parent whose
+`stage_artifact_manifest.jsonl` digest matches, an acyclic chain, and preserved
+bytes that still hash to the record; ANY failure is a hard blocker
+(`orfs.status=incomplete` + `lineage_violations`), and the verdict's
+`lineage_root_digest` rides `signoff_health` into the graph manifest.
 The manifest additionally carries `dataset_tier` (`strict_clean` iff the gate
 verdict was exactly `pass`, else `research` — a clean index filters on this) and
 a stable corpus-level `graph_id` (run_graphs.sh derives sha1(platform:design)

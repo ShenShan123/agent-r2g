@@ -5078,3 +5078,78 @@ Tests: canary validated against both the patched `.lyt` (PASS) and the preserved
 forced failed) is not the fix — remove the CAUSE (don't hand the checker a dependency engine at
 all), and make every repair a verified postcondition of the layer that owns it, probed before
 hours are spent, not after.*
+
+## Three-Platform Pilot Revalidation Failures (2026-07-24 — failure-patterns #55)
+
+The revalidation campaign (nangate45 / sky130hd / sky130hs, agent commit 8d449b0; analysis +
+remediation plan in `docs/superpowers/plans/2026-07-24-three-platform-*.md`) confirmed the #54
+fixes work on real runs (checker-only DRC, digest-bound reports, sky130hs GDS/LVS operational,
+sky130hd 45/49 and sky130hs 44/49 Gate cells) and found two remaining P0 defects plus one P1
+installation gap. Real design failures (sky130hd GCD `m3.2`, sky130hs SHA-256 non-closure) and
+the nangate45 full-DRC scale limitation are PRESERVED as measured results — never "fixed" by
+weakening decks, budgets, or gates.
+
+### RMD2-P0-01 — DRC timeout did not terminate the checker process tree
+Nangate45 SHA-256 hit the 7200s budget under `timeout … bash klayout.sh … | tee`: GNU timeout
+and the wrapper exited, but the wrapper starts KLayout WITHOUT `exec`, so the tool survived with
+`PPID=1` at ~99% CPU — and `tee` held the output pipe open, so `run_drc.sh`, `fix_signoff.sh`,
+the engineer loop, and the Pilot all blocked until an operator SIGKILLed the orphan. (Sibling of
+#40 — there `setsid timeout` disabled timeout's tree-kill; here the monitored process simply
+isn't the checker.) The stuck DIAGNOSIS was correct (`status=stuck`, `exit_code=124`,
+`stuck_at_rule=FreePDK45.lydrc:131`, loop `escalated`) — only autonomous termination was broken.
+**Guards:** `_bounded_run.sh: r2g_bounded_run` starts the checker in its OWN session/process
+group (`setsid`), writes output DIRECTLY to the run-local log (no `timeout | tee` pipeline whose
+reader can outlive the supervisor), delivers TERM → grace → KILL to the WHOLE group + session on
+expiry, and verifies no descendant survives before the verdict is written; `run_drc.sh` invokes
+`KLAYOUT_CMD` directly (the ORFS wrapper only version-checks, already recorded) under EXIT/INT/
+TERM cleanup traps so cancellation cannot orphan the checker either; exit 124 + the stuck-rule
+diagnosis are preserved. `run_lvs.sh` still uses `setsid timeout` + post-hoc pkill reaping —
+same latent shape, no pilot reproduction; migrate it to `r2g_bounded_run` when next touched.
+Tests: `tests/test_run_drc_timeout_group_kill.py` (TERM-ignoring checker + TERM-ignoring
+grandchild fully reaped; stuck + timeout verdicts), `tests/test_run_drc_checker_only.py`.
+
+### RMD2-P0-02 — repair/resume lineage recorded a null digest and the gate accepted it
+The #53 P0-4 lineage recorder named a NONEXISTENT canonical synth artifact (`1_synth.v` — the
+active ORFS produces `1_synth.odb`/`1_2_yosys.v`), so every repair run recorded
+`synth.sha256=null`; and `signoff_gate.py::_resolve_lineage` accepted a recorded parent whenever
+its stage ledger was clean — never requiring the digest to be non-null, never rehashing the
+consumed bytes. Nangate45 I2C (physically clean, five graph views verified) gate-passed with
+`lineage_quality=recorded` + `synth.sha256=null` and produced graph artifacts from
+provenance-incomplete input (the campaign's own six-stage evidence check caught it; the
+production gate did not). **Guards:** ONE versioned stage→artifact contract
+(`scripts/flow/stage_artifacts.py`, `STAGE_CONTRACT_VERSION=2`, synth=`1_synth.odb`; def-graph
+carries a sync-tested fallback copy); `run_orfs.sh` records a per-stage
+`stage_artifact_manifest.jsonl` row (canonical artifact path/size/sha256 + identity + toolchain)
+after every successful stage; BEFORE a `FROM_STAGE` resume cleans anything,
+`resume_lineage.py verify` hashes each reused workspace artifact and matches it against a parent
+run's recorded digest — a missing, unhashable, or digest-unattributable artifact STOPS the
+resume (exit 4; `R2G_RESUME_LINEAGE_ENFORCE=0` is a recorded operator override); legacy parents
+degrade LOUDLY to `source=legacy_stage_log`/`verified=false` (never silently to "newest clean
+sibling"); the def-graph gate independently re-verifies every recorded entry — valid sha256,
+canonical artifact name, existing same-design/platform/variant parent with a matching manifest
+digest, acyclic chain, preserved bytes that still hash to the record — and any failure is a HARD
+blocker (`orfs.status=incomplete` + `lineage_violations`), while reconstructed-only lineage
+stays a caveat that the strict tier rejects. The verdict carries `lineage_root_digest`, which
+rides `signoff_health` into `graph_manifest.json`, binding each dataset to the exact verified
+implementation generation.
+Tests: `tests/test_resume_lineage.py`,
+`def-graph/tests/test_signoff_gate_lineage_digest.py` (null digest / tampered bytes / foreign
+platform / cycle / legacy-strict-block / contract sync).
+
+### RMD2-P1-01 — strict-platform installation completed best-effort
+`install_platform_rules.sh` ran the nangate45 DRC/LVS/antenna installers and converted every
+failure into a HINT, so a fresh host could "finish" setup with strict collateral missing —
+caught only later by the runtime ENV gate (a usability gap, no longer a data-trust one).
+**Guards:** platforms named in `R2G_STRICT_PLATFORMS` / `--platforms` / bootstrap
+`--strict-platforms` are FAIL-CLOSED — missing installer, non-zero installer, unverifiable
+canary, or a failed post-install `platform_capability.py --strict` probe (run with the resolved
+env) fails setup; the capability verdict + per-platform collateral sha256 digests are persisted
+to `eda-install/references/install_manifest.json`; unselected platforms keep best-effort
+behavior (with the standing RMD-P0-04 exception); repeated installation is idempotent;
+`bootstrap.sh --strict-platforms` makes the platform_rules tier REQUIRED and probes with the
+detected PDK/magic/netgen env (a bare probe misreports a provisioned host as MISS).
+Tests: `eda-install/tests/test_platform_rules_failclosed.py`.
+
+*Generalizable rule: recording provenance is not verifying it — every digest a gate trusts must
+be re-derived from the bytes at judgment time, and the process a timeout supervises must be the
+process tree that actually does the work.*

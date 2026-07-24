@@ -80,7 +80,11 @@ dataset whose provenance is unrecorded or whose gate verdict is dirty.
 ORFS completion requires a reconstructable SIX-STAGE lineage, not merely a clean `finish` row —
 a repair/resume generation is attributed via `resume_meta.json`'s recorded `parent_lineage` or
 sibling ledgers (the latter as the `orfs_lineage=reconstructed` caveat); an orphan repair-only
-run blocks (round-2 pilot P0-4). **Strict tier** (`R2G_SIGNOFF_GATE=strict`, pilot P0-1): only
+run blocks (round-2 pilot P0-4). A recorded lineage is DIGEST-VERIFIED at gate time
+(RMD2-P0-02, failure-patterns #55): valid non-null sha256 per reused stage, canonical artifact
+names (stage contract v2), a same-identity parent with a matching stage-manifest digest, an
+acyclic chain, and preserved bytes re-hashed against the record — any failure is a hard
+blocker, and the verdict's `lineage_root_digest` rides the manifest. **Strict tier** (`R2G_SIGNOFF_GATE=strict`, pilot P0-1): only
 the exact verdict `pass` builds; `pass_with_caveats` blocks. Every manifest carries
 `dataset_tier` — `strict_clean` iff the gate verdict was exactly `pass`, else `research` — and a
 clean dataset index must filter on it. Each build also stamps a stable corpus-level `graph_id`

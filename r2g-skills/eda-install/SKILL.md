@@ -54,7 +54,13 @@ bash r2g-skills/eda-install/bootstrap.sh               # install missing tiers +
    (`install_platform_rules.sh`, best-effort, HINTs when the repo `tools/` installers are
    unreachable — EXCEPT the sky130hs `.lyt` lefdef repair, a REQUIRED postcondition verified by
    `patch_sky130hs_lyt.py --check` plus the `sky130hs_gds_canary.py` DEF→GDS geometry canary; a
-   failed repair FAILS setup, RMD-P0-04). `check_env.sh` prints the same per-platform capability
+   failed repair FAILS setup, RMD-P0-04). Platforms SELECTED as strict (`--strict-platforms
+   nangate45,sky130hd,sky130hs` on bootstrap.sh, or `R2G_STRICT_PLATFORMS` / `--platforms` on the
+   installer) are FAIL-CLOSED end-to-end (RMD2-P1-01, failure-patterns #55): a missing/failing
+   rule installer, an unverifiable canary, or a failed post-install
+   `platform_capability.py --strict` probe fails setup, and the capability verdict + collateral
+   sha256 digests are persisted to `eda-install/references/install_manifest.json`. Selecting
+   strict platforms also makes the platform_rules tier REQUIRED in the plan. `check_env.sh` prints the same per-platform capability
    table; `check_env.sh --platform <p>` (or `R2G_TARGET_PLATFORM`) makes the NAMED campaign
    platform's strict readiness REQUIRED and fail-closed (RMD-P0-03);
    `R2G_STRICT_PLATFORMS="nangate45"` does the same for a standing list.
